@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.upstox_token
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+paper_journal.json
+candle_cache.json.gz
+venv/
+.venv/
+env/
+.env/

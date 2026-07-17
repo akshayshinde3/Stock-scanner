@@ -1,0 +1,13 @@
+# Environment variables
+.env
+
+# Credentials and sensitive tokens
+.upstox_token
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local user/app data
+paper_journal.json
