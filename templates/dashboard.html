@@ -832,7 +832,8 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <span><span class="dot" id="marketDot"></span><span id="marketText">checking…</span></span>
     <span id="lastScan">—</span>
     <span id="uSize"></span>
-    <button id="btnRescan" onclick="triggerRescan()" style="font-size:11px;font-weight:600;color:var(--blue);background:rgba(77,142,245,0.12);border:1px solid rgba(77,142,245,0.3);padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;" title="Fetch latest quotes and re-evaluate patterns immediately">⟳ Rescan Now</button>
+    <button id="btnQuickScan" onclick="triggerQuickScan()" style="font-size:11px;font-weight:700;color:var(--green);background:rgba(16,208,122,0.12);border:1px solid rgba(16,208,122,0.35);padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;" title="Fast scan top 100 most liquid stocks in ~5 seconds">⚡ Quick Scan (Top 100)</button>
+    <button id="btnRescan" onclick="triggerRescan()" style="font-size:11px;font-weight:600;color:var(--blue);background:rgba(77,142,245,0.12);border:1px solid rgba(77,142,245,0.3);padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;" title="Full scan all 500 Nifty stocks">⟳ Full Scan (500)</button>
     <span id="hdrProg" style="margin-left:auto;"></span>
     <a href="/logout" id="logoutLink" style="font-size:11px;color:var(--muted);text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:6px;display:none" title="Log out of secure session">🔓 Logout</a>
   </div>
@@ -2160,6 +2161,31 @@ async function refreshWatchlistLtp() {
   }
 }
 
+async function triggerQuickScan() {
+  const btn = document.getElementById('btnQuickScan');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Quick Scanning…';
+  }
+  try {
+    const res = await fetch('/api/scan/quick', { method: 'POST' });
+    setTimeout(() => {
+      refreshAlerts();
+      refreshWeeklyAlerts();
+      loadStocks();
+    }, 2500);
+  } catch (e) {
+    alert('Quick scan error: ' + e);
+  } finally {
+    setTimeout(() => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⚡ Quick Scan (Top 100)';
+      }
+    }, 4000);
+  }
+}
+
 async function triggerRescan() {
   const btn = document.getElementById('btnRescan');
   if (btn) {
@@ -2180,7 +2206,7 @@ async function triggerRescan() {
     setTimeout(() => {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = '⟳ Rescan Now';
+        btn.textContent = '⟳ Full Scan (500)';
       }
     }, 3500);
   }

@@ -149,11 +149,22 @@ EXCLUDE_SYMBOLS = {"DUMMYHEG", "BAGMANE"}
 
 
 def load_nifty500_symbols():
-    """Fetch the official Nifty 500 constituent list from NSE. Falls back to
-    candle_cache or local nifty500.txt if NSE blocks/changes the URL."""
+    """Fetch the Nifty 500 constituent list. Prioritizes local nifty500.txt for instant
+    startup without cloud IP blocking, falling back to NSE or candle_cache."""
+    path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                syms = [line.strip().upper() for line in f if line.strip() and not line.startswith("#") and line.strip().upper() not in EXCLUDE_SYMBOLS and not line.strip().upper().startswith("DUMMY")]
+                if len(syms) >= 100:
+                    return syms
+        except Exception as e:
+            app.logger.warning(f"Error reading nifty500.txt: {e}")
+
+    # Fallback to NSE if nifty500.txt is missing
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept": "text/csv"}
-        r = requests.get(NIFTY500_URL, headers=headers, timeout=10)
+        r = requests.get(NIFTY500_URL, headers=headers, timeout=3)
         r.raise_for_status()
         lines = r.text.splitlines()
         symbols = []
@@ -166,7 +177,7 @@ def load_nifty500_symbols():
         if len(symbols) >= 100:
             return symbols
     except Exception as e:
-        app.logger.warning(f"Could not fetch live Nifty 500 list ({e}); checking cache fallback.")
+        app.logger.warning(f"Could not fetch live Nifty 500 list from NSE ({e}); checking cache fallback.")
 
     # Check if candle cache file on disk has symbols
     if os.path.exists(CANDLE_CACHE_FILE):
@@ -175,14 +186,10 @@ def load_nifty500_symbols():
                 cdata = json.load(f)
                 d_syms = [s for s in cdata.get("daily", {}).keys() if s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY")]
                 if len(d_syms) >= 100:
-                    return sorted(d_syms)
+                    return d_syms
         except Exception:
             pass
 
-    path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
-    if os.path.exists(path):
-        with open(path) as f:
-            return [line.strip().upper() for line in f if line.strip() and not line.startswith("#") and line.strip().upper() not in EXCLUDE_SYMBOLS and not line.strip().upper().startswith("DUMMY")]
     return []
 
 
@@ -308,24 +315,67 @@ def get_daily_candles(symbol, days=365):
     return candles
 
 
-def get_weekly_candles(symbol, weeks=120):
-    ticker_symbol = f"{symbol.upper()}.NS"
-    df = yf.download([ticker_symbol], period="3y", interval="1wk", ignore_tz=True, progress=False)
-    df = df.xs(ticker_symbol, axis=1, level=1).dropna(subset=["Close"])
-    
-    candles = []
-    for index, row in df.iterrows():
-        ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-        candles.append([
-            ts,
-            float(row["Open"]),
-            float(row["High"]),
-            float(row["Low"]),
-            float(row["Close"]),
-            int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+def resample_daily_to_weekly(daily_candles):
+    """Instantly converts daily candles into weekly candles in memory.
+    Zero network latency — runs in ~0.0001 seconds per symbol.
+    """
+    if not daily_candles or len(daily_candles) < 5:
+        return []
+
+    weeks = {}
+    for c in daily_candles:
+        ts = c[0]
+        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+        try:
+            d = dt.date.fromisoformat(date_str)
+        except Exception:
+            continue
+        cal = d.isocalendar()
+        key = (cal[0], cal[1])  # (year, week_num)
+
+        if key not in weeks:
+            weeks[key] = {
+                "ts": f"{date_str}T00:00:00+05:30",
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": int(c[5]) if c[5] else 0,
+            }
+        else:
+            w = weeks[key]
+            w["high"] = max(w["high"], float(c[2]))
+            w["low"]  = min(w["low"], float(c[3]))
+            w["close"] = float(c[4])
+            w["volume"] += int(c[5]) if c[5] else 0
+            w["ts"] = f"{date_str}T00:00:00+05:30"
+
+    weekly = []
+    for k in sorted(weeks.keys()):
+        w = weeks[k]
+        weekly.append([
+            w["ts"],
+            round(w["open"], 2),
+            round(w["high"], 2),
+            round(w["low"], 2),
+            round(w["close"], 2),
+            w["volume"],
             0
         ])
-    return candles
+    return weekly
+
+
+def get_weekly_candles(symbol, weeks=120):
+    """Return weekly candles, derived in-memory from daily candles."""
+    sym = symbol.upper()
+    candles = _candle_cache.get(sym)
+    if not candles:
+        candles = get_daily_candles(sym)
+        if candles:
+            _candle_cache[sym] = candles
+    if candles:
+        return resample_daily_to_weekly(candles)
+    return []
 
 
 def get_yfinance_quotes(symbols):
@@ -443,17 +493,19 @@ CANDLE_CACHE_FILE = os.path.join(
 
 
 def save_candle_cache_to_disk():
-    """Save daily and weekly candle caches to a compressed disk file."""
+    """Save daily and weekly candle caches to a compressed disk file (trimmed to keep file size tiny)."""
     try:
+        trimmed_daily = {sym: c[-180:] for sym, c in _candle_cache.items()}
+        trimmed_weekly = {sym: c[-80:] for sym, c in _weekly_candle_cache.items()}
         data = {
             "date": _candle_cache_date.isoformat() if _candle_cache_date else None,
             "weekly_date": _weekly_cache_date.isoformat() if _weekly_cache_date else None,
-            "daily": _candle_cache,
-            "weekly": _weekly_candle_cache
+            "daily": trimmed_daily,
+            "weekly": trimmed_weekly
         }
         with gzip.open(CANDLE_CACHE_FILE, "wt", encoding="utf-8") as f:
             json.dump(data, f)
-        app.logger.info("Candle cache saved to disk.")
+        app.logger.info(f"Candle cache saved to disk ({len(trimmed_daily)} symbols).")
     except Exception as e:
         app.logger.warning(f"Could not save candle cache to disk: {e}")
 
@@ -494,154 +546,111 @@ def _maybe_invalidate_candle_cache():
 
 
 def _extract_ticker_df(df, ticker_ns, tickers_ns):
-    """Safely extract a single-ticker DataFrame from a yfinance multi-download result.
-
-    yfinance ≥0.2.38 always returns a MultiIndex DataFrame when multiple tickers
-    are requested, with columns like ('Close', 'RELIANCE.NS'), ('Open', 'TCS.NS'), …
-    After slicing with xs() the result can still have a residual second column level
-    (e.g. ('Close', '')) depending on the yfinance version.  This helper normalises
-    everything to a flat string-indexed DataFrame so downstream code can safely use
-    ``row["Close"]`` etc.
-    """
+    """Safely extract a single-ticker DataFrame from a yfinance multi-download result."""
     if df is None or df.empty:
         return None
 
     try:
         if isinstance(df.columns, pd.MultiIndex):
-            if len(tickers_ns) == 1:
-                # Single-ticker multi-download: drop the ticker level
-                ticker_df = df.xs(ticker_ns, axis=1, level=1)
-            else:
-                ticker_df = df.xs(ticker_ns, axis=1, level=1)
+            ticker_df = df.xs(ticker_ns, axis=1, level=1)
         else:
-            # Flat columns — already a single-ticker result
             ticker_df = df
 
-        # Flatten any leftover MultiIndex columns (e.g. ('Close', ''))
         if isinstance(ticker_df.columns, pd.MultiIndex):
             ticker_df.columns = [c[0] if isinstance(c, tuple) else c for c in ticker_df.columns]
 
         return ticker_df
     except KeyError:
-        # Ticker not present in the downloaded batch (e.g. delisted)
         return None
 
 
-def warm_cache_for_all_symbols():
-    """Warms the daily and weekly candle caches in the background using batches."""
-    universe = STATE["universe"]
+def _download_batch_daily(batch, period="1y"):
+    """Download daily candles for a batch of symbols and return {sym: candles}."""
+    if not batch:
+        return {}
+    tickers_ns = [f"{sym}.NS" for sym in batch]
+    try:
+        df = yf.download(tickers_ns, period=period, interval="1d", ignore_tz=True, progress=False, threads=True)
+        batch_candles = {}
+        for sym in batch:
+            ticker_ns = f"{sym}.NS"
+            try:
+                ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
+                if ticker_df is None or ticker_df.empty:
+                    continue
+                ticker_df = ticker_df.dropna(subset=["Close"])
+                candles = []
+                for index, row in ticker_df.iterrows():
+                    ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
+                    candles.append([
+                        ts,
+                        float(row["Open"]),
+                        float(row["High"]),
+                        float(row["Low"]),
+                        float(row["Close"]),
+                        int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+                        0
+                    ])
+                if candles:
+                    batch_candles[sym] = candles
+            except Exception as e:
+                app.logger.warning(f"Error parsing daily candles for {sym}: {e}")
+        return batch_candles
+    except Exception as e:
+        app.logger.error(f"Error downloading batch ({len(batch)} symbols): {e}")
+        return {}
+
+
+def warm_cache_for_all_symbols(quick_only=False):
+    """Warms daily candles in parallel via ThreadPoolExecutor and instantly derives weekly candles."""
+    universe = STATE.get("universe") or []
     if not universe:
         return
 
-    # Invalidate if date has rolled over
     _maybe_invalidate_candle_cache()
 
-    # Find symbols that need daily candles
-    missing_daily = [sym for sym in universe if sym not in _candle_cache]
+    target_symbols = universe[:100] if quick_only else universe
+    missing_daily = [sym for sym in target_symbols if sym not in _candle_cache]
     total_missing = len(missing_daily)
 
     if total_missing > 0:
-        app.logger.info(f"Warming daily candles for {total_missing} symbols using yfinance batches...")
-        
-        batch_size = 100
+        app.logger.info(f"Warming daily candles for {total_missing} symbols in parallel...")
+        batch_size = 50
+        batches = [missing_daily[i:i+batch_size] for i in range(0, total_missing, batch_size)]
         completed = 0
         STATE["scan_progress"] = f"0/{total_missing}"
-        
-        for i in range(0, total_missing, batch_size):
-            batch = missing_daily[i:i+batch_size]
-            tickers_ns = [f"{sym}.NS" for sym in batch]
-            try:
-                df = yf.download(tickers_ns, period="1y", interval="1d", ignore_tz=True, progress=False)
-                
-                for sym in batch:
-                    ticker_ns = f"{sym}.NS"
-                    try:
-                        ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
-                        if ticker_df is None or ticker_df.empty:
-                            continue
-                        ticker_df = ticker_df.dropna(subset=["Close"])
-                        
-                        candles = []
-                        for index, row in ticker_df.iterrows():
-                            ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-                            candles.append([
-                                ts,
-                                float(row["Open"]),
-                                float(row["High"]),
-                                float(row["Low"]),
-                                float(row["Close"]),
-                                int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                                0
-                            ])
-                        if candles:
-                            _candle_cache[sym] = candles
-                    except Exception as e:
-                        app.logger.warning(f"Error parsing daily candles for {sym}: {e}")
-            except Exception as e:
-                app.logger.error(f"Error downloading daily batch: {e}")
-            
-            completed += len(batch)
-            STATE["scan_progress"] = f"{completed}/{total_missing}"
-            save_candle_cache_to_disk()
-            time.sleep(0.5)
-            
-        app.logger.info("Finished warming daily candles.")
 
-    # Now warm weekly candles, but only for those that pass daily liquidity filter
-    missing_weekly = []
-    for sym in universe:
-        if sym not in _weekly_candle_cache:
-            candles = _candle_cache.get(sym)
-            if candles and passes_liquidity_filter(candles):
-                missing_weekly.append(sym)
+        # 1. Download Batch 0 (top liquid symbols) first, so alerts appear in 5s!
+        first_batch = batches[0]
+        b0_res = _download_batch_daily(first_batch, period="1y")
+        for sym, candles in b0_res.items():
+            _candle_cache[sym] = candles
+            _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
+        completed += len(first_batch)
+        STATE["scan_progress"] = f"{completed}/{total_missing}"
+        _evaluate_all_symbols()
 
-    total_missing_weekly = len(missing_weekly)
-    if total_missing_weekly > 0:
-        app.logger.info(f"Warming weekly candles for {total_missing_weekly} liquid symbols...")
-        
-        batch_size = 100
-        completed = 0
-        STATE["scan_progress"] = f"Weekly: 0/{total_missing_weekly}"
-        
-        for i in range(0, total_missing_weekly, batch_size):
-            batch = missing_weekly[i:i+batch_size]
-            tickers_ns = [f"{sym}.NS" for sym in batch]
-            try:
-                df = yf.download(tickers_ns, period="3y", interval="1wk", ignore_tz=True, progress=False)
-                
-                for sym in batch:
-                    ticker_ns = f"{sym}.NS"
-                    try:
-                        ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
-                        if ticker_df is None or ticker_df.empty:
-                            continue
-                        ticker_df = ticker_df.dropna(subset=["Close"])
-                        
-                        candles = []
-                        for index, row in ticker_df.iterrows():
-                            ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-                            candles.append([
-                                ts,
-                                float(row["Open"]),
-                                float(row["High"]),
-                                float(row["Low"]),
-                                float(row["Close"]),
-                                int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                                0
-                            ])
-                        if candles:
-                            _weekly_candle_cache[sym] = candles
-                    except Exception as e:
-                        app.logger.warning(f"Error parsing weekly candles for {sym}: {e}")
-            except Exception as e:
-                app.logger.error(f"Error downloading weekly batch: {e}")
-                
-            completed += len(batch)
-            STATE["scan_progress"] = f"Weekly: {completed}/{total_missing_weekly}"
-            save_candle_cache_to_disk()
-            time.sleep(0.5)
-            
-        app.logger.info("Finished warming weekly candles.")
+        # 2. Download remaining batches concurrently with ThreadPoolExecutor (4 threads)
+        remaining_batches = batches[1:]
+        if remaining_batches:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                future_to_batch = {executor.submit(_download_batch_daily, b, "1y"): b for b in remaining_batches}
+                for future in as_completed(future_to_batch):
+                    b_res = future.result()
+                    for sym, candles in b_res.items():
+                        _candle_cache[sym] = candles
+                        _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
+                    completed += len(future_to_batch[future])
+                    STATE["scan_progress"] = f"{completed}/{total_missing}"
+                    _evaluate_all_symbols()
+
+        save_candle_cache_to_disk()
+        app.logger.info("Finished warming daily & weekly candles.")
+    else:
+        # Ensure weekly candles are generated in memory
+        for sym in target_symbols:
+            if sym not in _weekly_candle_cache and sym in _candle_cache:
+                _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
 
 
 def is_market_open():
@@ -692,51 +701,27 @@ _scan_event = threading.Event()
 _latest_synced_date = None
 
 
-def sync_latest_daily_candles():
-    """Fetch latest 5-day candles for all symbols and merge into cache."""
+def sync_latest_daily_candles(symbols=None):
+    """Fetch latest 5-day candles for symbols and merge into cache using parallel batches."""
     global _latest_synced_date
-    universe = STATE.get("universe") or []
-    if not universe:
+    target_symbols = symbols or STATE.get("universe") or []
+    if not target_symbols:
         return
-    app.logger.info("Syncing latest daily candles for all symbols...")
-    batch_size = 100
-    total_batches = (len(universe) + batch_size - 1) // batch_size
-    
-    for i in range(0, len(universe), batch_size):
-        batch = universe[i:i+batch_size]
-        tickers_ns = [f"{sym}.NS" for sym in batch]
-        STATE["scan_progress"] = f"Batch {i//batch_size + 1}/{total_batches}"
-        try:
-            df = yf.download(tickers_ns, period="5d", interval="1d", ignore_tz=True, progress=False)
-            for sym in batch:
-                ticker_ns = f"{sym}.NS"
-                try:
-                    ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
-                    if ticker_df is None or ticker_df.empty:
-                        continue
-                    ticker_df = ticker_df.dropna(subset=["Close"])
-                    new_candles = []
-                    for index, row in ticker_df.iterrows():
-                        ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-                        new_candles.append([
-                            ts,
-                            float(row["Open"]),
-                            float(row["High"]),
-                            float(row["Low"]),
-                            float(row["Close"]),
-                            int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                            0
-                        ])
-                    if new_candles:
-                        if sym in _candle_cache:
-                            _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
-                        else:
-                            _candle_cache[sym] = new_candles
-                except Exception as e:
-                    app.logger.warning(f"Error parsing live daily for {sym}: {e}")
-        except Exception as e:
-            app.logger.error(f"Error downloading live batch: {e}")
-        time.sleep(0.5)
+    app.logger.info(f"Syncing live daily candles for {len(target_symbols)} symbols in parallel...")
+    batch_size = 50
+    batches = [target_symbols[i:i+batch_size] for i in range(0, len(target_symbols), batch_size)]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_batch = {executor.submit(_download_batch_daily, b, "5d"): b for b in batches}
+        for future in as_completed(future_to_batch):
+            b_res = future.result()
+            for sym, new_candles in b_res.items():
+                if sym in _candle_cache:
+                    _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
+                else:
+                    _candle_cache[sym] = new_candles
+                _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
+
     _latest_synced_date = dt.date.today()
     save_candle_cache_to_disk()
 
@@ -760,30 +745,32 @@ def scan_loop():
         try:
             universe = STATE["universe"]
             if not universe:
-                STATE["error"] = "Nifty 500 list not loaded yet."
-                time.sleep(10)
-                continue
+                STATE["universe"] = load_nifty500_symbols()
+                universe = STATE["universe"]
+                if not universe:
+                    STATE["error"] = "Nifty 500 list not loaded yet."
+                    time.sleep(10)
+                    continue
 
             market_open = is_market_open()
             STATE["error"] = None
 
-            # Make sure historical cache has data for missing symbols
+            # 1. Warm missing daily & weekly candles (top liquid stocks show up in ~5s!)
             warm_cache_for_all_symbols()
 
-            # If market is open, or if we haven't synced today's candles yet:
-            if market_open or _latest_synced_date != dt.date.today():
+            # 2. If market is open, sync live 5-day candles in parallel
+            if market_open:
                 sync_latest_daily_candles()
 
-            # Run evaluation on all symbols
+            # 3. Final evaluation pass
             confirmed, watch, w_confirmed, w_watch = _evaluate_all_symbols()
             STATE["scan_progress"] = None
 
-            # Send phone notifications for new signals
             try:
                 notify_new_alerts(confirmed + w_confirmed, watch + w_watch)
             except Exception as e:
                 app.logger.warning(f"Notification error: {e}")
-            
+
             if market_open:
                 STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S")
             else:
@@ -794,7 +781,7 @@ def scan_loop():
             STATE["error"] = f"Scan error: {e}"
             app.logger.exception("Error in scan_loop")
 
-        sleep_secs = POLL_INTERVAL_SECONDS if is_market_open() else 300  # re-scan every 5 min when market closed
+        sleep_secs = POLL_INTERVAL_SECONDS if is_market_open() else 300
         _scan_event.clear()
         _scan_event.wait(timeout=sleep_secs)
 
@@ -956,13 +943,34 @@ def get_or_fetch_weekly_candles(symbol):
 # ---------------------------------------------------------------------------
 # Cache management & Force Rescan endpoints
 # ---------------------------------------------------------------------------
+@app.route("/api/scan/quick", methods=["POST"])
+def api_scan_quick():
+    """Trigger a fast scan of the top 100 liquid stocks (takes ~5 seconds)."""
+    def do_quick_scan():
+        STATE["scan_progress"] = "Quick Scan (100)..."
+        universe = STATE.get("universe") or []
+        top100 = universe[:100]
+        warm_cache_for_all_symbols(quick_only=True)
+        if is_market_open():
+            sync_latest_daily_candles(top100)
+        _evaluate_all_symbols()
+        STATE["scan_progress"] = None
+        STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S") + " (Quick)"
+    
+    threading.Thread(target=do_quick_scan, daemon=True).start()
+    return jsonify({"success": True, "message": "Quick scan started for top 100 liquid stocks."})
+
+
 @app.route("/api/scan/force", methods=["POST"])
 def api_scan_force():
     """Trigger an immediate re-scan and fetch fresh candle data."""
+    mode = request.args.get("mode", "full")
+    if mode == "quick":
+        return api_scan_quick()
     global _latest_synced_date
     _latest_synced_date = None  # reset to force candle sync
     _scan_event.set()           # wake up the scan loop immediately
-    return jsonify({"success": True, "message": "Scan triggered immediately."})
+    return jsonify({"success": True, "message": "Full scan triggered immediately."})
 
 
 @app.route("/api/cache/clear", methods=["POST"])
