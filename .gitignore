@@ -12,9 +12,6 @@ __pycache__/
 # Local user/app data
 paper_journal.json
 
-# Large local cache — rebuilt automatically on startup
-candle_cache.json.gz
-
 # Virtual environment
 venv/
 .venv/
