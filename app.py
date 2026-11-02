@@ -2,17 +2,20 @@
 Swing Trading Scanner — Upstox Edition
 ----------------------------------------
 Runs locally on your PC. Logs into your Upstox account (OAuth),
-polls your watchlist during market hours, evaluates 5 swing-trading
-pattern strategies, and shows live BUY signals on a
-dashboard at http://localhost:5000
+polls your watchlist during market hours, evaluates 3 swing-trading
+pattern strategies (Triangle, Darvas Box, Pennant), and shows live
+BUY signals on a dashboard at http://localhost:5000.
+Free push notifications via ntfy.sh.
 
 ⚠️ Educational tool only. Not investment advice. No strategy here
 guarantees any win rate — always paper-trade before risking capital.
 """
 
 import os
+import io
 import json
 import time
+import uuid
 import gzip
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,10 +24,11 @@ import datetime as dt
 import requests
 import pandas as pd
 import yfinance as yf
-from flask import Flask, request, redirect, jsonify, render_template, session, url_for
+from flask import Flask, request, redirect, jsonify, render_template, session, url_for, send_file
 from dotenv import load_dotenv
 
 import strategies
+from excel_export import create_prebreakout_excel
 
 # Load environment variables from .env file
 load_dotenv()
@@ -56,6 +60,83 @@ MARKET_CLOSE = dt.time(15, 30)
 MIN_AVG_DAILY_TURNOVER_CR = 5
 
 NIFTY500_URL = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+
+# ---------------------------------------------------------------------------
+# ntfy.sh Push Notifications (100% free, no signup)
+# ---------------------------------------------------------------------------
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
+NTFY_ENABLED = os.environ.get("NTFY_ENABLED", "false").lower() == "true"
+NTFY_SERVER = "https://ntfy.sh"
+
+# Track which alerts have already been notified (avoid duplicates)
+_notified_alerts = set()
+
+
+def send_ntfy_notification(title, message, priority="default", tags=None):
+    """Send a push notification via ntfy.sh (free, no API key needed)."""
+    if not NTFY_TOPIC or not NTFY_ENABLED:
+        return False
+    try:
+        headers = {
+            "Title": title,
+            "Priority": priority,
+        }
+        if tags:
+            headers["Tags"] = ",".join(tags)
+        resp = requests.post(
+            f"{NTFY_SERVER}/{NTFY_TOPIC}",
+            data=message.encode("utf-8"),
+            headers=headers,
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        app.logger.warning(f"ntfy notification failed: {e}")
+        return False
+
+
+def notify_new_alerts(confirmed_alerts, watch_alerts):
+    """Send phone notifications for new confirmed breakout signals."""
+    global _notified_alerts
+    if not NTFY_TOPIC or not NTFY_ENABLED:
+        return
+
+    for alert in confirmed_alerts:
+        alert_key = f"{alert['symbol']}_{alert['strategy_used']}_{dt.date.today()}"
+        if alert_key in _notified_alerts:
+            continue
+
+        title = f"🚀 BREAKOUT: {alert['symbol']}"
+        message = (
+            f"Strategy: {alert['strategy_used']}\n"
+            f"LTP: ₹{alert['ltp']}\n"
+            f"Buy: ₹{alert['buy_price']} | SL: ₹{alert['stop_loss']}\n"
+            f"Target 1: ₹{alert['target1']} | Target 2: ₹{alert['target2']}\n"
+            f"R:R: {alert['risk_reward']} | Confidence: {alert['confidence']}%\n"
+            f"Reason: {alert['reasons'][0] if alert['reasons'] else 'N/A'}"
+        )
+        if send_ntfy_notification(title, message, priority="high", tags=["chart_with_upwards_trend", "money_bag"]):
+            _notified_alerts.add(alert_key)
+
+    # Also notify high-confidence watch signals (confidence >= 50)
+    for alert in watch_alerts:
+        if alert.get("confidence", 0) < 50:
+            continue
+        alert_key = f"watch_{alert['symbol']}_{alert['strategy_used']}_{dt.date.today()}"
+        if alert_key in _notified_alerts:
+            continue
+
+        title = f"👀 WATCH: {alert['symbol']}"
+        message = (
+            f"Strategy: {alert['strategy_used']}\n"
+            f"LTP: ₹{alert['ltp']}\n"
+            f"Buy Trigger: ₹{alert['buy_price']} | SL: ₹{alert['stop_loss']}\n"
+            f"Confidence: {alert['confidence']}%\n"
+            f"Reason: {alert['reasons'][0] if alert['reasons'] else 'N/A'}"
+        )
+        if send_ntfy_notification(title, message, priority="default", tags=["eyes"]):
+            _notified_alerts.add(alert_key)
+
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -212,22 +293,34 @@ _load_paper_state()
 
 def load_nifty500_symbols():
     """Fetch the official Nifty 500 constituent list from NSE. Falls back to
-    a local nifty500.txt (one symbol per line) if NSE blocks/changes the URL —
-    NSE's site is picky about headers and sometimes rate-limits bots."""
+    candle_cache or local nifty500.txt if NSE blocks/changes the URL."""
     try:
-        headers = {"User-Agent": "Mozilla/5.0", "Accept": "text/csv"}
-        r = requests.get(NIFTY500_URL, headers=headers, timeout=20)
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept": "text/csv"}
+        r = requests.get(NIFTY500_URL, headers=headers, timeout=10)
         r.raise_for_status()
         lines = r.text.splitlines()
         symbols = []
         for line in lines[1:]:  # skip header row
             parts = line.split(",")
             if len(parts) >= 3:
-                symbols.append(parts[2].strip().upper())  # "Symbol" column
-        if symbols:
+                s = parts[2].strip().upper()
+                if s:
+                    symbols.append(s)
+        if len(symbols) >= 100:
             return symbols
     except Exception as e:
-        STATE["error"] = f"Could not fetch live Nifty 500 list ({e}); using local nifty500.txt fallback."
+        app.logger.warning(f"Could not fetch live Nifty 500 list ({e}); checking cache fallback.")
+
+    # Check if candle cache file on disk has symbols
+    if os.path.exists(CANDLE_CACHE_FILE):
+        try:
+            with gzip.open(CANDLE_CACHE_FILE, "rt", encoding="utf-8") as f:
+                cdata = json.load(f)
+                d_syms = list(cdata.get("daily", {}).keys())
+                if len(d_syms) >= 100:
+                    return sorted(d_syms)
+        except Exception:
+            pass
 
     path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
     if os.path.exists(path):
@@ -272,6 +365,12 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/favicon.ico")
+def favicon():
+    """Suppress browser 404 noise — we don't serve a favicon file."""
+    return "", 204
+
+
 @app.route("/")
 def home():
     if not STATE["scanning"]:
@@ -294,11 +393,13 @@ def save_env_keys(newsapi_key, site_password=None):
     if site_password is not None:
         SITE_PASSWORD = site_password
 
-    # Save to .env file
+    # Save to .env file (preserving notification settings)
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     with open(env_path, "w") as f:
         f.write(f"NEWSAPI_KEY={NEWSAPI_KEY}\n")
         f.write(f"SITE_PASSWORD={SITE_PASSWORD}\n")
+        f.write(f"NTFY_TOPIC={NTFY_TOPIC}\n")
+        f.write(f"NTFY_ENABLED={'true' if NTFY_ENABLED else 'false'}\n")
 
 
 @app.route("/get-settings")
@@ -478,7 +579,10 @@ _weekly_candle_cache = {}  # symbol -> weekly candles
 _candle_cache_date   = None   # the calendar date on which _candle_cache was last populated
 _weekly_cache_date   = None   # the calendar date on which _weekly_candle_cache was last populated
 
-CANDLE_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "candle_cache.json.gz")
+CANDLE_CACHE_FILE = os.path.join(
+    "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__)),
+    "candle_cache.json.gz"
+)
 
 
 def save_candle_cache_to_disk():
@@ -498,43 +602,72 @@ def save_candle_cache_to_disk():
 
 
 def load_candle_cache_from_disk():
-    """Load daily and weekly candle caches from a compressed disk file if date matches today."""
+    """Load daily and weekly candle caches from disk immediately on start."""
     global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
     if not os.path.exists(CANDLE_CACHE_FILE):
         return
     try:
         with gzip.open(CANDLE_CACHE_FILE, "rt", encoding="utf-8") as f:
             data = json.load(f)
-        d_str = data.get("date")
-        w_str = data.get("weekly_date")
-        today = dt.date.today()
-        if d_str and dt.date.fromisoformat(d_str) == today:
-            _candle_cache = data.get("daily", {})
-            _candle_cache_date = today
-            app.logger.info(f"Loaded daily candle cache from disk for {today} (contains {len(_candle_cache)} symbols)")
-        if w_str and dt.date.fromisoformat(w_str) == today:
-            _weekly_candle_cache = data.get("weekly", {})
-            _weekly_cache_date = today
-            app.logger.info(f"Loaded weekly candle cache from disk for {today} (contains {len(_weekly_candle_cache)} symbols)")
+        cached_daily = data.get("daily", {})
+        cached_weekly = data.get("weekly", {})
+        if cached_daily:
+            _candle_cache.update(cached_daily)
+            _candle_cache_date = dt.date.today()
+            app.logger.info(f"Loaded {len(_candle_cache)} daily candles from disk cache.")
+        if cached_weekly:
+            _weekly_candle_cache.update(cached_weekly)
+            _weekly_cache_date = dt.date.today()
+            app.logger.info(f"Loaded {len(_weekly_candle_cache)} weekly candles from disk cache.")
+        if not STATE.get("universe") and _candle_cache:
+            STATE["universe"] = sorted(list(_candle_cache.keys()))
     except Exception as e:
         app.logger.warning(f"Could not load candle cache from disk: {e}")
 
 
 
 def _maybe_invalidate_candle_cache():
-    """Clear the daily/weekly candle caches whenever the calendar date has
-    rolled over.  This ensures we always work with today's completed bars
-    rather than yesterday's stale data."""
-    global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
+    """Mark cache updated without throwing away historical bars."""
+    global _candle_cache_date, _weekly_cache_date
     today = dt.date.today()
     if _candle_cache_date != today:
-        _candle_cache.clear()
         _candle_cache_date = today
-        app.logger.info(f"Daily candle cache invalidated for {today}")
     if _weekly_cache_date != today:
-        _weekly_candle_cache.clear()
         _weekly_cache_date = today
-        app.logger.info(f"Weekly candle cache invalidated for {today}")
+
+
+def _extract_ticker_df(df, ticker_ns, tickers_ns):
+    """Safely extract a single-ticker DataFrame from a yfinance multi-download result.
+
+    yfinance ≥0.2.38 always returns a MultiIndex DataFrame when multiple tickers
+    are requested, with columns like ('Close', 'RELIANCE.NS'), ('Open', 'TCS.NS'), …
+    After slicing with xs() the result can still have a residual second column level
+    (e.g. ('Close', '')) depending on the yfinance version.  This helper normalises
+    everything to a flat string-indexed DataFrame so downstream code can safely use
+    ``row["Close"]`` etc.
+    """
+    if df is None or df.empty:
+        return None
+
+    try:
+        if isinstance(df.columns, pd.MultiIndex):
+            if len(tickers_ns) == 1:
+                # Single-ticker multi-download: drop the ticker level
+                ticker_df = df.xs(ticker_ns, axis=1, level=1)
+            else:
+                ticker_df = df.xs(ticker_ns, axis=1, level=1)
+        else:
+            # Flat columns — already a single-ticker result
+            ticker_df = df
+
+        # Flatten any leftover MultiIndex columns (e.g. ('Close', ''))
+        if isinstance(ticker_df.columns, pd.MultiIndex):
+            ticker_df.columns = [c[0] if isinstance(c, tuple) else c for c in ticker_df.columns]
+
+        return ticker_df
+    except KeyError:
+        # Ticker not present in the downloaded batch (e.g. delisted)
+        return None
 
 
 def warm_cache_for_all_symbols():
@@ -566,11 +699,9 @@ def warm_cache_for_all_symbols():
                 for sym in batch:
                     ticker_ns = f"{sym}.NS"
                     try:
-                        if len(tickers_ns) == 1:
-                            ticker_df = df
-                        else:
-                            ticker_df = df.xs(ticker_ns, axis=1, level=1)
-                            
+                        ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
+                        if ticker_df is None or ticker_df.empty:
+                            continue
                         ticker_df = ticker_df.dropna(subset=["Close"])
                         
                         candles = []
@@ -624,11 +755,9 @@ def warm_cache_for_all_symbols():
                 for sym in batch:
                     ticker_ns = f"{sym}.NS"
                     try:
-                        if len(tickers_ns) == 1:
-                            ticker_df = df
-                        else:
-                            ticker_df = df.xs(ticker_ns, axis=1, level=1)
-                            
+                        ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
+                        if ticker_df is None or ticker_df.empty:
+                            continue
                         ticker_df = ticker_df.dropna(subset=["Close"])
                         
                         candles = []
@@ -670,11 +799,51 @@ def chunked(lst, n):
         yield lst[i:i + n]
 
 
+def _evaluate_all_symbols():
+    universe = STATE.get("universe") or []
+    if not universe:
+        return [], [], [], []
+    confirmed, watch = [], []
+    w_confirmed, w_watch = [], []
+
+    for sym in universe:
+        candles = _candle_cache.get(sym)
+        if candles:
+            live_price = candles[-1][4]
+            res = evaluate_symbol(sym, candles, live_price)
+            if res:
+                res["timestamp"] = dt.datetime.now().strftime("%H:%M:%S")
+                (confirmed if res["status"] == "confirmed" else watch).append(res)
+                
+            if passes_liquidity_filter(candles):
+                w_candles = _weekly_candle_cache.get(sym)
+                if w_candles:
+                    last_close_w = w_candles[-1][4]
+                    w_res = evaluate_symbol_weekly(sym, w_candles, last_close_w)
+                    if w_res:
+                        w_res["timestamp"] = dt.datetime.now().strftime("%H:%M:%S")
+                        (w_confirmed if w_res["status"] == "confirmed" else w_watch).append(w_res)
+
+    STATE["confirmed_alerts"] = sorted(confirmed, key=lambda x: -x["confidence"])
+    STATE["watch_alerts"] = sorted(watch, key=lambda x: -x["confidence"])
+    STATE["weekly_confirmed_alerts"] = sorted(w_confirmed, key=lambda x: -x["confidence"])
+    STATE["weekly_watch_alerts"] = sorted(w_watch, key=lambda x: -x["confidence"])
+    return confirmed, watch, w_confirmed, w_watch
+
+
 def scan_loop():
     STATE["scanning"] = True
 
     # Try to load cache from disk at startup
     load_candle_cache_from_disk()
+
+    # Fast initial evaluation from disk cache if available
+    if _candle_cache:
+        try:
+            _evaluate_all_symbols()
+            STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S") + " (Cache)"
+        except Exception as e:
+            app.logger.warning(f"Initial cache evaluation error: {e}")
 
     while True:
         try:
@@ -687,7 +856,7 @@ def scan_loop():
             market_open = is_market_open()
             STATE["error"] = None
 
-            # First, make sure historical cache has data
+            # Make sure historical cache has data for missing symbols
             warm_cache_for_all_symbols()
 
             # If market is open, fetch latest 5 days of data to update live prices
@@ -736,35 +905,14 @@ def scan_loop():
                 save_candle_cache_to_disk()
 
             # Run evaluation on all symbols
-            confirmed, watch = [], []
-            w_confirmed, w_watch = [], []
-            
-            for i, sym in enumerate(universe):
-                STATE["scan_progress"] = f"Scanning {i + 1}/{len(universe)}"
-                candles = _candle_cache.get(sym)
-                
-                if candles:
-                    live_price = candles[-1][4]
-                    res = evaluate_symbol(sym, candles, live_price)
-                    if res:
-                        res["timestamp"] = dt.datetime.now().strftime("%H:%M:%S")
-                        (confirmed if res["status"] == "confirmed" else watch).append(res)
-                        
-                    if passes_liquidity_filter(candles):
-                        w_candles = _weekly_candle_cache.get(sym)
-                        if w_candles:
-                            last_close_w = w_candles[-1][4]
-                            w_res = evaluate_symbol_weekly(sym, w_candles, last_close_w)
-                            if w_res:
-                                w_res["timestamp"] = dt.datetime.now().strftime("%H:%M:%S")
-                                (w_confirmed if w_res["status"] == "confirmed" else w_watch).append(w_res)
-            
-            # Publish updates
-            STATE["confirmed_alerts"] = sorted(confirmed, key=lambda x: -x["confidence"])
-            STATE["watch_alerts"] = sorted(watch, key=lambda x: -x["confidence"])
-            STATE["weekly_confirmed_alerts"] = sorted(w_confirmed, key=lambda x: -x["confidence"])
-            STATE["weekly_watch_alerts"] = sorted(w_watch, key=lambda x: -x["confidence"])
+            confirmed, watch, w_confirmed, w_watch = _evaluate_all_symbols()
             STATE["scan_progress"] = None
+
+            # Send phone notifications for new signals
+            try:
+                notify_new_alerts(confirmed + w_confirmed, watch + w_watch)
+            except Exception as e:
+                app.logger.warning(f"Notification error: {e}")
             
             if market_open:
                 STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S")
@@ -776,7 +924,7 @@ def scan_loop():
             STATE["error"] = f"Scan error: {e}"
             app.logger.exception("Error in scan_loop")
 
-        sleep_secs = POLL_INTERVAL_SECONDS if is_market_open() else 3600
+        sleep_secs = POLL_INTERVAL_SECONDS if is_market_open() else 300  # re-scan every 5 min when market closed
         time.sleep(sleep_secs)
 
 
@@ -818,6 +966,31 @@ def api_signals_weekly():
         "error": STATE["error"],
         "universe_size": len(STATE["universe"]),
     })
+
+
+@app.route("/api/export/prebreakout")
+def export_prebreakout_excel():
+    tf = request.args.get("timeframe", "both").lower()
+
+    daily_w = STATE.get("watch_alerts", []) if tf in ("daily", "both", "all") else []
+    weekly_w = STATE.get("weekly_watch_alerts", []) if tf in ("weekly", "both", "all") else []
+    daily_c = STATE.get("confirmed_alerts", []) if tf in ("daily", "both", "all") else []
+    weekly_c = STATE.get("weekly_confirmed_alerts", []) if tf in ("weekly", "both", "all") else []
+
+    wb = create_prebreakout_excel(daily_w, weekly_w, daily_c, weekly_c)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"PreBreakout_Stocks_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
 
 
 
@@ -1064,59 +1237,13 @@ def api_pattern(symbol):
     except Exception:
         pass
 
-    # ── FLAG ─────────────────────────────────────────────────────────────────
-    try:
-        flag = strategies.detect_flag(candles)
-        if flag:
-            pole_s = n - 30
-            pole_e = n - 10
-            flag_s = n - 10
-            flag_e = n - 1
-            patterns["flag"] = {
-                "type": flag["type"],
-                "pole": [
-                    {"time": dates[pole_s], "value": round(window[pole_s][4], 2)},
-                    {"time": dates[pole_e], "value": round(window[pole_e][4], 2)},
-                ],
-                "flag_resistance": [
-                    {"time": dates[flag_s], "value": flag["flag_resistance"]},
-                    {"time": dates[flag_e], "value": flag["flag_resistance"]},
-                ],
-                "flag_support": [
-                    {"time": dates[flag_s], "value": flag["flag_support"]},
-                    {"time": dates[flag_e], "value": flag["flag_support"]},
-                ],
-                "resistance_level": flag["flag_resistance"],
-                "support_level":    flag["flag_support"],
-                "pole_move_pct":    flag["pole_move_pct"],
-            }
-    except Exception:
-        pass
 
-    # ── WEDGE ─────────────────────────────────────────────────────────────────
-    try:
-        wedge = strategies.detect_wedge(candles)
-        if wedge:
-            w30 = candles[-30:]
-            highs = [c[2] for c in w30]
-            lows  = [c[3] for c in w30]
-            sh, sl_ = strategies.find_swing_points(highs, lows, window=2)
-            rs, ri, _ = strategies.linreg(sh)
-            ss, si_, _ = strategies.linreg(sl_)
-            off = n - 30
-            patterns["wedge"] = {
-                "type": wedge["type"],
-                "resistance_line": trendline_pts(rs, ri, 0, 29, off),
-                "support_line":    trendline_pts(ss, si_, 0, 29, off),
-                "resistance_level": wedge["resistance"],
-                "support_level":    wedge["support"],
-                "swing_highs": [{"time": dates[off + p[0]], "value": round(p[1], 2)}
-                                 for p in sh if 0 <= off + p[0] < len(dates)],
-                "swing_lows":  [{"time": dates[off + p[0]], "value": round(p[1], 2)}
-                                 for p in sl_ if 0 <= off + p[0] < len(dates)],
-            }
-    except Exception:
-        pass
+
+
+
+
+
+
 
     # ── PENNANT ───────────────────────────────────────────────────────────────
     try:
@@ -1126,7 +1253,7 @@ def api_pattern(symbol):
             pole_si, pole_ei, consol_si = 0, 0, 0
             for i in range(max(0, n - 25), n - 8):
                 move = (closes[i + 8] - closes[i]) / closes[i] * 100
-                if move >= 7.0:
+                if move >= 8.0:
                     pole_si   = i
                     pole_ei   = i + 8
                     consol_si = pole_ei
@@ -1150,27 +1277,6 @@ def api_pattern(symbol):
                     "support_level":    pennant["support"],
                     "pole_move_pct":    pennant["pole_move_pct"],
                 }
-    except Exception:
-        pass
-
-    # ── CHANNEL ───────────────────────────────────────────────────────────────
-    try:
-        channel = strategies.detect_channel(candles)
-        if channel:
-            w40 = candles[-40:]
-            highs = [c[2] for c in w40]
-            lows  = [c[3] for c in w40]
-            sh, sl_ = strategies.find_swing_points(highs, lows, window=3)
-            rs, ri, _ = strategies.linreg(sh)
-            ss, si_, _ = strategies.linreg(sl_)
-            off = n - 40
-            patterns["channel"] = {
-                "type": channel["type"],
-                "resistance_line": trendline_pts(rs, ri, 0, 39, off),
-                "support_line":    trendline_pts(ss, si_, 0, 39, off),
-                "resistance_level": channel["resistance"],
-                "support_level":    channel["support"],
-            }
     except Exception:
         pass
 
@@ -1231,70 +1337,20 @@ def api_pattern_weekly(symbol):
     except Exception:
         pass
 
-    # ── FLAG ─────────────────────────────────────────────────────────────────
-    try:
-        flag = strategies.detect_flag(candles)
-        if flag:
-            pole_s = n - 30
-            pole_e = n - 10
-            flag_s = n - 10
-            flag_e = n - 1
-            patterns["flag"] = {
-                "type": flag["type"],
-                "pole": [
-                    {"time": dates[pole_s], "value": round(window[pole_s][4], 2)},
-                    {"time": dates[pole_e], "value": round(window[pole_e][4], 2)},
-                ],
-                "flag_resistance": [
-                    {"time": dates[flag_s], "value": flag["flag_resistance"]},
-                    {"time": dates[flag_e], "value": flag["flag_resistance"]},
-                ],
-                "flag_support": [
-                    {"time": dates[flag_s], "value": flag["flag_support"]},
-                    {"time": dates[flag_e], "value": flag["flag_support"]},
-                ],
-                "resistance_level": flag["flag_resistance"],
-                "support_level":    flag["flag_support"],
-                "pole_move_pct":    flag["pole_move_pct"],
-            }
-    except Exception:
-        pass
-
-    # ── WEDGE ─────────────────────────────────────────────────────────────────
-    try:
-        wedge = strategies.detect_wedge(candles)
-        if wedge:
-            w30 = candles[-30:]
-            highs = [c[2] for c in w30]
-            lows  = [c[3] for c in w30]
-            sh, sl_ = strategies.find_swing_points(highs, lows, window=2)
-            rs, ri, _ = strategies.linreg(sh)
-            ss, si_, _ = strategies.linreg(sl_)
-            off = n - 30
-            patterns["wedge"] = {
-                "type": wedge["type"],
-                "resistance_line": trendline_pts(rs, ri, 0, 29, off),
-                "support_line":    trendline_pts(ss, si_, 0, 29, off),
-                "resistance_level": wedge["resistance"],
-                "support_level":    wedge["support"],
-            }
-    except Exception:
-        pass
-
     # ── PENNANT ───────────────────────────────────────────────────────────────
     try:
         pennant = strategies.detect_pennant(candles)
         if pennant:
             closes = [c[4] for c in window]
-            pole_si, pole_ei, consolidation_si = 0, 0, 0
+            pole_si, pole_ei, consol_si = 0, 0, 0
             for i in range(max(0, n - 25), n - 8):
                 move = (closes[i + 8] - closes[i]) / closes[i] * 100
-                if move >= 7.0:
+                if move >= 8.0:
                     pole_si   = i
                     pole_ei   = i + 8
-                    consolidation_si = pole_ei
+                    consol_si = pole_ei
                     break
-            consol_w = window[consolidation_si:]
+            consol_w = window[consol_si:]
             c_highs = [c[2] for c in consol_w]
             c_lows  = [c[3] for c in consol_w]
             if len(consol_w) >= 2:
@@ -1307,8 +1363,8 @@ def api_pattern_weekly(symbol):
                         {"time": dates[pole_si],     "value": round(window[pole_si][4],     2)},
                         {"time": dates[pole_ei - 1], "value": round(window[pole_ei - 1][4], 2)},
                     ],
-                    "resistance_line": trendline_pts(rs, ri, 0, cx, consolidation_si),
-                    "support_line":    trendline_pts(ss, si_v, 0, cx, consolidation_si),
+                    "resistance_line": trendline_pts(rs, ri, 0, cx, consol_si),
+                    "support_line":    trendline_pts(ss, si_v, 0, cx, consol_si),
                     "resistance_level": pennant["resistance"],
                     "support_level":    pennant["support"],
                     "pole_move_pct":    pennant["pole_move_pct"],
@@ -1316,29 +1372,56 @@ def api_pattern_weekly(symbol):
     except Exception:
         pass
 
-    # ── CHANNEL ───────────────────────────────────────────────────────────────
-    try:
-        channel = strategies.detect_channel(candles)
-        if channel:
-            w40 = candles[-40:]
-            highs = [c[2] for c in w40]
-            lows  = [c[3] for c in w40]
-            sh, sl_ = strategies.find_swing_points(highs, lows, window=3)
-            rs, ri, _ = strategies.linreg(sh)
-            ss, si_, _ = strategies.linreg(sl_)
-            off = n - 40
-            patterns["channel"] = {
-                "type": channel["type"],
-                "resistance_line": trendline_pts(rs, ri, 0, 39, off),
-                "support_line":    trendline_pts(ss, si_, 0, 39, off),
-                "resistance_level": channel["resistance"],
-                "support_level":    channel["support"],
-            }
-    except Exception:
-        pass
-
     return jsonify({"symbol": sym, "patterns": patterns})
 
+
+
+# ---------------------------------------------------------------------------
+# Notification endpoints (ntfy.sh)
+# ---------------------------------------------------------------------------
+@app.route("/api/notifications/settings", methods=["GET"])
+def api_notification_settings_get():
+    return jsonify({
+        "topic": NTFY_TOPIC,
+        "enabled": NTFY_ENABLED,
+        "server": NTFY_SERVER,
+    })
+
+
+@app.route("/api/notifications/settings", methods=["POST"])
+def api_notification_settings_save():
+    global NTFY_TOPIC, NTFY_ENABLED
+    d = request.json or {}
+    NTFY_TOPIC = d.get("topic", "").strip()
+    NTFY_ENABLED = bool(d.get("enabled", False))
+
+    # Persist to .env
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    env_lines = []
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                if not line.startswith("NTFY_TOPIC=") and not line.startswith("NTFY_ENABLED="):
+                    env_lines.append(line.rstrip("\n"))
+    env_lines.append(f"NTFY_TOPIC={NTFY_TOPIC}")
+    env_lines.append(f"NTFY_ENABLED={'true' if NTFY_ENABLED else 'false'}")
+    with open(env_path, "w") as f:
+        f.write("\n".join(env_lines) + "\n")
+
+    return jsonify({"success": True})
+
+
+@app.route("/api/notifications/test", methods=["POST"])
+def api_notification_test():
+    if not NTFY_TOPIC:
+        return jsonify({"success": False, "error": "No topic configured"}), 400
+    ok = send_ntfy_notification(
+        "🔔 Test Notification",
+        "Your Stock Scanner notifications are working! You'll receive alerts here when breakouts are detected.",
+        priority="default",
+        tags=["white_check_mark"],
+    )
+    return jsonify({"success": ok, "error": None if ok else "Failed to send notification"})
 
 
 # ---------------------------------------------------------------------------
@@ -1364,6 +1447,8 @@ def _ltp(symbol):
 
 
 def _closed_trade_record(trade, sell_price, pnl, exit_reason):
+    cost = trade.get("buy_price", 0) * trade.get("quantity", 1)
+    pnl_pct = round((pnl / cost) * 100, 2) if cost > 0 else 0.0
     return {
         **trade,
         "setup": trade.get("setup", ""),
@@ -1372,6 +1457,7 @@ def _closed_trade_record(trade, sell_price, pnl, exit_reason):
         "tags": trade.get("tags", ""),
         "sell_price": round(sell_price, 2),
         "pnl": round(pnl, 2),
+        "pnl_pct": pnl_pct,
         "exit_time": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "result": "profit" if pnl >= 0 else "loss",
         "exit_reason": exit_reason,
@@ -1383,8 +1469,9 @@ def _journal_summary(history):
     wins = [t for t in history if t.get("pnl", 0) >= 0]
     losses = [t for t in history if t.get("pnl", 0) < 0]
     gross_profit = round(sum(t.get("pnl", 0) for t in wins), 2)
-    gross_loss = round(sum(t.get("pnl", 0) for t in losses), 2)
-    net_pnl = round(gross_profit + gross_loss, 2)
+    gross_loss = round(sum(abs(t.get("pnl", 0)) for t in losses), 2)
+    net_pnl = round(gross_profit - gross_loss, 2)
+    profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
     return {
         "total_trades": total,
         "wins": len(wins),
@@ -1393,6 +1480,7 @@ def _journal_summary(history):
         "net_pnl": net_pnl,
         "gross_profit": gross_profit,
         "gross_loss": gross_loss,
+        "profit_factor": profit_factor,
         "avg_win": round(gross_profit / len(wins), 2) if wins else 0,
         "avg_loss": round(gross_loss / len(losses), 2) if losses else 0,
         "best_trade": round(max((t.get("pnl", 0) for t in history), default=0), 2),
@@ -1440,35 +1528,46 @@ def api_paper_portfolio():
     trades = []
     for t in STATE["paper_trades"]:
         price = _ltp(t["symbol"]) or t["buy_price"]
-        pnl      = round((price - t["buy_price"]) * t["quantity"], 2)
-        pnl_pct  = round((price - t["buy_price"]) / t["buy_price"] * 100, 2)
         invested = round(t["buy_price"] * t["quantity"], 2)
+        cur_val  = round(price * t["quantity"], 2)
+        pnl      = round(cur_val - invested, 2)
+        pnl_pct  = round((price - t["buy_price"]) / t["buy_price"] * 100, 2) if t["buy_price"] else 0.0
         # Distance to SL / Target
         sl_dist = round((price - t["stop_loss"]) / t["stop_loss"] * 100, 2) if t["stop_loss"] else None
         tgt_dist = round((t["target"] - price)   / price * 100, 2)          if t["target"]    else None
         trades.append({
             **t,
             "ltp":       price,
+            "invested":  invested,
+            "cur_val":   cur_val,
             "pnl":       pnl,
             "pnl_pct":   pnl_pct,
-            "invested":  invested,
             "sl_dist":   sl_dist,
             "tgt_dist":  tgt_dist,
         })
 
-    total_invested = sum(t["invested"] for t in trades)
-    total_pnl      = sum(t["pnl"] for t in trades)
-    portfolio_val  = round(STATE["paper_balance"] + total_invested + total_pnl, 2)
+    total_invested      = round(sum(t["invested"] for t in trades), 2)
+    total_cur_val       = round(sum(t["cur_val"] for t in trades), 2)
+    unrealized_pnl      = round(sum(t["pnl"] for t in trades), 2)
+    realized_pnl        = round(sum(t.get("pnl", 0) for t in STATE["paper_history"]), 2)
+    available_cash      = round(STATE["paper_balance"], 2)
+    portfolio_val       = round(available_cash + total_cur_val, 2)
+    total_pnl           = round(portfolio_val - STATE["paper_initial"], 2)
+    total_pnl_pct       = round((total_pnl / STATE["paper_initial"] * 100), 2) if STATE["paper_initial"] else 0.0
 
     return jsonify({
-        "balance":       round(STATE["paper_balance"], 2),
-        "initial":       STATE["paper_initial"],
-        "portfolio_val": portfolio_val,
-        "total_pnl":     round(total_pnl, 2),
-        "total_invested": round(total_invested, 2),
-        "open_trades":   trades,
-        "history_count":  len(STATE["paper_history"]),
-        "history":       list(reversed(STATE["paper_history"]))[:30],
+        "balance":             available_cash,
+        "initial":             STATE["paper_initial"],
+        "portfolio_val":       portfolio_val,
+        "total_invested":      total_invested,
+        "total_cur_val":       total_cur_val,
+        "unrealized_pnl":      unrealized_pnl,
+        "realized_pnl":        realized_pnl,
+        "total_pnl":           total_pnl,
+        "total_pnl_pct":       total_pnl_pct,
+        "open_trades":         trades,
+        "history_count":       len(STATE["paper_history"]),
+        "history":             list(reversed(STATE["paper_history"]))[:50],
     })
 
 
@@ -1490,7 +1589,7 @@ def api_paper_buy():
     if cost > STATE["paper_balance"]:
         return jsonify({"error": f"Insufficient balance. Need ₹{cost:,.2f}, have ₹{STATE['paper_balance']:,.2f}"}), 400
 
-    trade_id = int(dt.datetime.now().timestamp() * 1000) % 1_000_000  # unique-ish ID
+    trade_id = f"tr_{uuid.uuid4().hex[:8]}"
     trade = {
         "id":          trade_id,
         "symbol":      symbol,
@@ -1511,9 +1610,9 @@ def api_paper_buy():
     return jsonify({"success": True, "trade": trade, "balance": STATE["paper_balance"]})
 
 
-@app.route("/api/paper/sell/<int:trade_id>", methods=["POST"])
+@app.route("/api/paper/sell/<trade_id>", methods=["POST"])
 def api_paper_sell(trade_id):
-    trade = next((t for t in STATE["paper_trades"] if t["id"] == trade_id), None)
+    trade = next((t for t in STATE["paper_trades"] if str(t.get("id")) == str(trade_id)), None)
     if not trade:
         return jsonify({"error": "Trade not found"}), 404
 
@@ -1523,8 +1622,9 @@ def api_paper_sell(trade_id):
 
     pnl = round((sell_price - trade["buy_price"]) * trade["quantity"], 2)
     STATE["paper_balance"] = round(STATE["paper_balance"] + trade["buy_price"] * trade["quantity"] + pnl, 2)
-    STATE["paper_trades"]  = [t for t in STATE["paper_trades"] if t["id"] != trade_id]
-    STATE["paper_history"].append(_closed_trade_record(trade, sell_price, pnl, "Manual Exit"))
+    STATE["paper_trades"]  = [t for t in STATE["paper_trades"] if str(t.get("id")) != str(trade_id)]
+    closed_rec = _closed_trade_record(trade, sell_price, pnl, "Manual Exit")
+    STATE["paper_history"].append(closed_rec)
     _save_paper_state()
     return jsonify({"success": True, "pnl": pnl, "balance": STATE["paper_balance"]})
 
@@ -1539,18 +1639,35 @@ def api_paper_journal():
     })
 
 
-@app.route("/api/paper/journal/<int:trade_id>", methods=["PATCH"])
+@app.route("/api/paper/journal/<trade_id>", methods=["PATCH"])
 def api_paper_journal_update(trade_id):
     d = request.json or {}
     allowed = {"setup", "notes", "review", "tags"}
     for trade in STATE["paper_history"]:
-        if trade.get("id") == trade_id:
+        if str(trade.get("id")) == str(trade_id):
             for key in allowed:
                 if key in d:
                     trade[key] = str(d.get(key, "")).strip()
             _save_paper_state()
             return jsonify({"success": True, "trade": trade})
     return jsonify({"error": "Journal trade not found"}), 404
+
+
+@app.route("/api/paper/journal/<trade_id>", methods=["DELETE"])
+def api_paper_journal_delete(trade_id):
+    before_len = len(STATE["paper_history"])
+    STATE["paper_history"] = [t for t in STATE["paper_history"] if str(t.get("id")) != str(trade_id)]
+    if len(STATE["paper_history"]) == before_len:
+        return jsonify({"error": "Journal trade not found"}), 404
+    _save_paper_state()
+    return jsonify({"success": True})
+
+
+@app.route("/api/paper/journal/clear", methods=["POST"])
+def api_paper_journal_clear():
+    STATE["paper_history"] = []
+    _save_paper_state()
+    return jsonify({"success": True})
 
 
 @app.route("/api/paper/reset", methods=["POST"])

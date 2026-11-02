@@ -1,14 +1,9 @@
 """
-strategies.py — Multi-Pattern Swing Trading Engine
+strategies.py — Focused Swing Trading Engine (3 Strategies)
 
 Implements:
   1.  Triangle pattern  (Ascending / Symmetrical)
-  2.  44-Day SMA breakout
-  3.  Head & Shoulders / Inverse Head & Shoulders  (reversal)
-  4.  Flag pattern  (Bull Flag)
-  5.  Wedge pattern  (Rising Wedge)
-  6.  Channel pattern  (Ascending Channel)
-  7.  Pennant pattern
+  2.  Pennant pattern  (pole + converging consolidation with volume confirmation)
 
 All patterns include:
   - Confirmed breakout detection
@@ -73,12 +68,12 @@ def sma(values, period):
 
 
 # ---------------------------------------------------------------------------
-# 1. TRIANGLE PATTERN
+# 1. TRIANGLE PATTERN — Ascending and Symmetrical
 # ---------------------------------------------------------------------------
-FLAT_SLOPE_THRESHOLD = 0.0015
-MIN_TOUCHES = 2
+FLAT_SLOPE_THRESHOLD = 0.0012       # flat slope threshold
+MIN_TOUCHES = 2                     # require ≥2 touches per trendline
+MIN_FIT_QUALITY = 0.50              # minimum R² fit quality (relaxed)
 LOOKBACK = 40
-
 
 def detect_triangle(candles):
     if len(candles) < LOOKBACK + 5:
@@ -95,6 +90,11 @@ def detect_triangle(candles):
 
     res_slope, res_intercept, res_r2 = linreg(swing_highs)
     sup_slope, sup_intercept, sup_r2 = linreg(swing_lows)
+
+    # Require good trendline fit quality
+    fit_quality = (res_r2 + sup_r2) / 2
+    if fit_quality < MIN_FIT_QUALITY:
+        return None
 
     res_slope_norm = res_slope / avg_price
     sup_slope_norm = sup_slope / avg_price
@@ -116,16 +116,35 @@ def detect_triangle(candles):
     else:
         return None
 
-    fit_quality = (res_r2 + sup_r2) / 2
     gap_start = line_value(res_slope, res_intercept, 0) - line_value(sup_slope, sup_intercept, 0)
     gap_now = res_now - sup_now
     contraction = 1 - (gap_now / gap_start) if gap_start > 0 else 0
+
+    # Require minimum contraction for valid triangle
+    if contraction < 0.15:
+        return None
 
     if res_slope != sup_slope:
         apex_x = (sup_intercept - res_intercept) / (res_slope - sup_slope)
         bars_to_apex = apex_x - last_x
     else:
         bars_to_apex = None
+
+    # Validate swing points actually touch the trendlines (within 2.5% tolerance)
+    res_touches = 0
+    for idx, val in swing_highs:
+        expected = line_value(res_slope, res_intercept, idx)
+        if expected > 0 and abs(val - expected) / expected < 0.025:
+            res_touches += 1
+
+    sup_touches = 0
+    for idx, val in swing_lows:
+        expected = line_value(sup_slope, sup_intercept, idx)
+        if expected > 0 and abs(val - expected) / expected < 0.025:
+            sup_touches += 1
+
+    if res_touches < 2 or sup_touches < 2:
+        return None
 
     return {
         "type": triangle_type,
@@ -134,352 +153,20 @@ def detect_triangle(candles):
         "fit_quality": round(fit_quality, 2),
         "contraction": round(max(contraction, 0), 2),
         "bars_to_apex": round(bars_to_apex, 1) if bars_to_apex is not None else None,
-        "touches": len(swing_highs) + len(swing_lows),
+        "touches": res_touches + sup_touches,
     }
 
 
 # ---------------------------------------------------------------------------
-# 2. 44 SMA STRATEGY
-# ---------------------------------------------------------------------------
-def sma44_signal(candles):
-    closes = [c[4] for c in candles]
-    opens = [c[1] for c in candles]
-    if len(closes) < 46:
-        return None
-
-    sma_today = sma(closes, 44)
-    sma_yday = sma(closes[:-1], 44)
-    if sma_today is None or sma_yday is None:
-        return None
-
-    today_close, today_open = closes[-1], opens[-1]
-    yday_close = closes[-2]
-
-    is_green = today_close > today_open
-    crosses_above = yday_close <= sma_yday and today_close > sma_today
-
-    if is_green and crosses_above:
-        return {"sma44": round(sma_today, 2), "status": "confirmed"}
-
-    near_below = sma_today >= today_close > sma_today * 0.99
-    trending_up = closes[-1] > closes[-4] if len(closes) >= 4 else False
-    if near_below and trending_up:
-        return {"sma44": round(sma_today, 2), "status": "approaching"}
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# 3. HEAD & SHOULDERS / INVERSE H&S
-# ---------------------------------------------------------------------------
-def detect_head_and_shoulders(candles):
-    """
-    Classic H&S (bearish reversal) and Inverse H&S (bullish reversal).
-    Looks for 3 peaks (H&S) or 3 troughs (IH&S) in the last 60 bars.
-    Returns dict with type, neckline, status (forming/confirmed).
-    """
-    if len(candles) < 60:
-        return None
-
-    window = candles[-60:]
-    highs = [c[2] for c in window]
-    lows = [c[3] for c in window]
-    closes = [c[4] for c in window]
-
-    swing_highs, swing_lows = find_swing_points(highs, lows, window=3)
-
-    # --- Head & Shoulders (bearish) ---
-    if len(swing_highs) >= 3:
-        # Take the 3 most prominent peaks
-        peaks = sorted(swing_highs, key=lambda p: p[1], reverse=True)[:5]
-        peaks = sorted(peaks, key=lambda p: p[0])  # sort by position
-
-        for i in range(len(peaks) - 2):
-            left, head, right = peaks[i], peaks[i+1], peaks[i+2]
-            # Head must be highest, shoulders roughly equal
-            if head[1] <= left[1] or head[1] <= right[1]:
-                continue
-            shoulder_diff = abs(left[1] - right[1]) / head[1]
-            if shoulder_diff > 0.05:  # shoulders within 5% of each other
-                continue
-
-            # Neckline: average of the troughs between shoulders
-            troughs_between = [s for s in swing_lows if left[0] < s[0] < right[0]]
-            if len(troughs_between) < 1:
-                continue
-            neckline = sum(t[1] for t in troughs_between) / len(troughs_between)
-            current_price = closes[-1]
-
-            if current_price < neckline * 0.995:
-                return {
-                    "type": "Head & Shoulders",
-                    "direction": "bearish",
-                    "neckline": round(neckline, 2),
-                    "head_high": round(head[1], 2),
-                    "status": "confirmed",
-                }
-            elif current_price < neckline * 1.02:
-                return {
-                    "type": "Head & Shoulders",
-                    "direction": "bearish",
-                    "neckline": round(neckline, 2),
-                    "head_high": round(head[1], 2),
-                    "status": "forming",
-                }
-
-    # --- Inverse Head & Shoulders (bullish) ---
-    if len(swing_lows) >= 3:
-        troughs = sorted(swing_lows, key=lambda p: p[1])[:5]
-        troughs = sorted(troughs, key=lambda p: p[0])
-
-        for i in range(len(troughs) - 2):
-            left, head, right = troughs[i], troughs[i+1], troughs[i+2]
-            if head[1] >= left[1] or head[1] >= right[1]:
-                continue
-            shoulder_diff = abs(left[1] - right[1]) / abs(head[1]) if head[1] != 0 else 1
-            if shoulder_diff > 0.05:
-                continue
-
-            peaks_between = [s for s in swing_highs if left[0] < s[0] < right[0]]
-            if len(peaks_between) < 1:
-                continue
-            neckline = sum(t[1] for t in peaks_between) / len(peaks_between)
-            current_price = closes[-1]
-
-            if current_price > neckline * 1.005:
-                return {
-                    "type": "Inverse Head & Shoulders",
-                    "direction": "bullish",
-                    "neckline": round(neckline, 2),
-                    "head_low": round(head[1], 2),
-                    "status": "confirmed",
-                }
-            elif current_price > neckline * 0.98:
-                return {
-                    "type": "Inverse Head & Shoulders",
-                    "direction": "bullish",
-                    "neckline": round(neckline, 2),
-                    "head_low": round(head[1], 2),
-                    "status": "forming",
-                }
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# 4. FLAG PATTERN
-# ---------------------------------------------------------------------------
-def detect_flag(candles):
-    """
-    Bull Flag: sharp pole up (>6% in 5-10 bars), then tight downward-drifting
-    consolidation (flag), breakout above flag resistance.
-    """
-    if len(candles) < 30:
-        return None
-
-    closes = [c[4] for c in candles]
-    highs = [c[2] for c in candles]
-    lows = [c[3] for c in candles]
-
-    # Look for a pole in the last 15-30 bars (before the last 10)
-    pole_window = candles[-30:-10]
-    flag_window = candles[-10:]
-
-    if len(pole_window) < 5 or len(flag_window) < 4:
-        return None
-
-    pole_start_close = pole_window[0][4]
-    pole_end_close = pole_window[-1][4]
-    pole_move = (pole_end_close - pole_start_close) / pole_start_close
-
-    flag_closes = [c[4] for c in flag_window]
-    flag_highs = [c[2] for c in flag_window]
-    flag_lows = [c[3] for c in flag_window]
-    flag_slope = (flag_closes[-1] - flag_closes[0]) / (len(flag_closes) * pole_start_close)
-
-    current_price = closes[-1]
-
-    # Bull Flag
-    if pole_move >= 0.06 and -0.025 <= flag_slope <= 0.005:
-        flag_resistance = max(flag_highs)
-        flag_support = min(flag_lows)
-        if current_price > flag_resistance * 1.002:
-            return {
-                "type": "Bull Flag",
-                "direction": "bullish",
-                "pole_move_pct": round(pole_move * 100, 1),
-                "flag_resistance": round(flag_resistance, 2),
-                "flag_support": round(flag_support, 2),
-                "status": "confirmed",
-            }
-        elif current_price >= flag_resistance * 0.99:
-            return {
-                "type": "Bull Flag",
-                "direction": "bullish",
-                "pole_move_pct": round(pole_move * 100, 1),
-                "flag_resistance": round(flag_resistance, 2),
-                "flag_support": round(flag_support, 2),
-                "status": "forming",
-            }
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# 5. WEDGE PATTERN
-# ---------------------------------------------------------------------------
-def detect_wedge(candles):
-    """
-    Rising Wedge: both trendlines slope up and converge.
-    This buy-side scanner only accepts breakouts above wedge resistance.
-    """
-    if len(candles) < 30:
-        return None
-
-    window = candles[-30:]
-    highs = [c[2] for c in window]
-    lows = [c[3] for c in window]
-    closes = [c[4] for c in window]
-    avg_price = sum(closes) / len(closes)
-
-    swing_highs, swing_lows = find_swing_points(highs, lows, window=2)
-    if len(swing_highs) < 2 or len(swing_lows) < 2:
-        return None
-
-    res_slope, res_intercept, res_r2 = linreg(swing_highs)
-    sup_slope, sup_intercept, sup_r2 = linreg(swing_lows)
-
-    res_slope_norm = res_slope / avg_price
-    sup_slope_norm = sup_slope / avg_price
-
-    last_x = len(window) - 1
-    res_now = line_value(res_slope, res_intercept, last_x)
-    sup_now = line_value(sup_slope, sup_intercept, last_x)
-    if sup_now >= res_now:
-        return None
-
-    # Both lines must slope same direction and converge
-    both_up = res_slope_norm > 0.0005 and sup_slope_norm > 0.0005
-    converging = res_slope_norm < sup_slope_norm  # resistance rising slower than support (or falling faster)
-
-    if not both_up or not converging:
-        return None
-
-    current_price = closes[-1]
-    fit_quality = (res_r2 + sup_r2) / 2
-
-    if both_up:
-        if current_price > res_now * 1.002:
-            return {
-                "type": "Rising Wedge",
-                "direction": "bullish",
-                "resistance": round(res_now, 2),
-                "support": round(sup_now, 2),
-                "fit_quality": round(fit_quality, 2),
-                "status": "confirmed",
-            }
-        elif current_price >= res_now * 0.99:
-            return {
-                "type": "Rising Wedge",
-                "direction": "bullish",
-                "resistance": round(res_now, 2),
-                "support": round(sup_now, 2),
-                "fit_quality": round(fit_quality, 2),
-                "status": "forming",
-            }
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# 6. CHANNEL PATTERN
-# ---------------------------------------------------------------------------
-def detect_channel(candles):
-    """
-    Ascending Channel: both trendlines slope up and are parallel → buy dips at support.
-    Breakout from the channel is a high-conviction trade.
-    """
-    if len(candles) < 40:
-        return None
-
-    window = candles[-40:]
-    highs = [c[2] for c in window]
-    lows = [c[3] for c in window]
-    closes = [c[4] for c in window]
-    avg_price = sum(closes) / len(closes)
-
-    swing_highs, swing_lows = find_swing_points(highs, lows, window=3)
-    if len(swing_highs) < 2 or len(swing_lows) < 2:
-        return None
-
-    res_slope, res_intercept, res_r2 = linreg(swing_highs)
-    sup_slope, sup_intercept, sup_r2 = linreg(swing_lows)
-
-    res_slope_norm = res_slope / avg_price
-    sup_slope_norm = sup_slope / avg_price
-
-    # Parallel: slopes within 20% of each other
-    if sup_slope_norm == 0:
-        return None
-    slope_ratio = abs(res_slope_norm / sup_slope_norm)
-    if not (0.6 <= slope_ratio <= 1.6):
-        return None
-
-    # Both must clearly slope the same direction
-    both_up = res_slope_norm > 0.001 and sup_slope_norm > 0.001
-    if not both_up:
-        return None
-
-    last_x = len(window) - 1
-    res_now = line_value(res_slope, res_intercept, last_x)
-    sup_now = line_value(sup_slope, sup_intercept, last_x)
-    if sup_now >= res_now:
-        return None
-
-    current_price = closes[-1]
-    channel_width = res_now - sup_now
-    fit_quality = (res_r2 + sup_r2) / 2
-
-    channel_type = "Ascending Channel"
-
-    # Breakout above resistance
-    if current_price > res_now * 1.003:
-        return {
-            "type": channel_type + " Breakout",
-            "direction": "bullish",
-            "resistance": round(res_now, 2),
-            "support": round(sup_now, 2),
-            "channel_width": round(channel_width, 2),
-            "fit_quality": round(fit_quality, 2),
-            "status": "confirmed",
-        }
-
-    # Price near support in ascending channel = buy opportunity
-    if current_price <= sup_now * 1.015:
-        return {
-            "type": channel_type,
-            "direction": "bullish",
-            "resistance": round(res_now, 2),
-            "support": round(sup_now, 2),
-            "channel_width": round(channel_width, 2),
-            "fit_quality": round(fit_quality, 2),
-            "status": "forming",
-        }
-
-    return None
-
-
-
-
-# ---------------------------------------------------------------------------
-# 7. PENNANT STRATEGY
+# 2. PENNANT STRATEGY — Bullish Pennant with volume spike confirmation
 # ---------------------------------------------------------------------------
 def detect_pennant(candles):
     """
-    Pennant Pattern:
-    - Sharp rise (pole) of at least 7% in the last 15-25 bars.
+    Pennant Pattern (Bullish):
+    - Sharp rise (pole) of at least 6% in the last 15-25 bars.
     - Small symmetrical triangle consolidation (converging lines) over 5-20 bars.
-    - Confirmed: breakout above resistance.
+    - Confirmed: breakout above resistance with green candle AND volume spike.
+    - Forming: price approaching resistance within 1.5%.
     """
     if len(candles) < 25:
         return None
@@ -487,6 +174,7 @@ def detect_pennant(candles):
     closes = [c[4] for c in candles]
     highs = [c[2] for c in candles]
     lows = [c[3] for c in candles]
+    volumes = [c[5] for c in candles]
     n = len(candles)
 
     pole_found = False
@@ -495,7 +183,7 @@ def detect_pennant(candles):
 
     for i in range(max(0, n - 25), n - 8):
         move = (closes[i+8] - closes[i]) / closes[i] * 100
-        if move >= 7.0:
+        if move >= 6.0:  # relaxed from 8% to 6%
             pole_found = True
             pole_start_idx = i
             pole_move_pct = move
@@ -510,16 +198,22 @@ def detect_pennant(candles):
 
     c_highs = [c[2] for c in consol_window]
     c_lows = [c[3] for c in consol_window]
+    c_vols = [c[5] for c in consol_window]
 
-    res_slope, res_intercept, _ = linreg([(idx, val) for idx, val in enumerate(c_highs)])
-    sup_slope, sup_intercept, _ = linreg([(idx, val) for idx, val in enumerate(c_lows)])
+    res_slope, res_intercept, res_r2 = linreg([(idx, val) for idx, val in enumerate(c_highs)])
+    sup_slope, sup_intercept, sup_r2 = linreg([(idx, val) for idx, val in enumerate(c_lows)])
 
     avg_price = sum(closes[-len(consol_window):]) / len(consol_window)
     res_slope_norm = res_slope / avg_price
     sup_slope_norm = sup_slope / avg_price
 
+    # Require good fit quality for the consolidation trendlines
+    consol_fit = (res_r2 + sup_r2) / 2
+    if consol_fit < 0.30:
+        return None
+
     # converging lines (resistance slopes down, support slopes up)
-    if res_slope_norm < -0.0005 and sup_slope_norm > 0.0005:
+    if res_slope_norm < -0.0003 and sup_slope_norm > 0.0003:
         last_x = len(consol_window) - 1
         res_now = line_value(res_slope, res_intercept, last_x)
         sup_now = line_value(sup_slope, sup_intercept, last_x)
@@ -527,15 +221,33 @@ def detect_pennant(candles):
         if res_now <= sup_now:
             return None
 
-        current_price = closes[-1]
+        # Ensure consolidation is actually tightening (converging)
+        gap_start = line_value(res_slope, res_intercept, 0) - line_value(sup_slope, sup_intercept, 0)
+        gap_now = res_now - sup_now
+        if gap_start > 0 and (gap_now / gap_start) > 0.85:
+            return None  # not converging enough
 
-        if current_price > res_now:
+        current_price = closes[-1]
+        current_volume = volumes[-1]
+        is_green = closes[-1] > candles[-1][1]  # close > open
+
+        # Volume spike check: breakout bar should have above-average volume
+        avg_vol_consol = sum(c_vols) / len(c_vols) if c_vols else 1
+        avg_vol_20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes)
+        avg_vol = (avg_vol_consol + avg_vol_20) / 2
+        volume_ratio = current_volume / avg_vol if avg_vol > 0 else 1.0
+        volume_spike = volume_ratio >= 1.2  # at least 20% above average on breakout
+
+        if current_price > res_now and is_green:
             return {
                 "type": "Pennant Breakout",
                 "direction": "bullish",
                 "resistance": round(res_now, 2),
                 "support": round(sup_now, 2),
                 "pole_move_pct": round(pole_move_pct, 1),
+                "fit_quality": round(consol_fit, 2),
+                "volume_ratio": round(volume_ratio, 2),
+                "volume_spike": volume_spike,
                 "status": "confirmed",
             }
         elif current_price >= res_now * 0.985:
@@ -545,11 +257,13 @@ def detect_pennant(candles):
                 "resistance": round(res_now, 2),
                 "support": round(sup_now, 2),
                 "pole_move_pct": round(pole_move_pct, 1),
+                "fit_quality": round(consol_fit, 2),
+                "volume_ratio": round(volume_ratio, 2),
+                "volume_spike": False,
                 "status": "forming",
             }
 
     return None
-
 
 
 # ---------------------------------------------------------------------------
@@ -563,18 +277,6 @@ def _pattern_levels(pattern_type, pattern, candles):
     if pattern_type == "triangle":
         buy_price = round(pattern["resistance_now"] * 1.002, 2)
         stop_loss = round(pattern["support_now"], 2)
-
-    elif pattern_type == "flag":
-        buy_price = round(pattern["flag_resistance"] * 1.002, 2)
-        stop_loss = round(pattern["flag_support"], 2)
-
-    elif pattern_type == "wedge":
-        buy_price = round(pattern["resistance"] * 1.002, 2)
-        stop_loss = round(pattern["support"], 2)
-
-    elif pattern_type == "darvas":
-        buy_price = round(pattern["box_top"] * 1.002, 2)
-        stop_loss = round(pattern["box_bottom"], 2)
 
     elif pattern_type == "pennant":
         buy_price = round(pattern["resistance"] * 1.002, 2)
@@ -598,8 +300,8 @@ def _pattern_levels(pattern_type, pattern, candles):
 # ---------------------------------------------------------------------------
 def build_alert(symbol, candles, live_price):
     """
-    Runs ALL strategies, picks the best qualifying signal, returns a full
-    alert dict or None if nothing qualifies.
+    Runs all strategies (Triangle, Pennant), picks the best
+    qualifying signal, returns a full alert dict or None if nothing qualifies.
     """
     if len(candles) < 50:
         return None
@@ -610,10 +312,8 @@ def build_alert(symbol, candles, live_price):
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14
 
     # Run all detectors
-    triangle      = detect_triangle(candles)
-    flag          = detect_flag(candles)
-    wedge         = detect_wedge(candles)
-    pennant       = detect_pennant(candles)
+    triangle = detect_triangle(candles)
+    pennant  = detect_pennant(candles)
 
     reasons = []
     strategies_used = []
@@ -626,78 +326,53 @@ def build_alert(symbol, candles, live_price):
     if triangle:
         breakout_now = is_green_today and today_close > triangle["resistance_now"]
         approaching = (
-            triangle["contraction"] >= 0.4
-            and triangle["bars_to_apex"] is not None and 0 < triangle["bars_to_apex"] <= 6
-            and today_close >= triangle["resistance_now"] * 0.985
+            triangle["contraction"] >= 0.25
+            and triangle["bars_to_apex"] is not None and 0 < triangle["bars_to_apex"] <= 10
+            and today_close >= triangle["resistance_now"] * 0.97
         )
+        t_name = triangle["type"]
         if breakout_now:
-            strategies_used.append("Triangle Breakout")
-            reasons.append(f"{triangle['type']} breakout above {triangle['resistance_now']}")
-            score += 40
+            strategies_used.append(t_name)
+            reasons.append(f"{t_name} breakout above {triangle['resistance_now']} "
+                           f"(fit: {triangle['fit_quality']}, {triangle['touches']} touches)")
+            score += 42
             best_pattern_type = "triangle"
             best_pattern = triangle
         elif approaching:
-            strategies_used.append("Triangle Breakout")
+            strategies_used.append(t_name)
             status = "pre_breakout_watch"
             reasons.append(
-                f"{triangle['type']} tightening ({int(triangle['contraction']*100)}% contraction), "
+                f"{t_name} tightening ({int(triangle['contraction']*100)}% contraction), "
                 f"price {today_close} near resistance {triangle['resistance_now']}, "
                 f"~{triangle['bars_to_apex']} bars to apex"
             )
-            score += 22
+            score += 24
             best_pattern_type = "triangle"
             best_pattern = triangle
 
-    # ---- Flag ----
-    if flag and flag["direction"] == "bullish":
-        if flag["status"] == "confirmed":
-            strategies_used.append(flag["type"])
-            reasons.append(f"{flag['type']}: pole +{flag['pole_move_pct']}%, breakout above flag at {flag['flag_resistance']}")
-            score += 36
-            if not best_pattern_type:
-                best_pattern_type = "flag"
-                best_pattern = flag
-        elif flag["status"] == "forming":
-            strategies_used.append(flag["type"])
-            status = "pre_breakout_watch"
-            reasons.append(f"{flag['type']} forming after +{flag['pole_move_pct']}% pole, resistance at {flag['flag_resistance']}")
-            score += 20
-            if not best_pattern_type:
-                best_pattern_type = "flag"
-                best_pattern = flag
-
-    # ---- Wedge ----
-    if wedge and wedge["direction"] == "bullish":
-        if wedge["status"] == "confirmed":
-            strategies_used.append(wedge["type"])
-            reasons.append(f"{wedge['type']} breakout above {wedge['resistance']} (fit quality {wedge['fit_quality']})")
-            score += 34
-            if not best_pattern_type:
-                best_pattern_type = "wedge"
-                best_pattern = wedge
-        elif wedge["status"] == "forming":
-            strategies_used.append(wedge["type"])
-            status = "pre_breakout_watch"
-            reasons.append(f"{wedge['type']} forming, resistance at {wedge['resistance']}, support at {wedge['support']}")
-            score += 18
-            if not best_pattern_type:
-                best_pattern_type = "wedge"
-                best_pattern = wedge
-
     # ---- Pennant ----
     if pennant:
+        vol_info = f", volume {pennant.get('volume_ratio', 0):.2f}× avg" if pennant.get('volume_ratio') else ""
+        vol_spike_bonus = 8 if pennant.get("volume_spike") else 0
         if pennant["status"] == "confirmed":
             strategies_used.append("Pennant Breakout")
-            reasons.append(f"Pennant breakout: pole +{pennant['pole_move_pct']}%, closed above resistance {pennant['resistance']}")
-            score += 37
+            reasons.append(
+                f"Pennant Breakout: pole +{pennant['pole_move_pct']}%, "
+                f"closed above resistance {pennant['resistance']}"
+                f"{vol_info} (fit: {pennant.get('fit_quality', 'N/A')})"
+            )
+            score += 40 + vol_spike_bonus
             if not best_pattern_type:
                 best_pattern_type = "pennant"
                 best_pattern = pennant
         elif pennant["status"] == "forming":
-            strategies_used.append("Pennant Consolidation")
+            strategies_used.append("Pennant Breakout")
             status = "pre_breakout_watch"
-            reasons.append(f"Pennant forming after +{pennant['pole_move_pct']}% move, resistance at {pennant['resistance']}")
-            score += 19
+            reasons.append(
+                f"Pennant forming after +{pennant['pole_move_pct']}% move, "
+                f"resistance at {pennant['resistance']}"
+            )
+            score += 20
             if not best_pattern_type:
                 best_pattern_type = "pennant"
                 best_pattern = pennant
@@ -705,9 +380,8 @@ def build_alert(symbol, candles, live_price):
     if not strategies_used:
         return None
 
-
     if len(strategies_used) >= 2:
-        score += 10  # multiple patterns agreeing
+        score += 12  # multiple patterns agreeing — stronger signal
 
     confidence = min(round(score), 95)
 
@@ -737,9 +411,9 @@ def build_alert(symbol, candles, live_price):
     if status == "pre_breakout_watch" and live_price >= buy_price:
         return None
 
-    # Also drop pre-breakout alerts where the trigger is more than 5% away —
+    # Also drop pre-breakout alerts where the trigger is more than 8% away —
     # those are too far from current price to be "near" breakout candidates.
-    if status == "pre_breakout_watch" and buy_price > live_price * 1.05:
+    if status == "pre_breakout_watch" and buy_price > live_price * 1.08:
         return None
 
     expected_breakout_date = "Today / already triggered" if status == "confirmed" else \

@@ -1,0 +1,32 @@
+# fly.toml — Fly.io app configuration
+# Generated for: Stock Scanner (Flask + yfinance)
+
+app = "stock-scanner"          # ← change this to your unique app name
+primary_region = "bom"         # Mumbai — closest to India for NSE latency
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # IMPORTANT: keep always-on (no sleep)
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  size = "shared-cpu-1x"       # free tier machine size
+  memory = "256mb"             # free tier memory
+
+[mounts]
+  source = "scanner_data"      # persistent volume name (created separately)
+  destination = "/data"        # mounted inside container
