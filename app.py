@@ -819,8 +819,8 @@ def _evaluate_all_symbols():
                 res["timestamp"] = ist_time_str
                 res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                 if res["status"] == "confirmed":
-                    # STRICT RULE: Confirmation stock ONLY above 60%
-                    if res.get("confidence", 0) >= 60:
+                    min_c = 80 if "Channel" in res.get("strategy_used", "") else 60
+                    if res.get("confidence", 0) >= min_c:
                         confirmed.append(res)
                 else:
                     watch.append(res)
@@ -834,7 +834,8 @@ def _evaluate_all_symbols():
                         w_res["timestamp"] = ist_time_str
                         w_res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                         if w_res["status"] == "confirmed":
-                            if w_res.get("confidence", 0) >= 60:
+                            min_wc = 80 if "Channel" in w_res.get("strategy_used", "") else 60
+                            if w_res.get("confidence", 0) >= min_wc:
                                 w_confirmed.append(w_res)
                         else:
                             w_watch.append(w_res)
@@ -1320,6 +1321,8 @@ def api_pattern(symbol):
                 "resistance_level": ch["resistance_now"],
                 "support_level": ch["support_now"],
                 "channel_height": ch["channel_height"],
+                "breakout_candle_date": ch.get("breakout_candle_date"),
+                "status": ch.get("status"),
             }
     except Exception:
         pass
@@ -1431,6 +1434,8 @@ def api_pattern_weekly(symbol):
                 "resistance_level": ch["resistance_now"],
                 "support_level": ch["support_now"],
                 "channel_height": ch["channel_height"],
+                "breakout_candle_date": ch.get("breakout_candle_date"),
+                "status": ch.get("status"),
             }
     except Exception:
         pass

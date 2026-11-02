@@ -492,6 +492,20 @@ def _detect_channel_window(candles, lookback, timeframe="daily", live_price=None
         cur_price >= res_now * 0.98
     )
 
+    breakout_candle_idx = None
+    if breakout_now:
+        breakout_candle_idx = len(candles) - 1
+    elif recent_breakout:
+        if len(closes) >= 2 and closes[-2] >= line_value(res_slope, res_intercept, last_x - 1):
+            breakout_candle_idx = len(candles) - 2
+        elif len(closes) >= 3 and closes[-3] >= line_value(res_slope, res_intercept, last_x - 2):
+            breakout_candle_idx = len(candles) - 3
+
+    breakout_candle_date = None
+    if breakout_candle_idx is not None and 0 <= breakout_candle_idx < len(candles):
+        ts = candles[breakout_candle_idx][0]
+        breakout_candle_date = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+
     # Pre-breakout watch: price in upper 25% of channel near resistance
     is_watch = (cur_price >= res_now * 0.96 and cur_price <= res_now * 1.015)
 
@@ -522,6 +536,10 @@ def _detect_channel_window(candles, lookback, timeframe="daily", live_price=None
         "status": status,
         "volume_ratio": round(vol_ratio, 2),
         "volume_spike": vol_spike,
+        "breakout_candle_date": breakout_candle_date,
+        "breakout_candle_idx": breakout_candle_idx,
+        "res_touches": res_touches,
+        "sup_touches": sup_touches,
         "lookback": lookback,
         "timeframe": timeframe,
         "offset": off,
@@ -729,26 +747,35 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     # 1. Descending Channel Candidate
     if channel:
         c_status = channel["status"]
-        c_score = 60 if c_status == "confirmed" else 42
+        c_score = 76 if c_status == "confirmed" else 48
         c_reasons = []
         if c_status == "confirmed":
-            c_reasons.append(f"Descending Channel: Decisive breakout above upper trendline ₹{channel['resistance_now']}")
+            c_reasons.append(f"Breakout > ₹{channel['resistance_now']}")
+            if channel.get("res_touches", 0) >= 2:
+                c_reasons.append(f"{channel['res_touches']}× Touches")
+                c_score += 4
+            if channel.get("res_touches", 0) >= 3:
+                c_score += 3
             if channel.get("volume_spike"):
-                c_reasons.append(f"Volume spike on breakout: {channel.get('volume_ratio', 1.2):.2f}× 20-day average")
+                c_reasons.append(f"Vol {channel.get('volume_ratio', 1.2):.1f}×")
                 c_score += 10
             else:
                 c_score += 5
         else:
-            c_reasons.append(f"Descending Channel: Testing upper resistance ₹{channel['resistance_now']} (Pre-breakout watch)")
+            c_reasons.append(f"Near Res ₹{channel['resistance_now']}")
+            if channel.get("res_touches", 0) >= 2:
+                c_reasons.append(f"{channel['res_touches']}× Touches")
+                c_score += 4
 
-        c_reasons.append(f"Channel support holding at ₹{channel['support_now']} (Fit: {channel['fit_quality']}, {channel['touches']} touches)")
+        c_reasons.append(f"Sup ₹{channel['support_now']}")
         candidates.append({
             "type_key": "channel",
             "name": "Descending Channel",
             "status": c_status,
             "score": c_score,
             "reasons": c_reasons,
-            "pattern": channel
+            "pattern": channel,
+            "breakout_candle_date": channel.get("breakout_candle_date"),
         })
 
     # 2. Triangle Candidate (Ascending / Symmetrical)
@@ -758,18 +785,18 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         t_score = 55 if t_status == "confirmed" else 38
         t_reasons = []
         if t_status == "confirmed":
-            t_reasons.append(f"{t_name}: Breakout at ₹{triangle['resistance_now']}")
+            t_reasons.append(f"Breakout > ₹{triangle['resistance_now']}")
             t_score += 8
         else:
-            t_reasons.append(f"{t_name}: Tightening near resistance ₹{triangle['resistance_now']} (Pre-breakout watch)")
+            t_reasons.append(f"Near Res ₹{triangle['resistance_now']}")
 
         if triangle.get("vol_dry_up"):
-            t_reasons.append("Volume dry-up confirmed: 5-day volume < 20-day average")
+            t_reasons.append("Vol Dry-Up")
             t_score += 5
         if timeframe == "daily":
-            t_reasons.append("Trend confirmed: Daily Close > 50 EMA")
+            t_reasons.append("> 50 EMA")
         elif timeframe == "weekly":
-            t_reasons.append("Weekly trend confirmed: Weekly Close > 20 EMA")
+            t_reasons.append("> 20 EMA")
 
         candidates.append({
             "type_key": "triangle",
@@ -786,14 +813,14 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         p_score = 58 if p_status == "confirmed" else 36
         p_reasons = []
         if p_status == "confirmed":
-            p_reasons.append(f"Pennant Breakout: pole +{pennant['pole_move_pct']}%, closed above resistance ₹{pennant['resistance']}")
+            p_reasons.append(f"Breakout > ₹{pennant['resistance']}")
             if pennant.get("volume_spike"):
-                p_reasons.append(f"Volume spike on breakout: {pennant.get('volume_ratio', 1.2):.2f}× average")
+                p_reasons.append(f"Vol {pennant.get('volume_ratio', 1.2):.1f}×")
                 p_score += 10
             else:
                 p_score += 4
         else:
-            p_reasons.append(f"Pennant forming after +{pennant['pole_move_pct']}% move, resistance at ₹{pennant['resistance']}")
+            p_reasons.append(f"Near Res ₹{pennant['resistance']}")
 
         candidates.append({
             "type_key": "pennant",
@@ -840,7 +867,7 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     # Pre-breakout: If LTP has crossed the buy trigger, it's a confirmed breakout
     if status == "pre_breakout_watch" and live_price >= buy_price:
         status = "confirmed"
-        reasons.append(f"Price crossed above buy trigger ₹{buy_price} (Breakout confirmed)")
+        reasons.append(f"Triggered > ₹{buy_price}")
         score += 18
 
     # For watch alerts, drop if trigger is more than 10% away
@@ -850,7 +877,7 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     confidence = min(round(score), 95)
 
     # ── STRICT FILTER: Show confirmation stocks ONLY above 60% confidence ──
-    if status == "confirmed" and confidence < 60:
+    if status == "confirmed" and ((best_pattern_type == "channel" and confidence < 80) or confidence < 60):
         return None
 
     expected_breakout_date = "Today / already triggered" if status == "confirmed" else \
@@ -869,4 +896,5 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         "risk_reward": f"1:{rr}",
         "confidence": confidence,
         "expected_breakout_date": expected_breakout_date,
+        "breakout_candle_date": best.get("breakout_candle_date") or (best_pattern.get("breakout_candle_date") if isinstance(best_pattern, dict) else None),
     }

@@ -229,7 +229,7 @@ main { padding: 22px 26px; max-width: 1750px; margin: 0 auto; }
   margin-bottom: 16px;
 }
 .disclaimer {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--muted);
   margin-bottom: 18px;
   padding: 9px 14px;
@@ -314,13 +314,18 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   letter-spacing: 0.01em;
 }
 .reasons {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--muted2);
-  max-width: 230px;
+  max-width: 260px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: normal;
-  line-height: 1.45;
+  line-height: 1.35;
 }
-.reasons div { margin-bottom: 3px; }
+.reasons div { margin-bottom: 0; }
 
 /* Numbers in mono font */
 .alert-ltp, td:has(.alert-ltp) {
@@ -1348,6 +1353,25 @@ async function fetchAndDrawPattern(sym, tf='daily') {
       }
     }
 
+    let breakoutDate = (currentAlertInfo && currentAlertInfo.breakout_candle_date) || (pats.channel && pats.channel.breakout_candle_date);
+    if (!breakoutDate) {
+      for (const k of ORDER) {
+        if (pats[k] && pats[k].breakout_candle_date) { breakoutDate = pats[k].breakout_candle_date; break; }
+      }
+    }
+    if (breakoutDate && candleSeries) {
+      try {
+        candleSeries.setMarkers([{
+          time: breakoutDate,
+          position: 'aboveBar',
+          color: '#10d07a',
+          shape: 'arrowDown',
+          text: '🚀 Breakout Candle (' + breakoutDate + ')',
+          size: 2
+        }]);
+      } catch(_) {}
+    }
+
     if (patLabel) {
       document.getElementById('patternLegend').innerHTML =
         `<div class="pat-legend">📐 ${patLabel} (${tf === 'daily' ? 'Daily' : 'Weekly'})</div>`;
@@ -1375,6 +1399,7 @@ function clearPatternLines() {
     try { chartObj?.removeSeries(s); } catch(_) {}
   }
   patternLineSeries = [];
+  if (candleSeries) { try { candleSeries.setMarkers([]); } catch(_) {} }
   document.getElementById('patternLegend').innerHTML = '';
 }
 
@@ -1582,7 +1607,8 @@ function setAF(key) {
 
 function applyAF() {
   const fn = r => {
-    if (r.status === 'confirmed' && (r.confidence || 0) < 60) return false;
+    const isCh = (r.strategy_used || '').toLowerCase().includes('channel');
+    if (r.status === 'confirmed' && (r.confidence || 0) < (isCh ? 80 : 60)) return false;
     if (activeAF === 'all') return true;
     if (activeAF === 'midcap') return !!r.is_midcap;
     return pKey(r.strategy_used) === activeAF;
@@ -1598,10 +1624,11 @@ function applyAF() {
 }
 
 function updatePFC(confirmed, watch) {
-  const all = [...confirmed, ...watch];
+  const vConf = confirmed.filter(r => (r.confidence||0) >= ((r.strategy_used||'').toLowerCase().includes('channel') ? 80 : 60));
+  const all = [...vConf, ...watch];
   document.getElementById('pfc-all').textContent = all.length;
   document.getElementById('sfc-all').textContent = all.length;
-  document.getElementById('sfc-confirmed').textContent = confirmed.length;
+  document.getElementById('sfc-confirmed').textContent = vConf.length;
   document.getElementById('sfc-watch').textContent = watch.length;
   Object.keys(PK).forEach(k => { const el=document.getElementById('pfc-'+k); if(el) el.textContent='0'; });
   const midEl = document.getElementById('pfc-midcap');
@@ -1609,6 +1636,16 @@ function updatePFC(confirmed, watch) {
   const cnts = {};
   all.forEach(r => { const k=pKey(r.strategy_used); cnts[k]=(cnts[k]||0)+1; });
   Object.entries(cnts).forEach(([k,v]) => { const el=document.getElementById('pfc-'+k); if(el) el.textContent=v; });
+}
+
+function formatReasonShort(reasons) {
+  if (!reasons || !reasons.length) return '—';
+  const clean = reasons.map(x => String(x).replace(/^•\s*/, '').trim()).filter(Boolean);
+  let text = clean.join(' • ');
+  if (text.length > 100) {
+    text = text.slice(0, 97).trim() + '…';
+  }
+  return text;
 }
 
 function renderAlerts(rows, tf='daily') {
@@ -1624,13 +1661,14 @@ function renderAlerts(rows, tf='daily') {
       sl:  r.stop_loss,
       tgt: r.target1,
       strategy: r.strategy_used || '',
-      timeframe: tf
+      timeframe: tf,
+      breakout_candle_date: r.breakout_candle_date || null
     }));
     return `<tr data-sym="${r.symbol}">
     <td class="sym click-sym" onclick="openChart('${r.symbol}','${al}')" title="Click to view chart"><span class="sym-name">${r.symbol}</span>${r.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
     <td class="alert-ltp">₹${fmt(r.ltp)}</td>
     <td><span class="badge ${bClass(r.strategy_used)}">${r.strategy_used}</span></td>
-    <td class="reasons">${r.reasons.map(x=>`<div>• ${x}</div>`).join('')}</td>
+    <td class="reasons" title="${(r.reasons||[]).join(' • ')}">${formatReasonShort(r.reasons)}</td>
     <td class="buy-c">₹${fmt(r.buy_price)}${r.status==='pre_breakout_watch'?`<br><span style="font-size:10px;color:#2ecc71;font-weight:700;">▲ ${((r.buy_price-r.ltp)/r.ltp*100).toFixed(2)}% away</span>`:''}</td>
     <td class="sl-c">₹${fmt(r.stop_loss)}</td>
     <td>₹${fmt(r.target1)}</td>
@@ -1721,7 +1759,8 @@ function setWeeklyAF(key) {
 
 function applyWeeklyAF() {
   const fn = r => {
-    if (r.status === 'confirmed' && (r.confidence || 0) < 60) return false;
+    const isCh = (r.strategy_used || '').toLowerCase().includes('channel');
+    if (r.status === 'confirmed' && (r.confidence || 0) < (isCh ? 80 : 60)) return false;
     if (activeWeeklyAF === 'all') return true;
     if (activeWeeklyAF === 'midcap') return !!r.is_midcap;
     return pKey(r.strategy_used) === activeWeeklyAF;
@@ -1737,10 +1776,11 @@ function applyWeeklyAF() {
 }
 
 function updateWeeklyPFC(confirmed, watch) {
-  const all = [...confirmed, ...watch];
+  const vConf = confirmed.filter(r => (r.confidence||0) >= ((r.strategy_used||'').toLowerCase().includes('channel') ? 80 : 60));
+  const all = [...vConf, ...watch];
   document.getElementById('wpfc-all').textContent = all.length;
   document.getElementById('wsfc-all').textContent = all.length;
-  document.getElementById('wsfc-confirmed').textContent = confirmed.length;
+  document.getElementById('wsfc-confirmed').textContent = vConf.length;
   document.getElementById('wsfc-watch').textContent = watch.length;
   Object.keys(PK).forEach(k => { const el=document.getElementById('wpfc-'+k); if(el) el.textContent='0'; });
   const midEl = document.getElementById('wpfc-midcap');
