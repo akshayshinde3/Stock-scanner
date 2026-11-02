@@ -2,8 +2,8 @@
 Swing Trading Scanner — Upstox Edition
 ----------------------------------------
 Runs locally on your PC. Logs into your Upstox account (OAuth),
-polls your watchlist during market hours, evaluates 3 swing-trading
-pattern strategies (Triangle, Darvas Box, Pennant), and shows live
+polls your watchlist during market hours, evaluates swing-trading
+pattern strategies (Descending Channel, Triangle, Pennant), and shows live
 BUY signals on a dashboard at http://localhost:5000.
 Free push notifications via ntfy.sh.
 
@@ -35,12 +35,10 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # CONFIG & TIMEZONE
 # ---------------------------------------------------------------------------
-# Optional: free NewsAPI.org key for headline-based news filter (leave blank to skip)
 NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
-# Optional: website security password to lock the dashboard. If empty, the site is unprotected.
 SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "")
 
-POLL_INTERVAL_SECONDS = 180         # how often to re-scan (Nifty 500 is heavy — keep this >= 120s)
+POLL_INTERVAL_SECONDS = 180         # how often to re-scan
 MARKET_OPEN = dt.time(9, 15)
 MARKET_CLOSE = dt.time(15, 30)
 
@@ -52,8 +50,8 @@ def get_ist_now():
     return dt.datetime.now(dt.timezone.utc).astimezone(IST_TZ)
 
 # Liquidity filter: skip stocks whose 20-day average daily turnover (price * volume)
-# is below this, in INR crore. Filters out illiquid names prone to false breakouts.
-MIN_AVG_DAILY_TURNOVER_CR = 5
+# is below this, in INR crore.
+MIN_AVG_DAILY_TURNOVER_CR = 1.0
 
 NIFTY500_URL = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
 
@@ -66,7 +64,7 @@ MIDCAP100_SYMBOLS = {
     "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "TATAELXSI", "KPITTECH", 
     "CYIENT", "SONACOMS", "SUNDRMFAST", "SCHAEFFLER", "SKFINDIA", "AIAENG", 
     "CUMMINSIND", "THERMAX", "OBEROIRLTY", "PHOENIXLTD", "PRESTIGE", "BRIGADE", 
-    "GODREJPROP", "CONCOR", "GMRINFRA", "ABCAPITAL", "MFSL", "L&TFH", "CHOLAFIN", 
+    "GODREJPROP", "CONCOR", "GMRAIRPORT", "ABCAPITAL", "MFSL", "L&TFH", "CHOLAFIN", 
     "POONAWALLA", "SHRIRAMFIN", "MUTHOOTFIN", "MANAPPURAM", "CANFINHOME", "LICHSGFIN", 
     "HUDCO", "PETRONET", "GUJGASLTD", "IGL", "MGL", "OIL", "CASTROLIND", 
     "DEEPAKNTR", "TATACHEM", "PIIND", "UPL", "COROMANDEL", "CHAMBLFERT", "GNFC", 
@@ -86,7 +84,6 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
 NTFY_ENABLED = os.environ.get("NTFY_ENABLED", "false").lower() == "true"
 NTFY_SERVER = "https://ntfy.sh"
 
-# Track which alerts have already been notified (avoid duplicates)
 _notified_alerts = set()
 
 
@@ -136,7 +133,6 @@ def notify_new_alerts(confirmed_alerts, watch_alerts):
         if send_ntfy_notification(title, message, priority="high", tags=["chart_with_upwards_trend", "money_bag"]):
             _notified_alerts.add(alert_key)
 
-    # Also notify high-confidence watch signals (confidence >= 50)
     for alert in watch_alerts:
         if alert.get("confidence", 0) < 50:
             continue
@@ -159,7 +155,7 @@ def notify_new_alerts(confirmed_alerts, watch_alerts):
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-# In-memory state (single-user local app — no DB needed)
+# In-memory state
 STATE = {
     "universe": [],           # Nifty 500 symbols being scanned
     "confirmed_alerts": [],   # breakouts that already triggered
@@ -167,19 +163,16 @@ STATE = {
     "weekly_confirmed_alerts": [], # weekly breakouts
     "weekly_watch_alerts": [],     # weekly pre-breakout candidates
     "last_scan": None,
-    "scan_progress": None,    # "120/500" while warming the candle cache
+    "scan_progress": None,
     "scanning": False,
     "error": None,
 }
 
-
-# Exclude known dummy / test / delisted ticker symbols from the NSE constituent list
-EXCLUDE_SYMBOLS = {"DUMMYHEG", "BAGMANE"}
+# Exclude known dummy / test / delisted ticker symbols
+EXCLUDE_SYMBOLS = {"DUMMYHEG", "BAGMANE", "ISEC"}
 
 
 def load_nifty500_symbols():
-    """Fetch the Nifty 500 constituent list. Prioritizes local nifty500.txt for instant
-    startup without cloud IP blocking, falling back to NSE or candle_cache."""
     path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
     if os.path.exists(path):
         try:
@@ -190,14 +183,13 @@ def load_nifty500_symbols():
         except Exception as e:
             app.logger.warning(f"Error reading nifty500.txt: {e}")
 
-    # Fallback to NSE if nifty500.txt is missing
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept": "text/csv"}
         r = requests.get(NIFTY500_URL, headers=headers, timeout=3)
         r.raise_for_status()
         lines = r.text.splitlines()
         symbols = []
-        for line in lines[1:]:  # skip header row
+        for line in lines[1:]:
             parts = line.split(",")
             if len(parts) >= 3:
                 s = parts[2].strip().upper()
@@ -208,7 +200,6 @@ def load_nifty500_symbols():
     except Exception as e:
         app.logger.warning(f"Could not fetch live Nifty 500 list from NSE ({e}); checking cache fallback.")
 
-    # Check if candle cache file on disk has symbols
     if os.path.exists(CANDLE_CACHE_FILE):
         try:
             with gzip.open(CANDLE_CACHE_FILE, "rt", encoding="utf-8") as f:
@@ -260,7 +251,6 @@ def logout():
 
 @app.route("/favicon.ico")
 def favicon():
-    """Suppress browser 404 noise — we don't serve a favicon file."""
     return "", 204
 
 
@@ -286,7 +276,6 @@ def save_env_keys(newsapi_key, site_password=None):
     if site_password is not None:
         SITE_PASSWORD = site_password
 
-    # Save to .env file (preserving notification settings)
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     with open(env_path, "w") as f:
         f.write(f"NEWSAPI_KEY={NEWSAPI_KEY}\n")
@@ -311,7 +300,6 @@ def update_settings():
 
     try:
         save_env_keys(newsapi_key, site_password)
-        # Authenticate current session if password matches or is disabled
         if site_password:
             session["authenticated"] = True
         else:
@@ -322,7 +310,7 @@ def update_settings():
 
 
 # ---------------------------------------------------------------------------
-# Data fetch helpers (Yahoo Finance)
+# Data fetch helpers (Yahoo Finance & Direct Chart API)
 # ---------------------------------------------------------------------------
 SYMBOL_MAP = {
     "MCDOWELL-N": "UNITDSPR",
@@ -330,6 +318,16 @@ SYMBOL_MAP = {
     "CADILAHC": "ZYDUSLIFE",
     "MINDTREE": "LTIM",
     "TATAMTRDVR": "TATAMOTORS",
+    "KALPATPOWR": "KPIL",
+    "GMRINFRA": "GMRAIRPORT",
+    "MAHINDCIE": "CIEINDIA",
+    "TBOEK": "TBOTEK",
+    "NIPPON": "NAM-INDIA",
+    "ARCHIAN": "ACI",
+    "VENKYS": "VENKEYS",
+    "AEGISCHEM": "AEGISLOG",
+    "CAPL": "CAPLIPOI",
+    "ISEC": "PVRINOX",
 }
 
 _yf_session = None
@@ -358,7 +356,60 @@ def reset_yf_session():
     return get_yf_session()
 
 
+def fetch_candles_via_chart_api(symbol, period="1y"):
+    """Fetch 1y daily OHLCV candles via Yahoo v8 Chart API (no crumb / quoteSummary errors)."""
+    mapped_sym = SYMBOL_MAP.get(symbol.upper(), symbol.upper())
+    ticker = f"{mapped_sym}.NS"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={period}&interval=1d"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://finance.yahoo.com"
+    }
+    try:
+        session = get_yf_session()
+        resp = session.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        chart = data.get("chart", {})
+        result = chart.get("result")
+        if not result or not result[0]:
+            return []
+        quote = result[0]
+        timestamps = quote.get("timestamp", [])
+        indicators = quote.get("indicators", {})
+        quote_list = indicators.get("quote", [{}])
+        if not quote_list:
+            return []
+        quote_data = quote_list[0]
+        opens = quote_data.get("open", [])
+        highs = quote_data.get("high", [])
+        lows = quote_data.get("low", [])
+        closes = quote_data.get("close", [])
+        volumes = quote_data.get("volume", [])
+
+        candles = []
+        for i in range(len(timestamps)):
+            c = closes[i] if i < len(closes) else None
+            if c is None:
+                continue
+            t = dt.datetime.fromtimestamp(timestamps[i], tz=IST_TZ).strftime("%Y-%m-%dT00:00:00+05:30")
+            o = opens[i] if i < len(opens) and opens[i] is not None else c
+            h = highs[i] if i < len(highs) and highs[i] is not None else c
+            l = lows[i] if i < len(lows) and lows[i] is not None else c
+            v = volumes[i] if i < len(volumes) and volumes[i] is not None else 0
+            candles.append([t, round(float(o), 2), round(float(h), 2), round(float(l), 2), round(float(c), 2), int(v), 0])
+        return candles
+    except Exception:
+        return []
+
+
 def get_daily_candles(symbol, days=365):
+    # Fast direct chart API first
+    candles = fetch_candles_via_chart_api(symbol, "1y")
+    if candles:
+        return candles
+
     mapped_sym = SYMBOL_MAP.get(symbol.upper(), symbol.upper())
     ticker_symbol = f"{mapped_sym}.NS"
     try:
@@ -377,10 +428,10 @@ def get_daily_candles(symbol, days=365):
             df = df.xs(ticker_symbol, axis=1, level=1)
         df = df.dropna(subset=["Close"])
         
-        candles = []
+        res_candles = []
         for index, row in df.iterrows():
             ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-            candles.append([
+            res_candles.append([
                 ts,
                 float(row["Open"]),
                 float(row["High"]),
@@ -389,7 +440,7 @@ def get_daily_candles(symbol, days=365):
                 int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
                 0
             ])
-        return candles
+        return res_candles
     except Exception as e:
         app.logger.warning(f"Error fetching daily candles for {symbol}: {e}")
         if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
@@ -398,9 +449,7 @@ def get_daily_candles(symbol, days=365):
 
 
 def resample_daily_to_weekly(daily_candles):
-    """Instantly converts daily candles into weekly candles in memory.
-    Zero network latency — runs in ~0.0001 seconds per symbol.
-    """
+    """Instantly converts daily candles into weekly candles in memory."""
     if not daily_candles or len(daily_candles) < 5:
         return []
 
@@ -413,7 +462,7 @@ def resample_daily_to_weekly(daily_candles):
         except Exception:
             continue
         cal = d.isocalendar()
-        key = (cal[0], cal[1])  # (year, week_num)
+        key = (cal[0], cal[1])
 
         if key not in weeks:
             weeks[key] = {
@@ -461,7 +510,7 @@ def get_weekly_candles(symbol, weeks=120):
 
 
 def get_yfinance_quotes(symbols):
-    """Fetch current price, net change, change percentage, and volume for a list of symbols in bulk."""
+    """Fetch current price, net change, change percentage, and volume for symbols in bulk."""
     if not symbols:
         return {}
     
@@ -523,19 +572,15 @@ def merge_candles(existing_candles, new_candles):
     return [candle_dict[d] for d in sorted_dates]
 
 
-# ---------------------------------------------------------------------------
-# Liquidity filter — skip stocks too thin to trade cleanly
-# ---------------------------------------------------------------------------
 def passes_liquidity_filter(candles):
     if len(candles) < 20:
         return False
-    turnovers = [c[4] * c[5] for c in candles[-20:]]  # close * volume, in INR
-    avg_turnover_cr = (sum(turnovers) / len(turnovers)) / 1e7  # convert to crore
+    turnovers = [c[4] * c[5] for c in candles[-20:]]
+    avg_turnover_cr = (sum(turnovers) / len(turnovers)) / 1e7
     return avg_turnover_cr >= MIN_AVG_DAILY_TURNOVER_CR
 
 
 def evaluate_symbol(symbol, candles, live_ltp):
-    """Liquidity gate, then hand off to the enabled chart-pattern scanner."""
     if not passes_liquidity_filter(candles):
         return None
     try:
@@ -545,7 +590,6 @@ def evaluate_symbol(symbol, candles, live_ltp):
 
 
 def evaluate_symbol_weekly(symbol, candles, live_ltp):
-    """Hand off weekly candles to the chart-pattern scanner."""
     if len(candles) < 20:
         return None
     try:
@@ -554,9 +598,7 @@ def evaluate_symbol_weekly(symbol, candles, live_ltp):
         return None
 
 
-
 def get_news_flag(symbol):
-    """Optional: recent news headline count via NewsAPI.org (free tier)."""
     if not NEWSAPI_KEY:
         return None
     try:
@@ -575,10 +617,10 @@ def get_news_flag(symbol):
 # ---------------------------------------------------------------------------
 # Background scanner loop
 # ---------------------------------------------------------------------------
-_candle_cache = {}        # symbol -> candles, refreshed once per calendar day
-_weekly_candle_cache = {}  # symbol -> weekly candles
-_candle_cache_date   = None   # the calendar date on which _candle_cache was last populated
-_weekly_cache_date   = None   # the calendar date on which _weekly_candle_cache was last populated
+_candle_cache = {}
+_weekly_candle_cache = {}
+_candle_cache_date   = None
+_weekly_cache_date   = None
 
 CANDLE_CACHE_FILE = os.path.join(
     "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__)),
@@ -587,7 +629,6 @@ CANDLE_CACHE_FILE = os.path.join(
 
 
 def save_candle_cache_to_disk():
-    """Save daily and weekly candle caches to a compressed disk file (trimmed to keep file size tiny)."""
     try:
         trimmed_daily = {sym: c[-180:] for sym, c in _candle_cache.items()}
         trimmed_weekly = {sym: c[-80:] for sym, c in _weekly_candle_cache.items()}
@@ -605,7 +646,6 @@ def save_candle_cache_to_disk():
 
 
 def load_candle_cache_from_disk():
-    """Load daily and weekly candle caches from disk immediately on start."""
     global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
     if not os.path.exists(CANDLE_CACHE_FILE):
         return
@@ -628,9 +668,7 @@ def load_candle_cache_from_disk():
         app.logger.warning(f"Could not load candle cache from disk: {e}")
 
 
-
 def _maybe_invalidate_candle_cache():
-    """Mark cache updated without throwing away historical bars."""
     global _candle_cache_date, _weekly_cache_date
     today = dt.date.today()
     if _candle_cache_date != today:
@@ -640,7 +678,6 @@ def _maybe_invalidate_candle_cache():
 
 
 def _extract_ticker_df(df, ticker_ns, tickers_ns):
-    """Safely extract a single-ticker DataFrame from a yfinance multi-download result."""
     if df is None or df.empty:
         return None
 
@@ -659,66 +696,67 @@ def _extract_ticker_df(df, ticker_ns, tickers_ns):
 
 
 def _download_batch_daily(batch, period="1y"):
-    """Download daily candles for a batch of symbols and return {sym: candles}."""
+    """Download daily candles for a batch using parallel chart API fetching."""
     if not batch:
         return {}
-    
-    # Map symbols for Yahoo Finance
-    mapped_to_orig = {}
-    tickers_ns = []
-    for sym in batch:
-        m_sym = SYMBOL_MAP.get(sym.upper(), sym.upper())
-        t_ns = f"{m_sym}.NS"
-        mapped_to_orig[t_ns] = sym.upper()
-        tickers_ns.append(t_ns)
 
-    try:
-        session = get_yf_session()
-        df = yf.download(
-            tickers_ns,
-            period=period,
-            interval="1d",
-            ignore_tz=True,
-            progress=False,
-            threads=False,
-            session=session
-        )
-        if df is None or df.empty:
-            return {}
-
-        batch_candles = {}
-        for ticker_ns, sym in mapped_to_orig.items():
+    batch_candles = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_sym = {executor.submit(fetch_candles_via_chart_api, s, period): s for s in batch}
+        for future in as_completed(future_to_sym):
+            sym = future_to_sym[future]
             try:
-                ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
-                if ticker_df is None or ticker_df.empty:
-                    continue
-                ticker_df = ticker_df.dropna(subset=["Close"])
-                candles = []
-                for index, row in ticker_df.iterrows():
-                    ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-                    candles.append([
-                        ts,
-                        float(row["Open"]),
-                        float(row["High"]),
-                        float(row["Low"]),
-                        float(row["Close"]),
-                        int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                        0
-                    ])
-                if candles:
-                    batch_candles[sym] = candles
-            except Exception as e:
-                app.logger.warning(f"Error parsing daily candles for {sym}: {e}")
-        return batch_candles
-    except Exception as e:
-        app.logger.error(f"Error downloading batch ({len(batch)} symbols): {e}")
-        if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
-            reset_yf_session()
-        return {}
+                c = future.result()
+                if c:
+                    batch_candles[sym] = c
+            except Exception:
+                pass
+
+    missing = [s for s in batch if s not in batch_candles]
+    if missing:
+        try:
+            mapped_to_orig = {f"{SYMBOL_MAP.get(sym.upper(), sym.upper())}.NS": sym.upper() for sym in missing}
+            tickers_ns = list(mapped_to_orig.keys())
+            session = get_yf_session()
+            df = yf.download(
+                tickers_ns,
+                period=period,
+                interval="1d",
+                ignore_tz=True,
+                progress=False,
+                threads=False,
+                session=session
+            )
+            if df is not None and not df.empty:
+                for ticker_ns, sym in mapped_to_orig.items():
+                    try:
+                        ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
+                        if ticker_df is None or ticker_df.empty:
+                            continue
+                        ticker_df = ticker_df.dropna(subset=["Close"])
+                        candles = []
+                        for index, row in ticker_df.iterrows():
+                            ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
+                            candles.append([
+                                ts,
+                                float(row["Open"]),
+                                float(row["High"]),
+                                float(row["Low"]),
+                                float(row["Close"]),
+                                int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+                                0
+                            ])
+                        if candles:
+                            batch_candles[sym] = candles
+                    except Exception as e:
+                        app.logger.warning(f"Error parsing daily candles for {sym}: {e}")
+        except Exception:
+            pass
+
+    return batch_candles
 
 
 def warm_cache_for_all_symbols(quick_only=False):
-    """Warms daily candles in controlled sequential batches and instantly derives weekly candles."""
     universe = STATE.get("universe") or []
     if not universe:
         return
@@ -731,7 +769,7 @@ def warm_cache_for_all_symbols(quick_only=False):
 
     if total_missing > 0:
         app.logger.info(f"Warming daily candles for {total_missing} symbols in sequential batches...")
-        batch_size = 60
+        batch_size = 50
         batches = [missing_daily[i:i+batch_size] for i in range(0, total_missing, batch_size)]
         completed = 0
         STATE["scan_progress"] = f"0/{total_missing}"
@@ -745,12 +783,11 @@ def warm_cache_for_all_symbols(quick_only=False):
             STATE["scan_progress"] = f"{min(completed, total_missing)}/{total_missing}"
             _evaluate_all_symbols()
             if len(batches) > 1:
-                time.sleep(0.5)
+                time.sleep(0.3)
 
         save_candle_cache_to_disk()
         app.logger.info("Finished warming daily & weekly candles.")
     else:
-        # Ensure weekly candles are generated in memory
         for sym in target_symbols:
             if sym not in _weekly_candle_cache and sym in _candle_cache:
                 _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
@@ -759,14 +796,9 @@ def warm_cache_for_all_symbols(quick_only=False):
 def is_market_open():
     """True if Indian stock market is open: Mon-Fri, 9:15 AM to 3:30 PM IST."""
     now_ist = get_ist_now()
-    if now_ist.weekday() >= 5:  # Saturday = 5, Sunday = 6
+    if now_ist.weekday() >= 5:
         return False
     return MARKET_OPEN <= now_ist.time() <= MARKET_CLOSE
-
-
-def chunked(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
 
 
 def _evaluate_all_symbols():
@@ -786,7 +818,12 @@ def _evaluate_all_symbols():
             if res:
                 res["timestamp"] = ist_time_str
                 res["is_midcap"] = sym in MIDCAP100_SYMBOLS
-                (confirmed if res["status"] == "confirmed" else watch).append(res)
+                if res["status"] == "confirmed":
+                    # STRICT RULE: Confirmation stock ONLY above 60%
+                    if res.get("confidence", 0) >= 60:
+                        confirmed.append(res)
+                else:
+                    watch.append(res)
                 
             if passes_liquidity_filter(candles):
                 w_candles = _weekly_candle_cache.get(sym)
@@ -796,7 +833,11 @@ def _evaluate_all_symbols():
                     if w_res:
                         w_res["timestamp"] = ist_time_str
                         w_res["is_midcap"] = sym in MIDCAP100_SYMBOLS
-                        (w_confirmed if w_res["status"] == "confirmed" else w_watch).append(w_res)
+                        if w_res["status"] == "confirmed":
+                            if w_res.get("confidence", 0) >= 60:
+                                w_confirmed.append(w_res)
+                        else:
+                            w_watch.append(w_res)
 
     STATE["confirmed_alerts"] = sorted(confirmed, key=lambda x: -x["confidence"])
     STATE["watch_alerts"] = sorted(watch, key=lambda x: -x["confidence"])
@@ -810,13 +851,12 @@ _latest_synced_date = None
 
 
 def sync_latest_daily_candles(symbols=None):
-    """Fetch latest 5-day candles for symbols and merge into cache using sequential pacing."""
     global _latest_synced_date
     target_symbols = symbols or STATE.get("universe") or []
     if not target_symbols:
         return
     app.logger.info(f"Syncing live daily candles for {len(target_symbols)} symbols...")
-    batch_size = 60
+    batch_size = 50
     batches = [target_symbols[i:i+batch_size] for i in range(0, len(target_symbols), batch_size)]
 
     for b in batches:
@@ -828,7 +868,7 @@ def sync_latest_daily_candles(symbols=None):
                 _candle_cache[sym] = new_candles
             _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
         if len(batches) > 1:
-            time.sleep(0.4)
+            time.sleep(0.3)
 
     _latest_synced_date = get_ist_now().date()
     save_candle_cache_to_disk()
@@ -838,10 +878,8 @@ def scan_loop():
     global _latest_synced_date
     STATE["scanning"] = True
 
-    # Try to load cache from disk at startup
     load_candle_cache_from_disk()
 
-    # Fast initial evaluation from disk cache if available
     if _candle_cache:
         try:
             _evaluate_all_symbols()
@@ -863,14 +901,11 @@ def scan_loop():
             market_open = is_market_open()
             STATE["error"] = None
 
-            # 1. Warm missing daily & weekly candles (top liquid stocks show up in ~5s!)
             warm_cache_for_all_symbols()
 
-            # 2. If market is open, sync live 5-day candles in parallel
             if market_open:
                 sync_latest_daily_candles()
 
-            # 3. Final evaluation pass
             confirmed, watch, w_confirmed, w_watch = _evaluate_all_symbols()
             STATE["scan_progress"] = None
 
@@ -941,10 +976,6 @@ def api_news(symbol):
 
 @app.route("/api/ltp")
 def api_ltp():
-    """Lightweight real-time LTP endpoint for dashboard price tickers.
-    Usage: GET /api/ltp?symbols=RELIANCE,TCS,INFY
-    Returns: { "RELIANCE": { "ltp": 1303.6, "change_pct": 0.82, "volume": 2548273 }, ... }
-    """
     raw_symbols = request.args.get("symbols", "")
     symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
     if not symbols:
@@ -1030,8 +1061,7 @@ def api_stocks():
 def api_stocks_52w():
     """
     Return all Nifty 500 stocks within 5% of their 52-week high,
-    identifying 52W Box Breakouts and Midcap 100 stocks.
-    Sorted by proximity ascending (breaking out / nearest 52W high at the top).
+    identifying 52W Box Breakouts, Descending Channels, and Midcap 100 stocks.
     """
     universe = STATE.get("universe") or []
     alert_map = {}
@@ -1066,7 +1096,6 @@ def api_stocks_52w():
         change_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close else 0.0
 
         if dist_pct <= 5.0:
-            # Detect Box Breakout / 52W Box Consolidation
             is_box = False
             box_label = ""
             box_top = high_52w
@@ -1088,6 +1117,14 @@ def api_stocks_52w():
             existing_pattern = alert_map.get(sym, {}).get("pattern", "")
             existing_status = alert_map.get(sym, {}).get("status", "")
             existing_conf = alert_map.get(sym, {}).get("confidence", 0)
+
+            # Check descending channel if not already in alert map
+            if not existing_pattern:
+                ch = strategies.detect_descending_channel(candles, timeframe="daily", live_price=ltp)
+                if ch:
+                    existing_pattern = "Descending Channel"
+                    existing_status = ch["status"]
+                    existing_conf = 78 if ch["status"] == "confirmed" else 62
 
             final_pattern = existing_pattern if existing_pattern else (box_label if box_label else "52W High")
             final_status = existing_status if existing_status else ("confirmed" if (dist_pct <= 0.5 or (is_box and ltp >= box_top * 0.995)) else "watch")
@@ -1125,7 +1162,6 @@ def api_stocks_52w():
 
 
 def get_or_fetch_candles(symbol):
-    """Get candles from cache or fetch on-demand if not loaded yet."""
     _maybe_invalidate_candle_cache()
     sym = symbol.upper()
     candles = _candle_cache.get(sym)
@@ -1139,7 +1175,6 @@ def get_or_fetch_candles(symbol):
 
 
 def get_or_fetch_weekly_candles(symbol):
-    """Get weekly candles from cache or fetch on-demand if not loaded yet."""
     _maybe_invalidate_candle_cache()
     sym = symbol.upper()
     candles = _weekly_candle_cache.get(sym)
@@ -1152,12 +1187,8 @@ def get_or_fetch_weekly_candles(symbol):
     return candles
 
 
-# ---------------------------------------------------------------------------
-# Cache management & Force Rescan endpoints
-# ---------------------------------------------------------------------------
 @app.route("/api/scan/quick", methods=["POST"])
 def api_scan_quick():
-    """Trigger a fast scan of the top 100 liquid stocks (takes ~5 seconds)."""
     def do_quick_scan():
         STATE["scan_progress"] = "Quick Scan (100)..."
         universe = STATE.get("universe") or []
@@ -1175,19 +1206,17 @@ def api_scan_quick():
 
 @app.route("/api/scan/force", methods=["POST"])
 def api_scan_force():
-    """Trigger an immediate re-scan and fetch fresh candle data."""
     mode = request.args.get("mode", "full")
     if mode == "quick":
         return api_scan_quick()
     global _latest_synced_date
-    _latest_synced_date = None  # reset to force candle sync
-    _scan_event.set()           # wake up the scan loop immediately
+    _latest_synced_date = None
+    _scan_event.set()
     return jsonify({"success": True, "message": "Full scan triggered immediately."})
 
 
 @app.route("/api/cache/clear", methods=["POST"])
 def api_clear_cache():
-    """Force-clear the candle cache so fresh data is fetched on next request."""
     global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
     count = len(_candle_cache) + len(_weekly_candle_cache)
     _candle_cache.clear()
@@ -1198,12 +1227,8 @@ def api_clear_cache():
     return jsonify({"success": True, "cleared_symbols": count})
 
 
-# ---------------------------------------------------------------------------
-# Chart data endpoint
-# ---------------------------------------------------------------------------
 @app.route("/api/candles/<symbol>")
 def api_candles(symbol):
-    """Return OHLCV candle data for a symbol so the frontend can render a chart."""
     sym = symbol.upper()
     candles = get_or_fetch_candles(sym)
     if not candles:
@@ -1227,7 +1252,6 @@ def api_candles(symbol):
 
 @app.route("/api/candles/<symbol>/weekly")
 def api_candles_weekly(symbol):
-    """Return OHLCV weekly candle data for a symbol so the frontend can render a weekly chart."""
     sym = symbol.upper()
     candles = get_or_fetch_weekly_candles(sym)
     if not candles:
@@ -1249,7 +1273,6 @@ def api_candles_weekly(symbol):
     return jsonify({"symbol": sym, "candles": result})
 
 
-
 # ---------------------------------------------------------------------------
 # Pattern geometry endpoint — returns trendline data for chart drawing
 # ---------------------------------------------------------------------------
@@ -1258,14 +1281,12 @@ def api_pattern(symbol):
     """
     Re-runs all pattern detectors on cached candles and returns geometric
     drawing data so the frontend can overlay trendlines on the chart.
-    Each pattern returns point arrays as [{time:'YYYY-MM-DD', value:N}, ...].
     """
     sym = symbol.upper()
     candles = get_or_fetch_candles(sym)
     if not candles:
         return jsonify({"error": "No candle data"}), 404
 
-    # Use the same 120-candle window that the chart shows
     window = candles[-120:]
     dates = []
     for c in window:
@@ -1276,13 +1297,32 @@ def api_pattern(symbol):
     patterns = {}
 
     def trendline_pts(slope, intercept, x_start, x_end, bar_offset=0):
-        """Two-point line segment: start and end of the pattern window."""
         pts = []
         for xi in (x_start, x_end):
             idx = bar_offset + xi
             if 0 <= idx < len(dates):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
+
+    # ── DESCENDING CHANNEL ───────────────────────────────────────────────────
+    try:
+        ch = strategies.detect_descending_channel(candles, timeframe="daily")
+        if ch:
+            LOOKBACK = ch.get("lookback", 30)
+            off = n - LOOKBACK
+            lx = LOOKBACK - 1
+            res_line = trendline_pts(ch["res_slope"], ch["res_intercept"], 0, lx, off)
+            sup_line = trendline_pts(ch["sup_slope"], ch["sup_intercept"], 0, lx, off)
+            patterns["channel"] = {
+                "type": ch["type"],
+                "resistance_line": res_line,
+                "support_line": sup_line,
+                "resistance_level": ch["resistance_now"],
+                "support_level": ch["support_now"],
+                "channel_height": ch["channel_height"],
+            }
+    except Exception:
+        pass
 
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
@@ -1298,28 +1338,16 @@ def api_pattern(symbol):
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
             res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
-            sup_line = trendline_pts(0, tri["support_now"], 0, lx, off) if tri["type"] == "Descending Triangle" else trendline_pts(ss, si_, 0, lx, off)
+            sup_line = trendline_pts(ss, si_, 0, lx, off)
             patterns["triangle"] = {
                 "type": tri["type"],
                 "resistance_line": res_line,
                 "support_line":    sup_line,
                 "resistance_level": tri["resistance_now"],
                 "support_level":    tri["support_now"],
-                "swing_highs": [{"time": dates[off + p[0]], "value": round(p[1], 2)}
-                                 for p in sh if 0 <= off + p[0] < len(dates)],
-                "swing_lows":  [{"time": dates[off + p[0]], "value": round(p[1], 2)}
-                                 for p in sl_ if 0 <= off + p[0] < len(dates)],
             }
     except Exception:
         pass
-
-
-
-
-
-
-
-
 
     # ── PENNANT ───────────────────────────────────────────────────────────────
     try:
@@ -1329,7 +1357,7 @@ def api_pattern(symbol):
             pole_si, pole_ei, consol_si = 0, 0, 0
             for i in range(max(0, n - 25), n - 8):
                 move = (closes[i + 8] - closes[i]) / closes[i] * 100
-                if move >= 8.0:
+                if move >= 6.0:
                     pole_si   = i
                     pole_ei   = i + 8
                     consol_si = pole_ei
@@ -1363,15 +1391,13 @@ def api_pattern(symbol):
 def api_pattern_weekly(symbol):
     """
     Re-runs all pattern detectors on cached weekly candles and returns geometric
-    drawing data so the frontend can overlay trendlines on the weekly chart.
-    Each pattern returns point arrays as [{time:'YYYY-MM-DD', value:N}, ...].
+    drawing data for weekly chart overlays.
     """
     sym = symbol.upper()
     candles = get_or_fetch_weekly_candles(sym)
     if not candles:
         return jsonify({"error": "No candle data"}), 404
 
-    # Use the same 120-candle window that the chart shows
     window = candles[-120:]
     dates = []
     for c in window:
@@ -1382,7 +1408,6 @@ def api_pattern_weekly(symbol):
     patterns = {}
 
     def trendline_pts(slope, intercept, x_start, x_end, bar_offset=0):
-        """Two-point line segment: start and end of the pattern window."""
         pts = []
         for xi in (x_start, x_end):
             idx = bar_offset + xi
@@ -1390,7 +1415,27 @@ def api_pattern_weekly(symbol):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
 
-    # ── TRIANGLE ─────────────────────────────────────────────────────────────
+    # ── DESCENDING CHANNEL WEEKLY ────────────────────────────────────────────
+    try:
+        ch = strategies.detect_descending_channel(candles, timeframe="weekly")
+        if ch:
+            LOOKBACK = ch.get("lookback", 20)
+            off = n - LOOKBACK
+            lx = LOOKBACK - 1
+            res_line = trendline_pts(ch["res_slope"], ch["res_intercept"], 0, lx, off)
+            sup_line = trendline_pts(ch["sup_slope"], ch["sup_intercept"], 0, lx, off)
+            patterns["channel"] = {
+                "type": ch["type"],
+                "resistance_line": res_line,
+                "support_line": sup_line,
+                "resistance_level": ch["resistance_now"],
+                "support_level": ch["support_now"],
+                "channel_height": ch["channel_height"],
+            }
+    except Exception:
+        pass
+
+    # ── TRIANGLE WEEKLY ──────────────────────────────────────────────────────
     try:
         tri = strategies.detect_triangle(candles, timeframe="weekly")
         if tri:
@@ -1404,7 +1449,7 @@ def api_pattern_weekly(symbol):
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
             res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
-            sup_line = trendline_pts(0, tri["support_now"], 0, lx, off) if tri["type"] == "Descending Triangle" else trendline_pts(ss, si_, 0, lx, off)
+            sup_line = trendline_pts(ss, si_, 0, lx, off)
             patterns["triangle"] = {
                 "type": tri["type"],
                 "resistance_line": res_line,
@@ -1415,7 +1460,7 @@ def api_pattern_weekly(symbol):
     except Exception:
         pass
 
-    # ── PENNANT ───────────────────────────────────────────────────────────────
+    # ── PENNANT WEEKLY ───────────────────────────────────────────────────────
     try:
         pennant = strategies.detect_pennant(candles)
         if pennant:
@@ -1423,7 +1468,7 @@ def api_pattern_weekly(symbol):
             pole_si, pole_ei, consol_si = 0, 0, 0
             for i in range(max(0, n - 25), n - 8):
                 move = (closes[i + 8] - closes[i]) / closes[i] * 100
-                if move >= 8.0:
+                if move >= 6.0:
                     pole_si   = i
                     pole_ei   = i + 8
                     consol_si = pole_ei
@@ -1453,7 +1498,6 @@ def api_pattern_weekly(symbol):
     return jsonify({"symbol": sym, "patterns": patterns})
 
 
-
 # ---------------------------------------------------------------------------
 # Notification endpoints (ntfy.sh)
 # ---------------------------------------------------------------------------
@@ -1473,7 +1517,6 @@ def api_notification_settings_save():
     NTFY_TOPIC = d.get("topic", "").strip()
     NTFY_ENABLED = bool(d.get("enabled", False))
 
-    # Persist to .env
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     env_lines = []
     if os.path.exists(env_path):

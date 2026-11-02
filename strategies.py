@@ -1,19 +1,17 @@
 """
-strategies.py — Focused Swing Trading Engine (3 Strategies)
+strategies.py — Focused Swing Trading Engine (Ascending/Symmetrical Triangle, Descending Channel, Pennant)
 
 Implements:
   1.  Triangle pattern  (Ascending / Symmetrical)
-  2.  Pennant pattern  (pole + converging consolidation with volume confirmation)
+  2.  Descending Channel pattern (Two parallel downward sloping trendlines with bullish breakout)
+  3.  Pennant pattern  (pole + converging consolidation with volume confirmation)
 
 All patterns include:
   - Confirmed breakout detection
   - Pre-breakout / watch-list detection
   - Confidence scoring
   - Trade levels (buy, stop-loss, target1, target2)
-
-None of this predicts the future with certainty — it identifies setups
-that historically precede breakouts more often than random price action.
-Treat "confidence score" as setup quality, not a probability of profit.
+  - Strict confidence filter: Confirmed stocks returned ONLY with confidence >= 60%
 """
 
 import datetime as dt
@@ -78,7 +76,7 @@ def ema(values, period):
 
 
 # ---------------------------------------------------------------------------
-# 1. TRIANGLE PATTERNS — Chartink Daily & Weekly Strategies + Geometric Fallback
+# 1. TRIANGLE PATTERNS — Ascending & Symmetrical (Chartink + Geometric Fallback)
 # ---------------------------------------------------------------------------
 FLAT_SLOPE_THRESHOLD = 0.0025       # realistic flat slope threshold (0.25% per day)
 MIN_TOUCHES = 2                     # require ≥2 touches per trendline
@@ -150,42 +148,10 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         range_10_1d < range_10_11d
     )
 
-    # 6. Check CASE C: Descending Triangle (Lower Highs, Flat Horizontal Support, Volume Expansion)
-    # Chartink Formula:
-    # daily max(20, 1d ago high) < daily max(20, 21d ago high)
-    # daily max(20, 21d ago high) < daily max(20, 41d ago high)
-    # daily min(20, 11d ago low) < daily min(20, 31d ago low) * 1.02
-    # daily min(20, 11d ago low) > daily min(20, 31d ago low) * 0.98
-    # daily volume > daily sma(volume, 20) and daily volume > 1d ago volume
-    is_descending = False
-    max_high_20_1d = None
-    min_low_20_11d = None
-    if len(candles) >= 61:
-        max_high_20_1d = max(highs[-21:-1])
-        max_high_20_21d = max(highs[-41:-21])
-        max_high_20_41d = max(highs[-61:-41])
-
-        min_low_20_11d = min(lows[-31:-11])
-        min_low_20_31d = min(lows[-51:-31])
-
-        cur_vol = volumes[-1]
-        prev_vol = volumes[-2] if len(volumes) >= 2 else 0
-
-        lower_highs_desc = (max_high_20_1d < max_high_20_21d) and (max_high_20_21d < max_high_20_41d)
-        flat_support_desc = (min_low_20_11d <= min_low_20_31d * 1.02) and (min_low_20_11d >= min_low_20_31d * 0.98)
-        vol_expansion_desc = (v20 is not None and cur_vol > v20 and cur_vol > prev_vol)
-
-        is_descending = lower_highs_desc and flat_support_desc and vol_expansion_desc
-
-    if not is_ascending and not is_symmetrical and not is_descending:
+    if not is_ascending and not is_symmetrical:
         return None
 
-    if is_descending:
-        triangle_type = "Descending Triangle"
-        res_level = max_high_20_1d
-        sup_level = min_low_20_11d
-        lookback = 60
-    elif is_ascending:
+    if is_ascending:
         triangle_type = "Ascending Triangle"
         res_level = max_high_30_1d
         sup_level = min_low_10_1d
@@ -217,10 +183,9 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         "fit_quality": 0.90,
         "contraction": round(max(0.15, 1 - (range_10_1d / range_10_11d)) if range_10_11d > 0 else 0.25, 2),
         "bars_to_apex": 4,
-        "touches": 4 if (is_ascending or is_descending) else 3,
+        "touches": 4 if is_ascending else 3,
         "status": status,
-        "vol_dry_up": vol_dry_up if not is_descending else False,
-        "vol_expansion": is_descending,
+        "vol_dry_up": vol_dry_up,
         "source": "Chartink Strategy",
         "lookback": lookback,
         "timeframe": "daily",
@@ -283,30 +248,10 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
         range_5_1w < range_5_6w
     )
 
-    # 5. CASE C: Weekly Descending Triangle
-    is_descending = False
-    max_high_10_1w = None
-    min_low_10_6w = None
-    if len(candles) >= 30:
-        max_high_10_1w = max(highs[-11:-1])
-        max_high_10_11w = max(highs[-21:-11])
-        min_low_10_6w = min(lows[-16:-6])
-        min_low_10_16w = min(lows[-26:-16])
-        is_descending = (
-            max_high_10_1w < max_high_10_11w and
-            min_low_10_6w <= min_low_10_16w * 1.025 and
-            min_low_10_6w >= min_low_10_16w * 0.975
-        )
-
-    if not is_ascending and not is_symmetrical and not is_descending:
+    if not is_ascending and not is_symmetrical:
         return None
 
-    if is_descending:
-        triangle_type = "Descending Triangle"
-        res_level = max_high_10_1w
-        sup_level = min_low_10_6w
-        lookback = 30
-    elif is_ascending:
+    if is_ascending:
         triangle_type = "Ascending Triangle"
         res_level = max_high_15_1w
         sup_level = min_low_5_1w
@@ -337,7 +282,7 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
         "fit_quality": 0.92,
         "contraction": round(max(0.15, 1 - (range_5_1w / range_5_6w)) if range_5_6w > 0 else 0.25, 2),
         "bars_to_apex": 4,
-        "touches": 4 if (is_ascending or is_descending) else 3,
+        "touches": 4 if is_ascending else 3,
         "status": status,
         "source": "Chartink Weekly Strategy",
         "lookback": lookback,
@@ -375,15 +320,12 @@ def _detect_triangle_window(candles, lookback=40):
         return None
 
     res_flat = abs(res_slope_norm) < FLAT_SLOPE_THRESHOLD
-    sup_flat = abs(sup_slope_norm) < FLAT_SLOPE_THRESHOLD
 
     triangle_type = None
     if res_flat and sup_slope_norm > 0.0003:
         triangle_type = "Ascending Triangle"
     elif res_slope_norm < -0.0003 and sup_slope_norm > 0.0003:
         triangle_type = "Symmetrical Triangle"
-    elif res_slope_norm < -0.0003 and sup_flat:
-        triangle_type = "Descending Triangle"
     else:
         return None
 
@@ -429,14 +371,6 @@ def _detect_triangle_window(candles, lookback=40):
 
 
 def detect_triangle(candles, timeframe="daily", live_price=None):
-    """
-    Evaluates triangle patterns:
-    1. Primary: Chartink exact formula for Daily and Weekly
-       - Ascending Triangle (Flat resistance tested multiple times with higher lows)
-       - Symmetrical Triangle (Lower highs + higher lows + range contraction)
-       - Volume dry-up (SMA Vol 5 < SMA Vol 20) & EMA trend confirmation
-    2. Secondary: Multi-window geometric regression as fallback
-    """
     if timeframe == "weekly":
         c_res = detect_triangle_chartink_weekly(candles, live_price)
     else:
@@ -445,7 +379,6 @@ def detect_triangle(candles, timeframe="daily", live_price=None):
     if c_res:
         return c_res
 
-    # Fallback to multi-window geometric detection
     best = None
     for lb in [40, 35, 50, 60]:
         res = _detect_triangle_window(candles, lookback=lb)
@@ -456,7 +389,165 @@ def detect_triangle(candles, timeframe="daily", live_price=None):
 
 
 # ---------------------------------------------------------------------------
-# 2. PENNANT STRATEGY — Bullish Pennant with volume spike confirmation
+# 2. DESCENDING CHANNEL STRATEGY — Parallel Downward Trendlines with Breakout
+# ---------------------------------------------------------------------------
+def _detect_channel_window(candles, lookback, timeframe="daily", live_price=None):
+    """
+    Detects a Descending Channel over a window:
+    - Upper Resistance Trendline connects Lower Highs (LH): negative slope.
+    - Lower Support Trendline connects Lower Lows (LL): negative slope.
+    - Two trendlines are roughly parallel.
+    - Confirmed Breakout: price breaks above upper resistance with volume expansion.
+    - Pre-Breakout Watch: price testing upper resistance near breakout zone.
+    """
+    if len(candles) < lookback:
+        return None
+
+    window = candles[-lookback:]
+    highs = [c[2] for c in window]
+    lows = [c[3] for c in window]
+    closes = [c[4] for c in window]
+    volumes = [c[5] for c in window]
+    avg_price = sum(closes) / len(closes)
+
+    cur_price = live_price if live_price is not None else closes[-1]
+    today_close = closes[-1]
+    today_open = window[-1][1]
+
+    # Find swing highs and swing lows
+    win_param = 2 if lookback <= 30 else 3
+    sh, sl = find_swing_points(highs, lows, window=win_param)
+    if len(sh) < 2 or len(sl) < 2:
+        return None
+
+    # Fit linear regression to swing highs (resistance) and swing lows (support)
+    res_slope, res_intercept, res_r2 = linreg(sh)
+    sup_slope, sup_intercept, sup_r2 = linreg(sl)
+
+    res_slope_norm = res_slope / avg_price
+    sup_slope_norm = sup_slope / avg_price
+
+    # Both slopes MUST be negative (descending channel!)
+    if res_slope_norm >= -0.0002 or sup_slope_norm >= -0.0002:
+        return None
+
+    # Trendlines must be approximately parallel:
+    # Slopes should not diverge sharply:
+    slope_diff = abs(res_slope_norm - sup_slope_norm)
+    if slope_diff > 0.005:
+        return None
+
+    last_x = len(window) - 1
+    res_now = line_value(res_slope, res_intercept, last_x)
+    sup_now = line_value(sup_slope, sup_intercept, last_x)
+
+    # Channel must be valid (resistance > support throughout)
+    res_start = line_value(res_slope, res_intercept, 0)
+    sup_start = line_value(sup_slope, sup_intercept, 0)
+
+    if res_now <= sup_now or res_start <= sup_start:
+        return None
+
+    channel_height = res_now - sup_now
+    channel_height_pct = (channel_height / avg_price) * 100
+
+    # Channel height should be reasonable (between 3% and 35%)
+    if channel_height_pct < 3.0 or channel_height_pct > 35.0:
+        return None
+
+    fit_quality = (res_r2 + sup_r2) / 2
+    if fit_quality < 0.28:
+        return None
+
+    # Count swing points respecting the boundaries
+    res_touches = 0
+    for idx, val in sh:
+        exp = line_value(res_slope, res_intercept, idx)
+        if exp > 0 and abs(val - exp) / exp < 0.038:
+            res_touches += 1
+
+    sup_touches = 0
+    for idx, val in sl:
+        exp = line_value(sup_slope, sup_intercept, idx)
+        if exp > 0 and abs(val - exp) / exp < 0.038:
+            sup_touches += 1
+
+    if res_touches < 2 or sup_touches < 2:
+        return None
+
+    # Volume metrics
+    avg_vol_20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes)
+    cur_vol = volumes[-1]
+    vol_ratio = (cur_vol / avg_vol_20) if avg_vol_20 > 0 else 1.0
+    vol_spike = vol_ratio >= 1.15
+
+    # Breakout check:
+    # 1. Breakout today: price breaks above upper descending resistance line
+    breakout_now = (today_close >= res_now or cur_price >= res_now) and (today_close >= today_open * 0.995)
+    # 2. Recent breakout holding:
+    recent_breakout = (
+        len(closes) >= 3 and
+        (closes[-2] >= line_value(res_slope, res_intercept, last_x - 1) or
+         closes[-3] >= line_value(res_slope, res_intercept, last_x - 2)) and
+        cur_price >= res_now * 0.98
+    )
+
+    # Pre-breakout watch: price in upper 25% of channel near resistance
+    is_watch = (cur_price >= res_now * 0.96 and cur_price <= res_now * 1.015)
+
+    if breakout_now or recent_breakout:
+        status = "confirmed"
+    elif is_watch:
+        status = "pre_breakout_watch"
+    else:
+        return None
+
+    # Trendline coordinates for chart drawing
+    off = len(candles) - lookback
+    start_x = 0
+    end_x = last_x
+
+    return {
+        "type": "Descending Channel",
+        "resistance_now": round(res_now, 2),
+        "support_now": round(sup_now, 2),
+        "channel_height": round(channel_height, 2),
+        "channel_height_pct": round(channel_height_pct, 1),
+        "res_slope": res_slope,
+        "res_intercept": res_intercept,
+        "sup_slope": sup_slope,
+        "sup_intercept": sup_intercept,
+        "fit_quality": round(fit_quality, 2),
+        "touches": res_touches + sup_touches,
+        "status": status,
+        "volume_ratio": round(vol_ratio, 2),
+        "volume_spike": vol_spike,
+        "lookback": lookback,
+        "timeframe": timeframe,
+        "offset": off,
+        "start_x": start_x,
+        "end_x": end_x,
+    }
+
+
+def detect_descending_channel(candles, timeframe="daily", live_price=None):
+    """
+    Evaluates descending channel across multiple lookbacks (capturing swing channels).
+    For daily: tests lookbacks 25, 35, 45, 60.
+    For weekly: tests lookbacks 15, 25, 35.
+    """
+    lookbacks = [15, 25, 35] if timeframe == "weekly" else [30, 45, 25, 60]
+    best = None
+    for lb in lookbacks:
+        res = _detect_channel_window(candles, lb, timeframe=timeframe, live_price=live_price)
+        if res:
+            if not best or (res["fit_quality"], res["touches"]) > (best["fit_quality"], best["touches"]):
+                best = res
+    return best
+
+
+# ---------------------------------------------------------------------------
+# 3. PENNANT STRATEGY — Bullish Pennant with volume confirmation
 # ---------------------------------------------------------------------------
 def detect_pennant(candles):
     """
@@ -481,7 +572,7 @@ def detect_pennant(candles):
 
     for i in range(max(0, n - 25), n - 8):
         move = (closes[i+8] - closes[i]) / closes[i] * 100
-        if move >= 6.0:  # relaxed from 8% to 6%
+        if move >= 6.0:
             pole_found = True
             pole_start_idx = i
             pole_move_pct = move
@@ -505,12 +596,11 @@ def detect_pennant(candles):
     res_slope_norm = res_slope / avg_price
     sup_slope_norm = sup_slope / avg_price
 
-    # Require good fit quality for the consolidation trendlines
     consol_fit = (res_r2 + sup_r2) / 2
     if consol_fit < 0.30:
         return None
 
-    # converging lines (resistance slopes down, support slopes up)
+    # Converging lines (resistance slopes down, support slopes up)
     if res_slope_norm < -0.0003 and sup_slope_norm > 0.0003:
         last_x = len(consol_window) - 1
         res_now = line_value(res_slope, res_intercept, last_x)
@@ -519,22 +609,20 @@ def detect_pennant(candles):
         if res_now <= sup_now:
             return None
 
-        # Ensure consolidation is actually tightening (converging)
         gap_start = line_value(res_slope, res_intercept, 0) - line_value(sup_slope, sup_intercept, 0)
         gap_now = res_now - sup_now
         if gap_start > 0 and (gap_now / gap_start) > 0.85:
-            return None  # not converging enough
+            return None
 
         current_price = closes[-1]
         current_volume = volumes[-1]
-        is_green = closes[-1] > candles[-1][1]  # close > open
+        is_green = closes[-1] >= candles[-1][1]
 
-        # Volume spike check: breakout bar should have above-average volume
         avg_vol_consol = sum(c_vols) / len(c_vols) if c_vols else 1
         avg_vol_20 = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else sum(volumes) / len(volumes)
         avg_vol = (avg_vol_consol + avg_vol_20) / 2
         volume_ratio = current_volume / avg_vol if avg_vol > 0 else 1.0
-        volume_spike = volume_ratio >= 1.2  # at least 20% above average on breakout
+        volume_spike = volume_ratio >= 1.15
 
         if current_price > res_now and is_green:
             return {
@@ -570,11 +658,24 @@ def detect_pennant(candles):
 def _pattern_levels(pattern_type, pattern, candles):
     """Compute buy/sl/target levels based on pattern type."""
     today_close = candles[-1][4]
-    atr = sum(c[2] - c[3] for c in candles[-14:]) / 14
+    atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (candles[-1][2] - candles[-1][3])
 
-    if pattern_type == "triangle":
+    if pattern_type == "channel":
         res = pattern["resistance_now"]
-        # If already broken out above resistance, buy price is entry close, else slightly above resistance
+        ch_height = pattern.get("channel_height", res * 0.05)
+        buy_price = round(max(res * 1.002, today_close), 2) if today_close > res else round(res * 1.002, 2)
+        # Stop loss below recent swing low inside channel or 2% - 3% risk (TMGM reference)
+        stop_loss = round(max(pattern["support_now"], buy_price - max(atr * 1.5, ch_height * 0.5)), 2)
+        risk = buy_price - stop_loss
+        if risk <= 0 or (risk / buy_price) < 0.01:
+            stop_loss = round(buy_price - max(atr * 1.5, buy_price * 0.025), 2)
+            risk = buy_price - stop_loss
+        target1 = round(buy_price + 2 * risk, 2)            # TP1: 2:1 RR
+        target2 = round(buy_price + max(ch_height, 3 * risk), 2)  # TP2: Channel height / Prior Highs
+        return buy_price, stop_loss, target1, target2
+
+    elif pattern_type == "triangle":
+        res = pattern["resistance_now"]
         buy_price = round(max(res * 1.002, today_close), 2) if today_close > res else round(res * 1.002, 2)
         stop_loss = round(pattern["support_now"], 2)
 
@@ -605,9 +706,9 @@ def _pattern_levels(pattern_type, pattern, candles):
 # ---------------------------------------------------------------------------
 def build_alert(symbol, candles, live_price, timeframe="daily"):
     """
-    Runs all strategies (Triangle, Pennant), picks the best
-    qualifying signal, returns a full alert dict or None if nothing qualifies.
-    Supports both 'daily' and 'weekly' timeframes.
+    Runs strategies (Descending Channel, Triangle, Pennant), picks the single
+    best qualifying signal, returns full alert dict or None.
+    Confirmed breakouts strictly filtered to confidence >= 60%.
     """
     min_candles = 20 if timeframe == "weekly" else 40
     if len(candles) < min_candles:
@@ -617,122 +718,109 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     today_open, today_close = today[1], today[4]
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (today[2] - today[3])
 
-    # Run all detectors
+    # Run detectors
+    channel  = detect_descending_channel(candles, timeframe=timeframe, live_price=live_price)
     triangle = detect_triangle(candles, timeframe=timeframe, live_price=live_price)
     pennant  = detect_pennant(candles) if timeframe == "daily" else None
 
-    reasons = []
-    strategies_used = []
-    status = "confirmed"
-    score = 0
-    best_pattern_type = None
-    best_pattern = None
+    # Candidate evaluation list: pick the single best pattern (no multi/combo)
+    candidates = []
 
-    # ---- Triangle ----
+    # 1. Descending Channel Candidate
+    if channel:
+        c_status = channel["status"]
+        c_score = 60 if c_status == "confirmed" else 42
+        c_reasons = []
+        if c_status == "confirmed":
+            c_reasons.append(f"Descending Channel: Decisive breakout above upper trendline ₹{channel['resistance_now']}")
+            if channel.get("volume_spike"):
+                c_reasons.append(f"Volume spike on breakout: {channel.get('volume_ratio', 1.2):.2f}× 20-day average")
+                c_score += 10
+            else:
+                c_score += 5
+        else:
+            c_reasons.append(f"Descending Channel: Testing upper resistance ₹{channel['resistance_now']} (Pre-breakout watch)")
+
+        c_reasons.append(f"Channel support holding at ₹{channel['support_now']} (Fit: {channel['fit_quality']}, {channel['touches']} touches)")
+        candidates.append({
+            "type_key": "channel",
+            "name": "Descending Channel",
+            "status": c_status,
+            "score": c_score,
+            "reasons": c_reasons,
+            "pattern": channel
+        })
+
+    # 2. Triangle Candidate (Ascending / Symmetrical)
     if triangle:
         t_name = triangle["type"]
-        if "source" in triangle:
-            strategies_used.append(t_name)
-            status = triangle["status"]
-            if status == "confirmed":
-                if t_name == "Descending Triangle":
-                    reasons.append(f"{t_name}: Breakout above descending resistance ₹{triangle['resistance_now']} with volume expansion")
-                else:
-                    reasons.append(f"{t_name}: Breakout at ₹{triangle['resistance_now']} (Targeting higher highs)")
-                score += 50
-            else:
-                if t_name == "Descending Triangle":
-                    reasons.append(f"{t_name}: Support floor ₹{triangle['support_now']} holding with volume expansion (Pre-breakout watch)")
-                else:
-                    reasons.append(f"{t_name}: Tightening near resistance ₹{triangle['resistance_now']} (Pre-breakout watch)")
-                score += 35
-
-            if triangle.get("vol_dry_up"):
-                reasons.append("Volume dry-up confirmed: 5-day volume < 20-day average")
-            if triangle.get("vol_expansion"):
-                reasons.append("Volume expansion confirmed: Daily Volume > 20 SMA & > 1-day ago volume")
-            if timeframe == "daily":
-                reasons.append("Trend confirmed: Daily Close > 50 EMA")
-            elif timeframe == "weekly":
-                reasons.append("Weekly trend confirmed: Weekly Close > 20 EMA")
-
-            best_pattern_type = "triangle"
-            best_pattern = triangle
+        t_status = triangle.get("status", "confirmed")
+        t_score = 55 if t_status == "confirmed" else 38
+        t_reasons = []
+        if t_status == "confirmed":
+            t_reasons.append(f"{t_name}: Breakout at ₹{triangle['resistance_now']}")
+            t_score += 8
         else:
-            # Geometric fallback
-            breakout_now = (today_close >= triangle["resistance_now"] or live_price >= triangle["resistance_now"]) and (
-                today_close >= today_open * 0.99 or (len(candles) >= 2 and today_close >= candles[-2][4] * 0.99)
-            )
-            recent_breakout = (
-                len(candles) >= 3
-                and (candles[-2][4] >= triangle["resistance_now"] or candles[-3][4] >= triangle["resistance_now"])
-                and today_close >= triangle["resistance_now"] * 0.97
-            )
-            approaching = (
-                triangle["contraction"] >= 0.10
-                and (triangle["bars_to_apex"] is None or -4 <= triangle["bars_to_apex"] <= 35)
-                and (today_close >= triangle["resistance_now"] * 0.92 or live_price >= triangle["resistance_now"] * 0.92)
-            )
-            if breakout_now or recent_breakout:
-                strategies_used.append(t_name)
-                action_text = "breakout above" if breakout_now else "holding breakout above"
-                reasons.append(f"{t_name} {action_text} {triangle['resistance_now']} "
-                               f"(fit: {triangle['fit_quality']}, {triangle['touches']} touches)")
-                score += 42
-                best_pattern_type = "triangle"
-                best_pattern = triangle
-            elif approaching:
-                strategies_used.append(t_name)
-                status = "pre_breakout_watch"
-                reasons.append(
-                    f"{t_name} tightening ({int(triangle['contraction']*100)}% contraction), "
-                    f"price {today_close} near resistance {triangle['resistance_now']}"
-                    + (f", ~{triangle['bars_to_apex']} bars to apex" if triangle.get('bars_to_apex') is not None else "")
-                )
-                score += 26
-                best_pattern_type = "triangle"
-                best_pattern = triangle
+            t_reasons.append(f"{t_name}: Tightening near resistance ₹{triangle['resistance_now']} (Pre-breakout watch)")
 
-    # ---- Pennant ----
+        if triangle.get("vol_dry_up"):
+            t_reasons.append("Volume dry-up confirmed: 5-day volume < 20-day average")
+            t_score += 5
+        if timeframe == "daily":
+            t_reasons.append("Trend confirmed: Daily Close > 50 EMA")
+        elif timeframe == "weekly":
+            t_reasons.append("Weekly trend confirmed: Weekly Close > 20 EMA")
+
+        candidates.append({
+            "type_key": "triangle",
+            "name": t_name,
+            "status": t_status,
+            "score": t_score,
+            "reasons": t_reasons,
+            "pattern": triangle
+        })
+
+    # 3. Pennant Candidate
     if pennant:
-        vol_info = f", volume {pennant.get('volume_ratio', 0):.2f}× avg" if pennant.get('volume_ratio') else ""
-        vol_spike_bonus = 8 if pennant.get("volume_spike") else 0
-        if pennant["status"] == "confirmed":
-            strategies_used.append("Pennant Breakout")
-            reasons.append(
-                f"Pennant Breakout: pole +{pennant['pole_move_pct']}%, "
-                f"closed above resistance {pennant['resistance']}"
-                f"{vol_info} (fit: {pennant.get('fit_quality', 'N/A')})"
-            )
-            score += 40 + vol_spike_bonus
-            if not best_pattern_type:
-                best_pattern_type = "pennant"
-                best_pattern = pennant
-        elif pennant["status"] == "forming":
-            strategies_used.append("Pennant Breakout")
-            if not best_pattern_type:
-                status = "pre_breakout_watch"
-            reasons.append(
-                f"Pennant forming after +{pennant['pole_move_pct']}% move, "
-                f"resistance at {pennant['resistance']}"
-            )
-            score += 20
-            if not best_pattern_type:
-                best_pattern_type = "pennant"
-                best_pattern = pennant
+        p_status = "confirmed" if pennant["status"] == "confirmed" else "pre_breakout_watch"
+        p_score = 58 if p_status == "confirmed" else 36
+        p_reasons = []
+        if p_status == "confirmed":
+            p_reasons.append(f"Pennant Breakout: pole +{pennant['pole_move_pct']}%, closed above resistance ₹{pennant['resistance']}")
+            if pennant.get("volume_spike"):
+                p_reasons.append(f"Volume spike on breakout: {pennant.get('volume_ratio', 1.2):.2f}× average")
+                p_score += 10
+            else:
+                p_score += 4
+        else:
+            p_reasons.append(f"Pennant forming after +{pennant['pole_move_pct']}% move, resistance at ₹{pennant['resistance']}")
 
-    if not strategies_used:
+        candidates.append({
+            "type_key": "pennant",
+            "name": "Pennant Breakout",
+            "status": p_status,
+            "score": p_score,
+            "reasons": p_reasons,
+            "pattern": pennant
+        })
+
+    if not candidates:
         return None
 
-    if len(strategies_used) >= 2:
-        score += 12  # multiple patterns agreeing — stronger signal
+    # Prioritize confirmed breakout candidates first, then highest score
+    candidates.sort(key=lambda c: (1 if c["status"] == "confirmed" else 0, c["score"]), reverse=True)
+    best = candidates[0]
 
-    confidence = min(round(score), 95)
+    status = best["status"]
+    score = best["score"]
+    strategy_used = best["name"]
+    reasons = best["reasons"]
+    best_pattern_type = best["type_key"]
+    best_pattern = best["pattern"]
 
-    # ---- Trade levels ----
+    # Calculate trade levels
     buy_price, stop_loss, target1, target2 = _pattern_levels(best_pattern_type, best_pattern, candles)
     if buy_price is None:
-        # Fallback to ATR-based levels
         buy_price = round(today_close, 2)
         stop_loss = round(today_close - 1.5 * atr, 2)
         risk = buy_price - stop_loss
@@ -749,15 +837,20 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     if rr < 1.8:
         return None  # enforce minimum ~1:2 R:R
 
-    # ── Pre-breakout: If LTP has reached or crossed the buy trigger, it's a confirmed breakout ──
+    # Pre-breakout: If LTP has crossed the buy trigger, it's a confirmed breakout
     if status == "pre_breakout_watch" and live_price >= buy_price:
         status = "confirmed"
         reasons.append(f"Price crossed above buy trigger ₹{buy_price} (Breakout confirmed)")
         score += 18
-        confidence = min(round(score), 95)
 
-    # For watch alerts, drop only if trigger is more than 10% away
+    # For watch alerts, drop if trigger is more than 10% away
     if status == "pre_breakout_watch" and buy_price > live_price * 1.10:
+        return None
+
+    confidence = min(round(score), 95)
+
+    # ── STRICT FILTER: Show confirmation stocks ONLY above 60% confidence ──
+    if status == "confirmed" and confidence < 60:
         return None
 
     expected_breakout_date = "Today / already triggered" if status == "confirmed" else \
@@ -767,7 +860,7 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         "symbol": symbol,
         "ltp": round(live_price, 2),
         "status": status,
-        "strategy_used": " + ".join(strategies_used) if len(strategies_used) > 1 else strategies_used[0],
+        "strategy_used": strategy_used,
         "reasons": reasons,
         "buy_price": buy_price,
         "stop_loss": stop_loss,

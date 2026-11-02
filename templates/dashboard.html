@@ -373,7 +373,9 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 }
 .badge-triangle    { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-ascending   { background:rgba(16,208,122,0.12); color:#10d07a; border:1px solid rgba(16,208,122,0.28); }
-.badge-descending  { background:rgba(248,184,50,0.13); color:var(--amber); border:1px solid rgba(248,184,50,0.30); }
+.badge-channel   { background:rgba(255,107,107,0.14); color:#ff8787; border:1px solid rgba(255,107,107,0.35); }
+.click-sym       { cursor:pointer; transition:all 0.15s ease; color:var(--blue); }
+.click-sym:hover { color:#7aaeff !important; text-decoration:underline; text-shadow:0 0 8px rgba(77,142,245,0.4); }
 .badge-symmetrical { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-pennant     { background:rgba(38,212,192,0.12); color:#4edfcf; border:1px solid rgba(38,212,192,0.28); }
 .badge-combo       { background:rgba(157,125,255,0.12);color:#c0a8ff; border:1px solid rgba(157,125,255,0.28);}
@@ -473,7 +475,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 /* Active pill colors */
 .pf-all.active-pf,          .wpf-all.active-pf          { background:rgba(77,142,245,0.14); border-color:rgba(77,142,245,0.35); color:var(--blue);   }
 .pf-ascending.active-pf,    .wpf-ascending.active-pf    { background:rgba(16,208,122,0.14); border-color:rgba(16,208,122,0.35); color:var(--green);  }
-.pf-descending.active-pf,   .wpf-descending.active-pf   { background:rgba(248,184,50,0.14); border-color:rgba(248,184,50,0.35); color:var(--amber);  }
+.pf-channel.active-pf,      .wpf-channel.active-pf      { background:rgba(255,107,107,0.14);border-color:rgba(255,107,107,0.35);color:#ff8787;      }
 .pf-symmetrical.active-pf,  .wpf-symmetrical.active-pf  { background:rgba(77,142,245,0.13); border-color:rgba(77,142,245,0.35); color:#7aaeff;       }
 .pf-pennant.active-pf,      .wpf-pennant.active-pf      { background:rgba(38,212,192,0.11); border-color:rgba(38,212,192,0.32); color:var(--teal);   }
 .pf-combo.active-pf,        .wpf-combo.active-pf        { background:rgba(157,125,255,0.12);border-color:rgba(157,125,255,0.32);color:var(--purple); }
@@ -871,10 +873,10 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <button class="pf-btn wpf-all active-pf" onclick="setWeeklyAF('all')">🔍 All Patterns <span class="pc" id="wpfc-all">0</span></button>
     <button class="pf-btn wpf-midcap" onclick="setWeeklyAF('midcap')">⚡ Midcap 100 <span class="pc" id="wpfc-midcap">0</span></button>
     <button class="pf-btn wpf-ascending" onclick="setWeeklyAF('ascending')">📐 Ascending Triangle <span class="pc" id="wpfc-ascending">0</span></button>
-    <button class="pf-btn wpf-descending" onclick="setWeeklyAF('descending')">📐 Descending Triangle <span class="pc" id="wpfc-descending">0</span></button>
+    <button class="pf-btn wpf-channel" onclick="setWeeklyAF('channel')">📉 Descending Channel <span class="pc" id="wpfc-channel">0</span></button>
     <button class="pf-btn wpf-symmetrical" onclick="setWeeklyAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="wpfc-symmetrical">0</span></button>
     <button class="pf-btn wpf-pennant" onclick="setWeeklyAF('pennant')">🎏 Bullish Pennant <span class="pc" id="wpfc-pennant">0</span></button>
-    <button class="pf-btn wpf-combo" onclick="setWeeklyAF('combo')">✦ Multi <span class="pc" id="wpfc-combo">0</span></button>
+
   </div>
 
   <div id="weeklyAlertsBanner"></div>
@@ -908,10 +910,10 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <button class="pf-btn pf-all active-pf" onclick="setAF('all')">🔍 All Patterns <span class="pc" id="pfc-all">0</span></button>
     <button class="pf-btn pf-midcap" onclick="setAF('midcap')">⚡ Midcap 100 <span class="pc" id="pfc-midcap">0</span></button>
     <button class="pf-btn pf-ascending" onclick="setAF('ascending')">📐 Ascending Triangle <span class="pc" id="pfc-ascending">0</span></button>
-    <button class="pf-btn pf-descending" onclick="setAF('descending')">📐 Descending Triangle <span class="pc" id="pfc-descending">0</span></button>
+    <button class="pf-btn pf-channel" onclick="setAF('channel')">📉 Descending Channel <span class="pc" id="pfc-channel">0</span></button>
     <button class="pf-btn pf-symmetrical" onclick="setAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="pfc-symmetrical">0</span></button>
     <button class="pf-btn pf-pennant" onclick="setAF('pennant')">🎏 Bullish Pennant <span class="pc" id="pfc-pennant">0</span></button>
-    <button class="pf-btn pf-combo" onclick="setAF('combo')">✦ Multi <span class="pc" id="pfc-combo">0</span></button>
+
   </div>
 
   <div id="alertsBanner"></div>
@@ -966,7 +968,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
         <th onclick="sort52w('volume')">Volume ↕</th>
         <th onclick="sort52w('pattern')">Box / Pattern ↕</th>
         <th onclick="sort52w('confidence')">Conf ↕</th>
-        <th>Actions</th>
+
       </tr></thead>
       <tbody id="h52Tbody"><tr><td colspan="10" class="empty"><span class="spin"></span> Loading 52-Week High stocks…</td></tr></tbody>
     </table>
@@ -997,7 +999,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
         <th onclick="sortS('low_52w')">52W Low ↕</th>
         <th onclick="sortS('pattern')">Pattern ↕</th>
         <th onclick="sortS('confidence')">Conf ↕</th>
-        <th>Actions</th>
+
       </tr></thead>
       <tbody id="sTbody"><tr><td colspan="9" class="empty"><span class="spin"></span>Loading…</td></tr></tbody>
     </table>
@@ -1094,7 +1096,8 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
           <div class="qt-field"><label style="color:#4a9eff">● Buy ₹</label><input id="qt-buy" type="number" step="0.05" oninput="redrawLevels()" style="border-color:#1e3a6a"></div>
           <div class="qt-field"><label style="color:#e74c3c">● Stop Loss ₹</label><input id="qt-sl" type="number" step="0.05" oninput="redrawLevels()" style="border-color:#6a1e1e"></div>
           <div class="qt-field"><label style="color:#2ecc71">● Target ₹</label><input id="qt-tgt" type="number" step="0.05" oninput="redrawLevels()" style="border-color:#1e4a1e"></div>
-        </div>
+
+
       </div>
     </div>
   </div>
@@ -1132,7 +1135,7 @@ function switchTab(t) {
 // ═══════════════════════════════════════════════════════════
 const PK = { 
   ascending: ['ascending'], 
-  descending: ['descending'],
+  channel: ['channel'],
   symmetrical: ['symmetrical'], 
   triangle: ['triangle'], 
   pennant: ['pennant'], 
@@ -1143,18 +1146,18 @@ function pKey(s) {
   if (!s) return 'none';
   const sl = s.toLowerCase();
   if (sl.includes('box')) return 'box';
-  if (sl.includes('+')) return 'combo';
+  if (sl.includes('channel')) return 'channel';
   if (sl.includes('ascending')) return 'ascending';
-  if (sl.includes('descending')) return 'descending';
+  if (sl.includes('descending')) return 'channel';
   if (sl.includes('symmetrical')) return 'symmetrical';
   if (sl.includes('pennant')) return 'pennant';
   if (sl.includes('triangle')) return 'triangle';
-  return 'combo';
+  return 'channel';
 }
 
 const BC = { 
   ascending: 'badge-ascending', 
-  descending: 'badge-descending',
+  channel: 'badge-channel',
   symmetrical: 'badge-symmetrical', 
   triangle: 'badge-triangle', 
   pennant: 'badge-pennant', 
@@ -1322,12 +1325,17 @@ async function fetchAndDrawPattern(sym, tf='daily') {
     const pats    = data.patterns;
     let patLabel  = '';
 
-    const ORDER = ['triangle','pennant'];
+    const ORDER = ['channel', 'triangle', 'pennant'];
     for (const key of ORDER) {
       if (!pats[key]) continue;
       const p = pats[key];
 
-      if (key === 'triangle') {
+      if (key === 'channel') {
+        addLine(p.resistance_line, W, 1, 0);
+        addLine(p.support_line,    W, 1, 0);
+        patLabel = p.type || 'Descending Channel';
+      }
+      else if (key === 'triangle') {
         addLine(p.resistance_line, W, 1, 0);
         addLine(p.support_line,    W, 1, 0);
         patLabel = p.type;
@@ -1574,6 +1582,7 @@ function setAF(key) {
 
 function applyAF() {
   const fn = r => {
+    if (r.status === 'confirmed' && (r.confidence || 0) < 60) return false;
     if (activeAF === 'all') return true;
     if (activeAF === 'midcap') return !!r.is_midcap;
     return pKey(r.strategy_used) === activeAF;
@@ -1606,11 +1615,19 @@ function renderAlerts(rows, tf='daily') {
   if (!rows?.length) return `<div class="empty">No alerts found for this filter.</div>`;
   return `<table><thead><tr>
     <th>Symbol</th><th>LTP</th><th>Pattern</th><th>Reason</th>
-    <th>Buy @ Trigger</th><th>SL</th><th>T1</th><th>T2</th><th>R:R</th>
-    <th>Vol Ratio</th><th>RSI</th><th>Conf</th><th>Breakout</th><th>Actions</th>
+    <th>Buy @ Trigger</th><th>SL</th><th>T1</th><th>T2</th>
+    <th>Conf</th><th>Breakout</th>
   </tr></thead><tbody>
-  ${rows.map(r=>`<tr data-sym="${r.symbol}">
-    <td class="sym">${r.symbol}${r.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
+  ${rows.map(r=>{
+    const al = encodeURIComponent(JSON.stringify({
+      buy: r.buy_price,
+      sl:  r.stop_loss,
+      tgt: r.target1,
+      strategy: r.strategy_used || '',
+      timeframe: tf
+    }));
+    return `<tr data-sym="${r.symbol}">
+    <td class="sym click-sym" onclick="openChart('${r.symbol}','${al}')" title="Click to view chart"><span class="sym-name">${r.symbol}</span>${r.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
     <td class="alert-ltp">₹${fmt(r.ltp)}</td>
     <td><span class="badge ${bClass(r.strategy_used)}">${r.strategy_used}</span></td>
     <td class="reasons">${r.reasons.map(x=>`<div>• ${x}</div>`).join('')}</td>
@@ -1618,15 +1635,16 @@ function renderAlerts(rows, tf='daily') {
     <td class="sl-c">₹${fmt(r.stop_loss)}</td>
     <td>₹${fmt(r.target1)}</td>
     <td>₹${fmt(r.target2)}</td>
-    <td>${r.risk_reward}</td>
-    <td style="text-align:center">${fmtVolR(r.vol_ratio)}</td>
-    <td style="text-align:center">${fmtRsi(r.rsi)}</td>
+
+
+
     <td class="conf ${cc(r.confidence)}" style="text-align:center">${confLabel(r.confidence)}${r.weekly_aligned?'<br><span title="Weekly trend aligned" style="font-size:10px">📈 MTF✓</span>':''}</td>
     <td>${r.expected_breakout_date}</td>
-    <td style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-      ${chartBtn(r.symbol, r, tf)}
-    </td>
-  </tr>`).join('')}
+
+
+
+  </tr>`;
+  }).join('')}
   </tbody></table>`;
 }
 
@@ -1703,6 +1721,7 @@ function setWeeklyAF(key) {
 
 function applyWeeklyAF() {
   const fn = r => {
+    if (r.status === 'confirmed' && (r.confidence || 0) < 60) return false;
     if (activeWeeklyAF === 'all') return true;
     if (activeWeeklyAF === 'midcap') return !!r.is_midcap;
     return pKey(r.strategy_used) === activeWeeklyAF;
@@ -1875,15 +1894,15 @@ function renderStocks() {
     const sb=s.status==='confirmed'?`<span class="s-confirmed">✅</span>`:s.status==='watch'?`<span class="s-watch">👀</span>`:'';
     const cf=s.confidence?`<span class="conf ${cc(s.confidence)}">${s.confidence}%</span>`:`<span style="color:var(--muted)">—</span>`;
     return `<tr data-sym="${s.symbol}">
-      <td><span class="sym">${s.symbol}</span>${s.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
+      <td><span class="sym click-sym" onclick="openChart('${s.symbol}',null)" title="Click to view chart">${s.symbol}</span>${s.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
       <td>${s.close!==null?'₹'+fmt(s.close):'<span style="color:var(--muted)">Loading…</span>'}</td>
       <td class="${cc2}">${chgT}</td><td>${fmtVol(s.volume)}</td>
       <td>${s.high_52w!==null?'₹'+fmt(s.high_52w):'—'}</td>
       <td>${s.low_52w!==null?'₹'+fmt(s.low_52w):'—'}</td>
       <td>${pb} ${sb}</td><td>${cf}</td>
-      <td style="display:flex;gap:5px;align-items:center">
-        ${chartBtn(s.symbol,null)}
-      </td>
+
+
+  
     </tr>`;
   }).join('');
 }
@@ -2158,23 +2177,24 @@ function render52wTable() {
     const fillPct = Math.max(0, Math.min(100, Math.round((1 - (dist / 5.0)) * 100)));
 
     return `<tr data-sym="${s.symbol}">
-      <td><span class="sym">${s.symbol}</span>${midcapTag}</td>
+      <td><span class="sym click-sym" onclick="openChart('${s.symbol}',null)" title="Click to view chart">${s.symbol}</span>${midcapTag}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-weight:700">₹${fmt(s.ltp)}</td>
       <td class="${cc2}">${chgT}</td>
       <td>
         ${distBadge}
         <div class="dist-bar-wrap" title="${dist.toFixed(2)}% away from 52W High">
-          <div class="dist-bar-fill" style="width:${fillPct}%;background:${barColor}"></div>
-        </div>
-      </td>
+          <div class="dist-bar-fill" style="width:${fillPct}%;background:${barColor}"></div></div></td><!--dist_end-->
+
+
+  
       <td style="font-family:'JetBrains Mono',monospace;color:var(--green);font-weight:600">₹${fmt(s.high_52w)}</td>
       <td style="font-family:'JetBrains Mono',monospace;color:var(--muted2)">₹${fmt(s.low_52w)}</td>
       <td>${fmtVol(s.volume)}</td>
       <td>${boxTag ? boxTag + ' ' : ''}${pb} ${sb}</td>
       <td>${cf}</td>
-      <td style="display:flex;gap:5px;align-items:center">
-        ${chartBtn(s.symbol, null)}
-      </td>
+
+
+  
     </tr>`;
   }).join('');
 }
