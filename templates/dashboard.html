@@ -833,7 +833,6 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <span id="lastScan">—</span>
     <span id="uSize"></span>
     <button id="btnRescan" onclick="triggerRescan()" style="font-size:11px;font-weight:600;color:var(--blue);background:rgba(77,142,245,0.12);border:1px solid rgba(77,142,245,0.3);padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;" title="Fetch latest quotes and re-evaluate patterns immediately">⟳ Rescan Now</button>
-    <a href="/api/export/prebreakout?timeframe=both" class="dl-excel-btn hdr-dl-btn" title="Download all 4 sheets: Daily Pre-Breakouts, Weekly Pre-Breakouts, Confirmed Breakouts">📊 Download All Sheets (.xlsx)</a>
     <span id="hdrProg" style="margin-left:auto;"></span>
     <a href="/logout" id="logoutLink" style="font-size:11px;color:var(--muted);text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:6px;display:none" title="Log out of secure session">🔓 Logout</a>
   </div>
@@ -844,8 +843,6 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <button class="tab-btn" id="tab-weekly-btn" onclick="switchTab('weekly')">📅 Weekly Alerts <span class="tab-count" id="tc-weekly">0</span></button>
   <button class="tab-btn" id="tab-watchlist-btn" onclick="switchTab('watchlist')">⭐ Watchlist <span class="tab-count" id="tc-watchlist">0</span></button>
   <button class="tab-btn" id="tab-stocks-btn" onclick="switchTab('stocks')">📊 Nifty 500 <span class="tab-count" id="tc-stocks">500</span></button>
-  <button class="tab-btn" id="tab-paper-btn" onclick="switchTab('paper')">💰 Paper Trading <span class="tab-count" id="tc-paper">0</span></button>
-  <button class="tab-btn" id="tab-journal-btn" onclick="switchTab('journal')">📓 Journal <span class="tab-count" id="tc-journal">0</span></button>
   <button class="tab-btn" id="tab-settings-btn" onclick="switchTab('settings')">⚙️ API Settings</button>
 </div>
 
@@ -865,10 +862,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div id="weeklyAlertsBanner"></div>
   <h2 class="section">✅ Confirmed Weekly Breakouts <span class="section-tag" id="wcCount">0</span></h2>
   <div class="table-wrap"><div id="wcTable"><div class="empty">No weekly alerts yet.</div></div></div>
-  <div class="section-hdr-row">
-    <h2 class="section">👀 Pre-Breakout Weekly Watchlist <span class="section-tag" id="wwCount">0</span></h2>
-    <a href="/api/export/prebreakout?timeframe=both" class="dl-excel-btn" title="Downloads all 4 sheets in one workbook">📥 Download All Sheets (.xlsx)</a>
-  </div>
+  <h2 class="section">👀 Pre-Breakout Weekly Watchlist <span class="section-tag" id="wwCount">0</span></h2>
   <div class="table-wrap"><div id="wwTable"><div class="empty">No weekly alerts yet.</div></div></div>
 </div>
 
@@ -886,10 +880,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div id="alertsBanner"></div>
   <h2 class="section">✅ Confirmed Breakouts <span class="section-tag" id="cCount">0</span></h2>
   <div class="table-wrap"><div id="cTable"><div class="empty">No alerts yet.</div></div></div>
-  <div class="section-hdr-row">
-    <h2 class="section">👀 Pre-Breakout Watchlist <span class="section-tag" id="wCount">0</span></h2>
-    <a href="/api/export/prebreakout?timeframe=both" class="dl-excel-btn" title="Downloads all 4 sheets in one workbook">📥 Download All Sheets (.xlsx)</a>
-  </div>
+  <h2 class="section">👀 Pre-Breakout Watchlist <span class="section-tag" id="wCount">0</span></h2>
   <div class="table-wrap"><div id="wTable"><div class="empty">No alerts yet.</div></div></div>
 </div>
 
@@ -961,169 +952,6 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
         <th>Actions</th>
       </tr></thead>
       <tbody id="sTbody"><tr><td colspan="9" class="empty"><span class="spin"></span>Loading…</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ═══════ PAPER TRADING TAB ═══════ -->
-<div class="tab-panel" id="panel-paper">
-
-  <!-- Pro Broker Balance & Performance Metrics -->
-  <div class="pt-stats" id="ptStats">
-    <div class="stat-card">
-      <div class="label">Available Cash</div>
-      <div class="val blue" id="ptBal">₹1,00,000</div>
-      <small style="color:var(--muted)">Free trading capital</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Invested Margin</div>
-      <div class="val" id="ptInvested">₹0</div>
-      <small style="color:var(--muted)">Open position cost</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Current Holding Value</div>
-      <div class="val" id="ptCurVal">₹0</div>
-      <small style="color:var(--muted)">At live market LTP</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Unrealized P&amp;L</div>
-      <div class="val" id="ptUnrealizedPnl">₹0</div>
-      <small id="ptUnrealizedPnlPct">0.00%</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Realized P&amp;L</div>
-      <div class="val" id="ptRealizedPnl">₹0</div>
-      <small style="color:var(--muted)">Closed positions</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Total Portfolio Net Worth</div>
-      <div class="val" id="ptPortVal">₹1,00,000</div>
-      <small id="ptTotalPnl">Net P&amp;L: ₹0 (0.00%)</small>
-    </div>
-  </div>
-
-  <!-- Trade form -->
-  <div class="pt-form">
-    <h3>📤 Place Paper Order</h3>
-    <div class="form-row">
-      <div class="form-field wide"><label>Symbol</label><input id="pt-sym" placeholder="e.g. RELIANCE" oninput="this.value=this.value.toUpperCase()"></div>
-      <div class="form-field"><label>Qty</label><input id="pt-qty" type="number" min="1" value="1"></div>
-      <div class="form-field"><label>Buy Price ₹</label><input id="pt-buy" type="number" step="0.05" placeholder="0.00"></div>
-      <div class="form-field"><label>Stop Loss ₹</label><input id="pt-sl" type="number" step="0.05" placeholder="0.00"></div>
-      <div class="form-field"><label>Target ₹</label><input id="pt-tgt" type="number" step="0.05" placeholder="0.00"></div>
-      <div class="form-field wide"><label>Setup Strategy</label><select id="pt-setup">
-        <option value="">Select setup</option>
-        <option>Ascending Triangle</option>
-        <option>Symmetrical Triangle</option>
-        <option>Pennant Breakout</option>
-        <option>Manual</option>
-      </select></div>
-      <div class="form-field note"><label>Entry Trading Plan / Reason</label><textarea id="pt-notes" placeholder="Confluence, support/resistance, volume confirmation..."></textarea></div>
-      <button class="buy-btn" onclick="placeTrade()">Buy ▶</button>
-      <button class="reset-btn" onclick="showResetDialog()">Reset Account</button>
-    </div>
-    <div class="form-msg" id="ptMsg"></div>
-  </div>
-
-  <!-- Open Positions -->
-  <h2 class="section">📂 Open Positions <span class="section-tag" id="ptOpenTag">0</span></h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Symbol</th><th>Qty</th><th>Buy ₹</th><th>LTP ₹</th><th>Invested ₹</th><th>Current Val ₹</th>
-        <th>Unrealized P&amp;L</th><th>P&amp;L %</th><th>SL ₹</th><th>Target ₹</th><th>SL Dist</th><th>Tgt Dist</th><th>Entry Time</th><th>Actions</th>
-      </tr></thead>
-      <tbody id="ptOpenTbody"><tr><td colspan="14" class="empty">No open positions.</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- Closed Trades History -->
-  <h2 class="section">📋 Trade History <span class="section-tag" id="ptHistTag">0</span></h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Symbol</th><th>Setup</th><th>Qty</th><th>Buy ₹</th><th>Sell ₹</th><th>Realized P&amp;L</th><th>Return %</th><th>Result</th><th>Exit Reason</th><th>Entry</th><th>Exit</th>
-      </tr></thead>
-      <tbody id="ptHistTbody"><tr><td colspan="11" class="empty">No closed trades yet.</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ═══════ JOURNAL TAB ═══════ -->
-<div class="tab-panel" id="panel-journal">
-  <!-- Professional Trading Journal Stats -->
-  <div class="pt-stats">
-    <div class="stat-card">
-      <div class="label">Total Trades Logged</div>
-      <div class="val blue" id="jTotal">0</div>
-      <small id="jWinLoss">0 Wins / 0 Losses</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Win Rate %</div>
-      <div class="val" id="jWinRate">0.00%</div>
-      <small style="color:var(--muted)">Accuracy metric</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Net Realized P&amp;L</div>
-      <div class="val" id="jNet">₹0</div>
-      <small style="color:var(--muted)">After all exits</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Profit Factor</div>
-      <div class="val blue" id="jProfitFactor">0.00</div>
-      <small style="color:var(--muted)">Gross Profit / Loss</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Avg Win / Loss</div>
-      <div class="val green" id="jAvgWin" style="font-size:16px">₹0</div>
-      <small class="val red" id="jAvgLoss" style="font-size:13px;display:block">Avg Loss: ₹0</small>
-    </div>
-    <div class="stat-card">
-      <div class="label">Best Trade</div>
-      <div class="val green" id="jBestTrade" style="font-size:16px">₹0</div>
-      <small class="val red" id="jWorstTrade" style="font-size:13px;display:block">Worst: ₹0</small>
-    </div>
-  </div>
-
-  <div class="toolbar">
-    <input class="search-box" id="jSearch" type="text" placeholder="🔍 Search symbol, setup, notes, tags…" oninput="renderJournal()">
-    <select class="filter-btn" id="jResult" onchange="renderJournal()">
-      <option value="all">All Results</option>
-      <option value="profit">🟢 Profit Only</option>
-      <option value="loss">🔴 Loss Only</option>
-    </select>
-    <select class="filter-btn" id="jSetup" onchange="renderJournal()">
-      <option value="all">All Setups</option>
-      <option>Ascending Triangle</option>
-      <option>Symmetrical Triangle</option>
-      <option>Pennant Breakout</option>
-      <option>Manual</option>
-    </select>
-    <button class="filter-btn" onclick="loadJournal()">⟳ Refresh</button>
-    <button class="filter-btn" style="color:var(--red);border-color:rgba(255,64,96,0.3)" onclick="clearJournal()">🗑 Clear Journal</button>
-    <span class="meta" id="jMeta">—</span>
-  </div>
-
-  <div class="table-wrap">
-    <table>
-      <thead><tr>
-        <th>Symbol</th>
-        <th>Setup Strategy</th>
-        <th>Qty</th>
-        <th>Buy ₹</th>
-        <th>Sell ₹</th>
-        <th>Net P&amp;L ₹</th>
-        <th>Return %</th>
-        <th>Result</th>
-        <th>Exit Trigger</th>
-        <th>Strategy Tags</th>
-        <th>Entry Trading Notes</th>
-        <th>Post-Trade Review &amp; Lessons</th>
-        <th>Entry Date</th>
-        <th>Exit Date</th>
-        <th>Actions</th>
-      </tr></thead>
-      <tbody id="jTbody"><tr><td colspan="15" class="empty">No journal entries yet. Complete a paper trade to log it automatically.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -1248,17 +1076,14 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
         <div class="cl-item"><span class="cl-dot" style="background:#2ecc71"></span> <span class="cl-label">Target</span> <span class="cl-val" id="leg-tgt">—</span></div>
         <div class="cl-item cl-rr" id="leg-rr"></div>
       </div>
-      <!-- Quick trade form inside chart -->
+      <!-- Key price levels inside chart -->
       <div class="quick-trade">
-        <h4>📤 Quick Paper Trade from Chart</h4>
+        <h4>🎯 Key Price Levels</h4>
         <div class="qt-row">
-          <div class="qt-field"><label>Qty</label><input id="qt-qty" type="number" min="1" value="1"></div>
           <div class="qt-field"><label style="color:#4a9eff">● Buy ₹</label><input id="qt-buy" type="number" step="0.05" oninput="redrawLevels()" style="border-color:#1e3a6a"></div>
           <div class="qt-field"><label style="color:#e74c3c">● Stop Loss ₹</label><input id="qt-sl" type="number" step="0.05" oninput="redrawLevels()" style="border-color:#6a1e1e"></div>
           <div class="qt-field"><label style="color:#2ecc71">● Target ₹</label><input id="qt-tgt" type="number" step="0.05" oninput="redrawLevels()" style="border-color:#1e4a1e"></div>
-          <button class="qt-buy-btn" onclick="quickTrade()">Buy ▶</button>
         </div>
-        <div class="qt-msg" id="qtMsg"></div>
       </div>
     </div>
   </div>
@@ -1268,7 +1093,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
-let rawConfirmed = [], rawWatch = [], allStocks = [], journalRows = [];
+let rawConfirmed = [], rawWatch = [], allStocks = [];
 let weeklyRawConfirmed = [], weeklyRawWatch = [];
 let activeAF = 'all', activeWeeklyAF = 'all';
 let activeSF = 'all', sortKey = 'confidence', sortDir = -1;
@@ -1288,8 +1113,6 @@ function switchTab(t) {
   if (t === 'weekly')    refreshWeeklyAlerts();
   if (t === 'watchlist') renderWatchlist();
   if (t === 'stocks')    loadStocks();
-  if (t === 'paper')     loadPortfolio();
-  if (t === 'journal')   loadJournal();
   if (t === 'settings')  { loadSettings(); loadNtfySettings(); }
 }
 
@@ -1368,9 +1191,6 @@ function chartBtn(sym, alert, tf='daily') {
     timeframe: tf
   })) : '';
   return `<button class="icon-btn" onclick="openChart('${sym}','${al}')" title="View Chart">📈</button>`;
-}
-function tradeBtn(sym, buy, sl, tgt) {
-  return `<button class="icon-btn trade" onclick="prefillTrade('${sym}',${buy},${sl||0},${tgt||0})" title="Paper Trade">💰</button>`;
 }
 function pinBtn(sym, alert, tf='daily') {
   const pinned = isInWatchlist(sym);
@@ -1692,24 +1512,9 @@ function _stopLiveRefresh() {
 function closeChart() {
   _stopLiveRefresh();
   document.getElementById('chartOverlay').classList.remove('open');
-  document.getElementById('qtMsg').textContent = '';
   clearPatternLines();
   if (chartObj) { chartObj.remove(); chartObj = null; candleSeries = null; }
 }
-
-async function quickTrade() {
-  const qty = parseInt(document.getElementById('qt-qty').value)||1;
-  const buy = parseFloat(document.getElementById('qt-buy').value)||0;
-  const sl  = parseFloat(document.getElementById('qt-sl').value)||0;
-  const tgt = parseFloat(document.getElementById('qt-tgt').value)||0;
-  if (!chartSymbol || !buy) { setQtMsg('Enter buy price.', 'err'); return; }
-  const r = await fetch('/api/paper/buy', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ symbol:chartSymbol, quantity:qty, buy_price:buy, stop_loss:sl, target:tgt }) });
-  const d = await r.json();
-  if (d.error) { setQtMsg('❌ ' + d.error, 'err'); }
-  else { setQtMsg(`✅ Bought ${qty} × ${chartSymbol} @ ₹${buy}. Balance: ₹${fmt(d.balance)}`, 'ok'); loadPortfolio(); }
-}
-function setQtMsg(t,c) { const el=document.getElementById('qtMsg'); el.textContent=t; el.className='qt-msg '+c; }
 
 // ═══════════════════════════════════════════════════════════
 // ALERTS TAB
@@ -1762,7 +1567,6 @@ function renderAlerts(rows, tf='daily') {
     <td>${r.expected_breakout_date}</td>
     <td style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
       ${chartBtn(r.symbol, r, tf)}
-      ${tradeBtn(r.symbol, r.buy_price, r.stop_loss, r.target1)}
       ${pinBtn(r.symbol, r, tf)}
     </td>
   </tr>`).join('')}
@@ -2008,157 +1812,9 @@ function renderStocks() {
       <td>${pb} ${sb}</td><td>${cf}</td>
       <td style="display:flex;gap:5px;align-items:center">
         ${chartBtn(s.symbol,null)}
-        ${tradeBtn(s.symbol,s.close||0,0,0)}
       </td>
     </tr>`;
   }).join('');
-}
-
-// ═══════════════════════════════════════════════════════════
-// PAPER TRADING
-// ═══════════════════════════════════════════════════════════
-function prefillTrade(sym, buy, sl, tgt) {
-  switchTab('paper');
-  document.getElementById('pt-sym').value = sym;
-  document.getElementById('pt-buy').value = buy||'';
-  document.getElementById('pt-sl').value  = sl ||'';
-  document.getElementById('pt-tgt').value = tgt||'';
-  document.getElementById('pt-qty').value = 1;
-  document.getElementById('pt-buy').focus();
-}
-
-async function placeTrade() {
-  const sym = document.getElementById('pt-sym').value.trim().toUpperCase();
-  const qty = parseInt(document.getElementById('pt-qty').value)||1;
-  const buy = parseFloat(document.getElementById('pt-buy').value)||0;
-  const sl  = parseFloat(document.getElementById('pt-sl').value)||0;
-  const tgt = parseFloat(document.getElementById('pt-tgt').value)||0;
-  const setup = document.getElementById('pt-setup').value;
-  const notes = document.getElementById('pt-notes').value.trim();
-  if (!sym||!buy) { setPtMsg('❌ Symbol and buy price required.','err'); return; }
-  const res = await fetch('/api/paper/buy',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({symbol:sym,quantity:qty,buy_price:buy,stop_loss:sl,target:tgt,setup,notes})});
-  const d = await res.json();
-  if(d.error){setPtMsg('❌ '+d.error,'err');}
-  else{
-    setPtMsg(`✅ Bought ${qty}×${sym} @ ₹${buy}. Bal: ₹${fmt(d.balance)}`,'ok');
-    document.getElementById('pt-notes').value = '';
-    loadPortfolio();
-  }
-}
-
-async function sellTrade(id) {
-  if(!confirm('Exit this position at current market price?')) return;
-  const res = await fetch('/api/paper/sell/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  const d = await res.json();
-  if(d.error){alert(d.error);}
-  else{alert(`Trade closed. P&L: ₹${fmt(d.pnl)}`);loadPortfolio();loadJournal();}
-}
-
-function setPtMsg(t,c){const el=document.getElementById('ptMsg');el.textContent=t;el.className='form-msg '+c;}
-
-async function loadPortfolio() {
-  const res = await fetch('/api/paper/portfolio').catch(()=>null); if(!res) return;
-  const d = await res.json();
-
-  // Pro Broker Metrics
-  document.getElementById('ptBal').textContent          = '₹' + fmt(d.balance);
-  document.getElementById('ptInvested').textContent     = '₹' + fmt(d.total_invested || 0);
-  document.getElementById('ptCurVal').textContent       = '₹' + fmt(d.total_cur_val || 0);
-  
-  const unPnl = d.unrealized_pnl || 0;
-  const unPnlEl = document.getElementById('ptUnrealizedPnl');
-  unPnlEl.textContent = (unPnl >= 0 ? '+ ' : '- ') + '₹' + fmt(Math.abs(unPnl));
-  unPnlEl.className   = 'val ' + (unPnl >= 0 ? 'green' : 'red');
-
-  const unPnlPct = d.total_invested ? ((unPnl / d.total_invested) * 100).toFixed(2) : '0.00';
-  const unPnlPctEl = document.getElementById('ptUnrealizedPnlPct');
-  unPnlPctEl.textContent = (parseFloat(unPnlPct)>=0?'+':'') + unPnlPct + '%';
-  unPnlPctEl.style.color = unPnl >= 0 ? 'var(--green)' : 'var(--red)';
-
-  const rPnl = d.realized_pnl || 0;
-  const rPnlEl = document.getElementById('ptRealizedPnl');
-  rPnlEl.textContent = (rPnl >= 0 ? '+ ' : '- ') + '₹' + fmt(Math.abs(rPnl));
-  rPnlEl.className   = 'val ' + (rPnl >= 0 ? 'green' : 'red');
-
-  document.getElementById('ptPortVal').textContent = '₹' + fmt(d.portfolio_val);
-
-  const totPnl = d.total_pnl || 0;
-  const totPnlPct = (d.total_pnl_pct || 0).toFixed(2);
-  const totPnlEl = document.getElementById('ptTotalPnl');
-  totPnlEl.textContent = `Net P&L: ${(totPnl>=0?'+':'-')}₹${fmt(Math.abs(totPnl))} (${(parseFloat(totPnlPct)>=0?'+':'')}${totPnlPct}%)`;
-  totPnlEl.style.color = totPnl >= 0 ? 'var(--green)' : 'var(--red)';
-
-  const histCount = d.history_count ?? (d.history ? d.history.length : 0);
-  document.getElementById('ptOpenTag').textContent = d.open_trades.length;
-  document.getElementById('ptHistTag').textContent = histCount;
-  document.getElementById('tc-journal').textContent = histCount;
-
-  // Tab badge
-  const tbl = document.getElementById('tc-paper');
-  tbl.textContent = d.open_trades.length; tbl.className='tab-count'+(d.open_trades.length>0?' green':'');
-
-  // Open trades
-  if(!d.open_trades.length){
-    document.getElementById('ptOpenTbody').innerHTML=`<tr><td colspan="14" class="empty">No open positions. Use the form above to place a trade.</td></tr>`;
-  } else {
-    document.getElementById('ptOpenTbody').innerHTML = d.open_trades.map(t=>{
-      const pnlC = t.pnl>=0?'pnl-pos':'pnl-neg';
-      const slNear  = t.sl_dist  !== null && t.sl_dist  < 3;
-      const tgtNear = t.tgt_dist !== null && t.tgt_dist < 3;
-      return `<tr data-id="${t.id}" data-sym="${t.symbol}" data-qty="${t.quantity}" data-buy="${t.buy_price}" data-sl="${t.stop_loss||0}" data-tgt="${t.target||0}">
-        <td><span class="sym">${t.symbol}</span></td>
-        <td>${t.quantity}</td>
-        <td>₹${fmt(t.buy_price)}</td>
-        <td class="pt-ltp">₹${fmt(t.ltp)}</td>
-        <td>₹${fmt(t.invested)}</td>
-        <td class="pt-curval">₹${fmt(t.cur_val)}</td>
-        <td class="${pnlC} pt-pnl">${t.pnl>=0?'+ ':'- '}₹${fmt(Math.abs(t.pnl))}</td>
-        <td class="${pnlC} pt-pnlpct">${t.pnl_pct>=0?'+':''}${t.pnl_pct}%</td>
-        <td class="${slNear?'sl-near':''}">${t.stop_loss?'₹'+fmt(t.stop_loss):'—'}</td>
-        <td class="${tgtNear?'tgt-near':''}">${t.target?'₹'+fmt(t.target):'—'}</td>
-        <td class="${slNear?'sl-near':''}">${t.sl_dist!==null?t.sl_dist+'%':'—'}</td>
-        <td class="${tgtNear?'tgt-near':''}">${t.tgt_dist!==null?t.tgt_dist+'%':'—'}</td>
-        <td style="font-size:11px;color:var(--muted)">${t.entry_time}</td>
-        <td style="display:flex;gap:5px;align-items:center">
-          ${chartBtn(t.symbol,null)}
-          <button class="exit-btn" onclick="sellTrade('${t.id}')">Exit</button>
-        </td>
-      </tr>`;
-    }).join('');
-  }
-
-  // History
-  if(!d.history.length){
-    document.getElementById('ptHistTbody').innerHTML=`<tr><td colspan="11" class="empty">No closed trades yet.</td></tr>`;
-  } else {
-    document.getElementById('ptHistTbody').innerHTML = d.history.map(t=>{
-      const rc = t.result==='profit'?'badge-profit':'badge-loss';
-      const pnlC = t.pnl>=0?'pnl-pos':'pnl-neg';
-      return `<tr>
-        <td><span class="sym">${t.symbol}</span></td>
-        <td><span class="badge ${bClass(t.setup)}">${t.setup||'Manual'}</span></td>
-        <td>${t.quantity}</td>
-        <td>₹${fmt(t.buy_price)}</td>
-        <td>₹${fmt(t.sell_price)}</td>
-        <td class="${pnlC}">${t.pnl>=0?'+ ':'- '}₹${fmt(Math.abs(t.pnl))}</td>
-        <td class="${pnlC}">${t.pnl_pct ? (t.pnl_pct>=0?'+':'')+t.pnl_pct+'%' : '—'}</td>
-        <td><span class="badge ${rc}">${t.result==='profit'?'✅ Profit':'❌ Loss'}</span></td>
-        <td style="font-size:11px;color:var(--muted)">${t.exit_reason||'Manual'}</td>
-        <td style="font-size:11px;color:var(--muted)">${t.entry_time}</td>
-        <td style="font-size:11px;color:var(--muted)">${t.exit_time||'—'}</td>
-      </tr>`;
-    }).join('');
-  }
-}
-
-function showResetDialog() {
-  const bal = prompt('Reset paper account. Enter starting balance (₹):','100000');
-  if (bal===null) return;
-  const n = parseFloat(bal);
-  if (!n||n<1000) { alert('Enter a valid balance (min ₹1000)'); return; }
-  fetch('/api/paper/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({balance:n})})
-    .then(()=>{ setPtMsg(`Account reset to ₹${fmt(n)}`,'ok'); loadPortfolio(); loadJournal(); });
 }
 
 // ─── Real-time LTP patch for Alerts (every 8s) ─────────────────────────────
@@ -2191,189 +1847,6 @@ async function patchAlertLtps() {
       }
     }
   } catch(e) { /* silent */ }
-}
-
-// ─── Real-time LTP + P&L patch for Paper Trading (every 8s) ────────────────
-async function patchPortfolioLtps() {
-  if (!_isMarketHours()) return;
-  if (!document.getElementById('panel-paper')?.classList.contains('active')) return;
-  const rows = document.querySelectorAll('#ptOpenTbody tr[data-sym]');
-  if (!rows.length) return;
-  const symSet = new Set(Array.from(rows).map(r => r.dataset.sym).filter(Boolean));
-  if (!symSet.size) return;
-
-  try {
-    const res = await fetch('/api/ltp?symbols=' + [...symSet].join(',')).catch(()=>null);
-    if (!res || !res.ok) return;
-    const data = await res.json();
-
-    let totalCurVal = 0, totalInvested = 0, totalPnl = 0;
-
-    rows.forEach(row => {
-      const sym = row.dataset.sym;
-      const qty = parseFloat(row.dataset.qty) || 0;
-      const buy = parseFloat(row.dataset.buy) || 0;
-      const q   = data[sym];
-      if (!q || !qty || !buy) return;
-
-      const ltp      = q.ltp;
-      const invested = buy * qty;
-      const curVal   = ltp * qty;
-      const pnl      = curVal - invested;
-      const pnlPct   = ((ltp - buy) / buy * 100).toFixed(2);
-      const pnlC     = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-
-      totalInvested += invested;
-      totalCurVal   += curVal;
-      totalPnl      += pnl;
-
-      const ltpCell    = row.querySelector('.pt-ltp');
-      const curValCell = row.querySelector('.pt-curval');
-      const pnlCell    = row.querySelector('.pt-pnl');
-      const pnlPctCell = row.querySelector('.pt-pnlpct');
-
-      if (ltpCell) {
-        ltpCell.textContent = '₹' + fmt(ltp);
-        ltpCell.style.transition = 'background 0.3s';
-        ltpCell.style.background = pnl >= 0 ? 'rgba(46,204,113,0.18)' : 'rgba(231,76,60,0.18)';
-        setTimeout(() => { ltpCell.style.background = ''; }, 600);
-      }
-      if (curValCell) { curValCell.textContent = '₹' + fmt(curVal); }
-      if (pnlCell)    { pnlCell.textContent    = (pnl >= 0 ? '+ ' : '- ') + '₹' + fmt(Math.abs(pnl)); pnlCell.className = pnlC + ' pt-pnl'; }
-      if (pnlPctCell) { pnlPctCell.textContent = (pnlPct >= 0 ? '+' : '') + pnlPct + '%'; pnlPctCell.className = pnlC + ' pt-pnlpct'; }
-    });
-
-    const unPnlEl = document.getElementById('ptUnrealizedPnl');
-    if (unPnlEl) {
-      unPnlEl.textContent = (totalPnl >= 0 ? '+ ' : '- ') + '₹' + fmt(Math.abs(totalPnl));
-      unPnlEl.className   = 'val ' + (totalPnl >= 0 ? 'green' : 'red');
-    }
-    const unPnlPct = totalInvested ? ((totalPnl / totalInvested) * 100).toFixed(2) : '0.00';
-    const unPnlPctEl = document.getElementById('ptUnrealizedPnlPct');
-    if (unPnlPctEl) unPnlPctEl.textContent = (parseFloat(unPnlPct)>=0?'+':'') + unPnlPct + '%';
-
-    const curValEl = document.getElementById('ptCurVal');
-    if (curValEl) curValEl.textContent = '₹' + fmt(totalCurVal);
-
-    const portEl = document.getElementById('ptPortVal');
-    if (portEl) {
-      const balText = document.getElementById('ptBal')?.textContent || '0';
-      const bal = parseFloat(balText.replace(/[₹,]/g, '')) || 0;
-      portEl.textContent = '₹' + fmt(bal + totalCurVal);
-    }
-  } catch(e) { /* silent */ }
-}
-
-
-// TRADING JOURNAL
-// ═══════════════════════════════════════════════════════════
-async function loadJournal() {
-  const res = await fetch('/api/paper/journal').catch(()=>null); if(!res) return;
-  const d = await res.json();
-  journalRows = d.history || [];
-  const s = d.summary || {};
-  document.getElementById('jTotal').textContent = s.total_trades || 0;
-  document.getElementById('jWinRate').textContent = (s.win_rate || 0).toFixed(2) + '%';
-  document.getElementById('jWinLoss').textContent = `${s.wins||0}W / ${s.losses||0}L`;
-  document.getElementById('jNet').textContent = ((s.net_pnl||0)>=0?'+ ':'- ')+'₹'+fmt(Math.abs(s.net_pnl||0));
-  document.getElementById('jNet').className = 'val '+((s.net_pnl||0)>=0?'green':'red');
-  document.getElementById('jProfitFactor').textContent = s.profit_factor ? Number(s.profit_factor).toFixed(2) : '0.00';
-  document.getElementById('jAvgWin').textContent = '₹'+fmt(s.avg_win||0);
-  document.getElementById('jAvgLoss').textContent = 'Avg Loss: ₹'+fmt(Math.abs(s.avg_loss||0));
-  document.getElementById('jBestTrade').textContent = '₹'+fmt(s.best_trade||0);
-  document.getElementById('jWorstTrade').textContent = 'Worst: ₹'+fmt(Math.abs(s.worst_trade||0));
-  document.getElementById('tc-journal').textContent = journalRows.length;
-  renderJournal();
-}
-
-function renderJournal() {
-  const q = (document.getElementById('jSearch').value||'').toUpperCase().trim();
-  const result = document.getElementById('jResult').value;
-  const setup = document.getElementById('jSetup').value;
-  let rows = journalRows.filter(t => {
-    const hay = `${t.symbol||''} ${t.setup||''} ${t.exit_reason||''} ${t.notes||''} ${t.review||''} ${t.tags||''}`.toUpperCase();
-    if (q && !hay.includes(q)) return false;
-    if (result !== 'all' && t.result !== result) return false;
-    if (setup !== 'all' && (t.setup||'') !== setup) return false;
-    return true;
-  });
-  document.getElementById('jMeta').textContent = `Showing ${rows.length} of ${journalRows.length}`;
-  if(!rows.length){
-    document.getElementById('jTbody').innerHTML=`<tr><td colspan="15" class="empty">No journal entries match. Complete trades to log automatically.</td></tr>`;
-    return;
-  }
-  document.getElementById('jTbody').innerHTML = rows.map(t => {
-    const rc = t.result==='profit'?'badge-profit':'badge-loss';
-    const pnlC = t.pnl>=0?'pnl-pos':'pnl-neg';
-    const pnlPct = t.pnl_pct !== undefined && t.pnl_pct !== null ? t.pnl_pct : (t.buy_price ? ((t.sell_price - t.buy_price) / t.buy_price * 100) : 0);
-    return `<tr>
-      <td><span class="sym">${esc(t.symbol)}</span></td>
-      <td><select class="journal-setup" id="js-${t.id}" onchange="saveJournal('${t.id}')">${setupOptions(t.setup)}</select></td>
-      <td>${t.quantity}</td>
-      <td>₹${fmt(t.buy_price)}</td>
-      <td>₹${fmt(t.sell_price)}</td>
-      <td class="${pnlC}">${t.pnl>=0?'+ ':'- '}₹${fmt(Math.abs(t.pnl))}</td>
-      <td class="${pnlC}">${Number(pnlPct)>=0?'+':''}${Number(pnlPct).toFixed(2)}%</td>
-      <td><span class="badge ${rc}">${t.result==='profit'?'✅ Profit':'❌ Loss'}</span></td>
-      <td style="font-size:11px;color:var(--muted)">${esc(t.exit_reason||'Manual')}</td>
-      <td><input class="journal-setup" style="min-width:110px" id="jt-${t.id}" value="${esc(t.tags||'')}" placeholder="e.g. breakout, pole" onblur="saveJournal('${t.id}')"></td>
-      <td><textarea class="journal-text" id="jn-${t.id}" placeholder="Plan & entry notes" onblur="saveJournal('${t.id}')">${esc(t.notes||'')}</textarea></td>
-      <td><textarea class="journal-text" id="jr-${t.id}" placeholder="Post-trade review & lessons" onblur="saveJournal('${t.id}')">${esc(t.review||'')}</textarea></td>
-      <td style="font-size:11px;color:var(--muted)">${esc(t.entry_time||'')}</td>
-      <td style="font-size:11px;color:var(--muted)">${esc(t.exit_time||'')}</td>
-      <td style="display:flex;gap:5px;align-items:center">
-        ${chartBtn(t.symbol, null)}
-        <button class="save-btn" id="sbtn-${t.id}" onclick="saveJournal('${t.id}')" title="Save changes">Save</button>
-        <button class="wl-remove-btn" onclick="deleteJournal('${t.id}')" title="Delete entry">✕</button>
-      </td>
-    </tr>`;
-  }).join('');
-}
-
-async function saveJournal(id) {
-  const setupEl = document.getElementById('js-'+id);
-  const notesEl = document.getElementById('jn-'+id);
-  const reviewEl = document.getElementById('jr-'+id);
-  const tagsEl = document.getElementById('jt-'+id);
-  if (!setupEl) return;
-  const body = {
-    setup: setupEl.value,
-    notes: notesEl ? notesEl.value : '',
-    review: reviewEl ? reviewEl.value : '',
-    tags: tagsEl ? tagsEl.value : '',
-  };
-  const res = await fetch('/api/paper/journal/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const d = await res.json();
-  if(d.error){alert(d.error);return;}
-  const btn = document.getElementById('sbtn-'+id);
-  if (btn) {
-    btn.textContent = '✓ Saved!';
-    btn.style.background = 'rgba(16,208,122,0.25)';
-    btn.style.borderColor = 'rgba(16,208,122,0.5)';
-    btn.style.color = 'var(--green)';
-    setTimeout(() => {
-      btn.textContent = 'Save';
-      btn.style.background = '';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-    }, 1500);
-  }
-}
-
-async function deleteJournal(id) {
-  if (!confirm('Delete this journal record?')) return;
-  const res = await fetch('/api/paper/journal/'+id, { method: 'DELETE' });
-  const d = await res.json();
-  if (d.error) { alert(d.error); return; }
-  loadJournal();
-}
-
-async function clearJournal() {
-  if (!confirm('Are you sure you want to clear ALL journal entries? This cannot be undone.')) return;
-  const res = await fetch('/api/paper/journal/clear', { method: 'POST' });
-  const d = await res.json();
-  if (d.error) { alert(d.error); return; }
-  loadJournal();
 }
 
 function loadSettings() {
@@ -2721,14 +2194,9 @@ updateWLBadge();
 refreshAlerts();
 refreshWeeklyAlerts();
 loadStocks();
-loadPortfolio();
-loadJournal();
-// Real-time live price patches — run every 8s across all panels
+// Real-time live price patches — run every 8s across active panels
 setInterval(patchLivePrices,    8000);  // Stocks tab: price/change% flash
 setInterval(patchAlertLtps,     8000);  // Alerts tab: LTP flash
-setInterval(patchPortfolioLtps, 8000);  // Paper tab: LTP + P&L flash
-// Full portfolio reload every 30s (only when panel is visible)
-setInterval(()=>{ if(document.getElementById('panel-paper').classList.contains('active'))  loadPortfolio(); }, 30000);
 // Watchlist LTP auto-refresh every 60s (lightweight)
 setInterval(()=>{ if(document.getElementById('panel-watchlist')?.classList.contains('active')) refreshWatchlistLtp(); }, 60000);
 window.addEventListener('resize', ()=>{ if(chartObj) chartObj.applyOptions({width:document.getElementById('chartContainer').clientWidth}); });
