@@ -1,14 +1,23 @@
 import io
 import datetime as dt
-import openpyxl
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
+
+try:
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    HAS_OPENPYXL = True
+except ImportError:
+    openpyxl = None
+    HAS_OPENPYXL = False
 
 
 def create_prebreakout_excel(daily_watch, weekly_watch, confirmed_daily=None, confirmed_weekly=None):
     """Generate a professionally styled Excel workbook containing pre-breakout stock candidates.
     Returns an openpyxl Workbook object.
     """
+    if not HAS_OPENPYXL or openpyxl is None:
+        raise ImportError("openpyxl is not installed")
+
     wb = openpyxl.Workbook()
     # Remove default sheet
     wb.remove(wb.active)

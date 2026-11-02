@@ -28,7 +28,12 @@ from flask import Flask, request, redirect, jsonify, render_template, session, u
 from dotenv import load_dotenv
 
 import strategies
-from excel_export import create_prebreakout_excel
+try:
+    from excel_export import create_prebreakout_excel
+    HAS_EXCEL = True
+except ImportError:
+    create_prebreakout_excel = None
+    HAS_EXCEL = False
 
 # Load environment variables from .env file
 load_dotenv()
@@ -291,6 +296,10 @@ init_db()
 _load_paper_state()
 
 
+# Exclude known dummy / test / delisted ticker symbols from the NSE constituent list
+EXCLUDE_SYMBOLS = {"DUMMYHEG", "BAGMANE"}
+
+
 def load_nifty500_symbols():
     """Fetch the official Nifty 500 constituent list from NSE. Falls back to
     candle_cache or local nifty500.txt if NSE blocks/changes the URL."""
@@ -304,7 +313,7 @@ def load_nifty500_symbols():
             parts = line.split(",")
             if len(parts) >= 3:
                 s = parts[2].strip().upper()
-                if s:
+                if s and s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY"):
                     symbols.append(s)
         if len(symbols) >= 100:
             return symbols
@@ -316,7 +325,7 @@ def load_nifty500_symbols():
         try:
             with gzip.open(CANDLE_CACHE_FILE, "rt", encoding="utf-8") as f:
                 cdata = json.load(f)
-                d_syms = list(cdata.get("daily", {}).keys())
+                d_syms = [s for s in cdata.get("daily", {}).keys() if s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY")]
                 if len(d_syms) >= 100:
                     return sorted(d_syms)
         except Exception:
@@ -325,7 +334,7 @@ def load_nifty500_symbols():
     path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
     if os.path.exists(path):
         with open(path) as f:
-            return [line.strip().upper() for line in f if line.strip() and not line.startswith("#")]
+            return [line.strip().upper() for line in f if line.strip() and not line.startswith("#") and line.strip().upper() not in EXCLUDE_SYMBOLS and not line.strip().upper().startswith("DUMMY")]
     return []
 
 
@@ -538,17 +547,17 @@ def evaluate_symbol(symbol, candles, live_ltp):
     if not passes_liquidity_filter(candles):
         return None
     try:
-        return strategies.build_alert(symbol, candles, live_ltp)
+        return strategies.build_alert(symbol, candles, live_ltp, timeframe="daily")
     except Exception:
         return None
 
 
 def evaluate_symbol_weekly(symbol, candles, live_ltp):
     """Hand off weekly candles to the chart-pattern scanner."""
-    if len(candles) < 45:
+    if len(candles) < 20:
         return None
     try:
-        return strategies.build_alert(symbol, candles, live_ltp)
+        return strategies.build_alert(symbol, candles, live_ltp, timeframe="weekly")
     except Exception:
         return None
 
@@ -831,7 +840,61 @@ def _evaluate_all_symbols():
     return confirmed, watch, w_confirmed, w_watch
 
 
+_scan_event = threading.Event()
+_latest_synced_date = None
+
+
+def sync_latest_daily_candles():
+    """Fetch latest 5-day candles for all symbols and merge into cache."""
+    global _latest_synced_date
+    universe = STATE.get("universe") or []
+    if not universe:
+        return
+    app.logger.info("Syncing latest daily candles for all symbols...")
+    batch_size = 100
+    total_batches = (len(universe) + batch_size - 1) // batch_size
+    
+    for i in range(0, len(universe), batch_size):
+        batch = universe[i:i+batch_size]
+        tickers_ns = [f"{sym}.NS" for sym in batch]
+        STATE["scan_progress"] = f"Batch {i//batch_size + 1}/{total_batches}"
+        try:
+            df = yf.download(tickers_ns, period="5d", interval="1d", ignore_tz=True, progress=False)
+            for sym in batch:
+                ticker_ns = f"{sym}.NS"
+                try:
+                    ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
+                    if ticker_df is None or ticker_df.empty:
+                        continue
+                    ticker_df = ticker_df.dropna(subset=["Close"])
+                    new_candles = []
+                    for index, row in ticker_df.iterrows():
+                        ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
+                        new_candles.append([
+                            ts,
+                            float(row["Open"]),
+                            float(row["High"]),
+                            float(row["Low"]),
+                            float(row["Close"]),
+                            int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+                            0
+                        ])
+                    if new_candles:
+                        if sym in _candle_cache:
+                            _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
+                        else:
+                            _candle_cache[sym] = new_candles
+                except Exception as e:
+                    app.logger.warning(f"Error parsing live daily for {sym}: {e}")
+        except Exception as e:
+            app.logger.error(f"Error downloading live batch: {e}")
+        time.sleep(0.5)
+    _latest_synced_date = dt.date.today()
+    save_candle_cache_to_disk()
+
+
 def scan_loop():
+    global _latest_synced_date
     STATE["scanning"] = True
 
     # Try to load cache from disk at startup
@@ -859,50 +922,9 @@ def scan_loop():
             # Make sure historical cache has data for missing symbols
             warm_cache_for_all_symbols()
 
-            # If market is open, fetch latest 5 days of data to update live prices
-            if market_open:
-                app.logger.info("Market is open: fetching live updates for all symbols...")
-                batch_size = 100
-                total_batches = (len(universe) + batch_size - 1) // batch_size
-                
-                for i in range(0, len(universe), batch_size):
-                    batch = universe[i:i+batch_size]
-                    tickers_ns = [f"{sym}.NS" for sym in batch]
-                    STATE["scan_progress"] = f"Live Batch {i//batch_size + 1}/{total_batches}"
-                    try:
-                        df = yf.download(tickers_ns, period="5d", interval="1d", ignore_tz=True, progress=False)
-                        for sym in batch:
-                            ticker_ns = f"{sym}.NS"
-                            try:
-                                if len(tickers_ns) == 1:
-                                    ticker_df = df
-                                else:
-                                    ticker_df = df.xs(ticker_ns, axis=1, level=1)
-                                    
-                                ticker_df = ticker_df.dropna(subset=["Close"])
-                                new_candles = []
-                                for index, row in ticker_df.iterrows():
-                                    ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-                                    new_candles.append([
-                                        ts,
-                                        float(row["Open"]),
-                                        float(row["High"]),
-                                        float(row["Low"]),
-                                        float(row["Close"]),
-                                        int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                                        0
-                                    ])
-                                if new_candles:
-                                    if sym in _candle_cache:
-                                        _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
-                                    else:
-                                        _candle_cache[sym] = new_candles
-                            except Exception as e:
-                                app.logger.warning(f"Error parsing live daily for {sym}: {e}")
-                    except Exception as e:
-                        app.logger.error(f"Error downloading live batch: {e}")
-                    time.sleep(0.5)
-                save_candle_cache_to_disk()
+            # If market is open, or if we haven't synced today's candles yet:
+            if market_open or _latest_synced_date != dt.date.today():
+                sync_latest_daily_candles()
 
             # Run evaluation on all symbols
             confirmed, watch, w_confirmed, w_watch = _evaluate_all_symbols()
@@ -925,7 +947,8 @@ def scan_loop():
             app.logger.exception("Error in scan_loop")
 
         sleep_secs = POLL_INTERVAL_SECONDS if is_market_open() else 300  # re-scan every 5 min when market closed
-        time.sleep(sleep_secs)
+        _scan_event.clear()
+        _scan_event.wait(timeout=sleep_secs)
 
 
 _thread_started = False
@@ -970,6 +993,9 @@ def api_signals_weekly():
 
 @app.route("/api/export/prebreakout")
 def export_prebreakout_excel():
+    if not HAS_EXCEL or create_prebreakout_excel is None:
+        return jsonify({"error": "openpyxl is not installed. Excel export is unavailable."}), 503
+
     tf = request.args.get("timeframe", "both").lower()
 
     daily_w = STATE.get("watch_alerts", []) if tf in ("daily", "both", "all") else []
@@ -1109,8 +1135,17 @@ def get_or_fetch_weekly_candles(symbol):
 
 
 # ---------------------------------------------------------------------------
-# Cache management endpoint
+# Cache management & Force Rescan endpoints
 # ---------------------------------------------------------------------------
+@app.route("/api/scan/force", methods=["POST"])
+def api_scan_force():
+    """Trigger an immediate re-scan and fetch fresh candle data."""
+    global _latest_synced_date
+    _latest_synced_date = None  # reset to force candle sync
+    _scan_event.set()           # wake up the scan loop immediately
+    return jsonify({"success": True, "message": "Scan triggered immediately."})
+
+
 @app.route("/api/cache/clear", methods=["POST"])
 def api_clear_cache():
     """Force-clear the candle cache so fresh data is fetched on next request."""
@@ -1212,9 +1247,9 @@ def api_pattern(symbol):
 
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
-        tri = strategies.detect_triangle(candles)
+        tri = strategies.detect_triangle(candles, timeframe="daily")
         if tri:
-            LOOKBACK = 40
+            LOOKBACK = tri.get("lookback", 40)
             w = candles[-LOOKBACK:]
             highs = [c[2] for c in w]
             lows  = [c[3] for c in w]
@@ -1223,9 +1258,10 @@ def api_pattern(symbol):
             ss, si_, _ = strategies.linreg(sl_)
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
+            res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
             patterns["triangle"] = {
                 "type": tri["type"],
-                "resistance_line": trendline_pts(rs, ri, 0, lx, off),
+                "resistance_line": res_line,
                 "support_line":    trendline_pts(ss, si_, 0, lx, off),
                 "resistance_level": tri["resistance_now"],
                 "support_level":    tri["support_now"],
@@ -1316,9 +1352,9 @@ def api_pattern_weekly(symbol):
 
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
-        tri = strategies.detect_triangle(candles)
+        tri = strategies.detect_triangle(candles, timeframe="weekly")
         if tri:
-            LOOKBACK = 40
+            LOOKBACK = tri.get("lookback", 40)
             w = candles[-LOOKBACK:]
             highs = [c[2] for c in w]
             lows  = [c[3] for c in w]
@@ -1327,9 +1363,10 @@ def api_pattern_weekly(symbol):
             ss, si_, _ = strategies.linreg(sl_)
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
+            res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
             patterns["triangle"] = {
                 "type": tri["type"],
-                "resistance_line": trendline_pts(rs, ri, 0, lx, off),
+                "resistance_line": res_line,
                 "support_line":    trendline_pts(ss, si_, 0, lx, off),
                 "resistance_level": tri["resistance_now"],
                 "support_level":    tri["support_now"],

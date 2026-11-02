@@ -832,6 +832,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <span><span class="dot" id="marketDot"></span><span id="marketText">checking…</span></span>
     <span id="lastScan">—</span>
     <span id="uSize"></span>
+    <button id="btnRescan" onclick="triggerRescan()" style="font-size:11px;font-weight:600;color:var(--blue);background:rgba(77,142,245,0.12);border:1px solid rgba(77,142,245,0.3);padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;" title="Fetch latest quotes and re-evaluate patterns immediately">⟳ Rescan Now</button>
     <a href="/api/export/prebreakout?timeframe=both" class="dl-excel-btn hdr-dl-btn" title="Download all 4 sheets: Daily Pre-Breakouts, Weekly Pre-Breakouts, Confirmed Breakouts">📊 Download All Sheets (.xlsx)</a>
     <span id="hdrProg" style="margin-left:auto;"></span>
     <a href="/logout" id="logoutLink" style="font-size:11px;color:var(--muted);text-decoration:none;padding:4px 10px;border:1px solid var(--border);border-radius:6px;display:none" title="Log out of secure session">🔓 Logout</a>
@@ -2683,6 +2684,32 @@ async function refreshWatchlistLtp() {
     }
   } finally {
     if (btn) { btn.textContent = '⟳ Refresh LTP'; btn.disabled = false; }
+  }
+}
+
+async function triggerRescan() {
+  const btn = document.getElementById('btnRescan');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Rescanning…';
+  }
+  try {
+    const res = await fetch('/api/scan/force', { method: 'POST' });
+    const data = await res.json();
+    setTimeout(() => {
+      refreshAlerts();
+      refreshWeeklyAlerts();
+      loadStocks();
+    }, 1500);
+  } catch (e) {
+    alert('Rescan error: ' + e);
+  } finally {
+    setTimeout(() => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⟳ Rescan Now';
+      }
+    }, 3500);
   }
 }
 
