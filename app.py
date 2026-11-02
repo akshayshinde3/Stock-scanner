@@ -295,24 +295,77 @@ def update_settings():
 # ---------------------------------------------------------------------------
 # Data fetch helpers (Yahoo Finance)
 # ---------------------------------------------------------------------------
+SYMBOL_MAP = {
+    "MCDOWELL-N": "UNITDSPR",
+    "LTI": "LTIM",
+    "CADILAHC": "ZYDUSLIFE",
+    "MINDTREE": "LTIM",
+    "TATAMTRDVR": "TATAMOTORS",
+}
+
+_yf_session = None
+
+def get_yf_session():
+    """Return a shared persistent requests.Session configured with browser headers."""
+    global _yf_session
+    if _yf_session is None:
+        _yf_session = requests.Session()
+        _yf_session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+    return _yf_session
+
+def reset_yf_session():
+    """Reset session and crumb cache if Yahoo returns 429 or 401."""
+    global _yf_session
+    try:
+        if _yf_session:
+            _yf_session.close()
+    except Exception:
+        pass
+    _yf_session = None
+    return get_yf_session()
+
+
 def get_daily_candles(symbol, days=365):
-    ticker_symbol = f"{symbol.upper()}.NS"
-    df = yf.download([ticker_symbol], period="1y", interval="1d", ignore_tz=True, progress=False)
-    df = df.xs(ticker_symbol, axis=1, level=1).dropna(subset=["Close"])
-    
-    candles = []
-    for index, row in df.iterrows():
-        ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-        candles.append([
-            ts,
-            float(row["Open"]),
-            float(row["High"]),
-            float(row["Low"]),
-            float(row["Close"]),
-            int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-            0
-        ])
-    return candles
+    mapped_sym = SYMBOL_MAP.get(symbol.upper(), symbol.upper())
+    ticker_symbol = f"{mapped_sym}.NS"
+    try:
+        df = yf.download(
+            [ticker_symbol],
+            period="1y",
+            interval="1d",
+            ignore_tz=True,
+            progress=False,
+            threads=False,
+            session=get_yf_session()
+        )
+        if df is None or df.empty:
+            return []
+        if isinstance(df.columns, pd.MultiIndex):
+            df = df.xs(ticker_symbol, axis=1, level=1)
+        df = df.dropna(subset=["Close"])
+        
+        candles = []
+        for index, row in df.iterrows():
+            ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
+            candles.append([
+                ts,
+                float(row["Open"]),
+                float(row["High"]),
+                float(row["Low"]),
+                float(row["Close"]),
+                int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
+                0
+            ])
+        return candles
+    except Exception as e:
+        app.logger.warning(f"Error fetching daily candles for {symbol}: {e}")
+        if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
+            reset_yf_session()
+        return []
 
 
 def resample_daily_to_weekly(daily_candles):
@@ -383,40 +436,52 @@ def get_yfinance_quotes(symbols):
     if not symbols:
         return {}
     
-    tickers = [f"{sym.upper()}.NS" for sym in symbols]
-    df = yf.download(tickers, period="5d", ignore_tz=True, progress=False)
+    mapped_to_orig = {f"{SYMBOL_MAP.get(sym.upper(), sym.upper())}.NS": sym.upper() for sym in symbols}
+    tickers = list(mapped_to_orig.keys())
     
-    result = {}
-    for sym in symbols:
-        ticker_ns = f"{sym.upper()}.NS"
-        try:
-            ticker_df = df.xs(ticker_ns, axis=1, level=1)
-            close_col = ticker_df['Close'].dropna()
-            vol_col = ticker_df['Volume'].dropna()
-            
-            if len(close_col) >= 1:
-                ltp = float(close_col.iloc[-1])
-                volume = int(vol_col.iloc[-1]) if len(vol_col) >= 1 else 0
+    try:
+        session = get_yf_session()
+        df = yf.download(tickers, period="5d", ignore_tz=True, progress=False, threads=False, session=session)
+        if df is None or df.empty:
+            return {}
+        
+        result = {}
+        for ticker_ns, sym in mapped_to_orig.items():
+            try:
+                ticker_df = _extract_ticker_df(df, ticker_ns, tickers)
+                if ticker_df is None or ticker_df.empty:
+                    continue
+                close_col = ticker_df['Close'].dropna()
+                vol_col = ticker_df['Volume'].dropna()
                 
-                if len(close_col) >= 2:
-                    prev_close = float(close_col.iloc[-2])
-                    net_change = ltp - prev_close
-                    change_pct = (net_change / prev_close) * 100
-                else:
-                    prev_close = ltp
-                    net_change = 0.0
-                    change_pct = 0.0
+                if len(close_col) >= 1:
+                    ltp = float(close_col.iloc[-1])
+                    volume = int(vol_col.iloc[-1]) if len(vol_col) >= 1 else 0
                     
-                result[sym.upper()] = {
-                    "ltp": round(ltp, 2),
-                    "change_pct": round(change_pct, 2),
-                    "volume": volume,
-                    "net_change": round(net_change, 2)
-                }
-        except Exception as e:
-            app.logger.warning(f"Error fetching yfinance quote for {sym}: {e}")
-            
-    return result
+                    if len(close_col) >= 2:
+                        prev_close = float(close_col.iloc[-2])
+                        net_change = ltp - prev_close
+                        change_pct = (net_change / prev_close) * 100
+                    else:
+                        prev_close = ltp
+                        net_change = 0.0
+                        change_pct = 0.0
+                        
+                    result[sym] = {
+                        "ltp": round(ltp, 2),
+                        "change_pct": round(change_pct, 2),
+                        "volume": volume,
+                        "net_change": round(net_change, 2)
+                    }
+            except Exception as e:
+                app.logger.warning(f"Error fetching yfinance quote for {sym}: {e}")
+                
+        return result
+    except Exception as e:
+        app.logger.warning(f"get_yfinance_quotes error: {e}")
+        if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
+            reset_yf_session()
+        return {}
 
 
 def merge_candles(existing_candles, new_candles):
@@ -568,12 +633,32 @@ def _download_batch_daily(batch, period="1y"):
     """Download daily candles for a batch of symbols and return {sym: candles}."""
     if not batch:
         return {}
-    tickers_ns = [f"{sym}.NS" for sym in batch]
+    
+    # Map symbols for Yahoo Finance
+    mapped_to_orig = {}
+    tickers_ns = []
+    for sym in batch:
+        m_sym = SYMBOL_MAP.get(sym.upper(), sym.upper())
+        t_ns = f"{m_sym}.NS"
+        mapped_to_orig[t_ns] = sym.upper()
+        tickers_ns.append(t_ns)
+
     try:
-        df = yf.download(tickers_ns, period=period, interval="1d", ignore_tz=True, progress=False, threads=True)
+        session = get_yf_session()
+        df = yf.download(
+            tickers_ns,
+            period=period,
+            interval="1d",
+            ignore_tz=True,
+            progress=False,
+            threads=False,
+            session=session
+        )
+        if df is None or df.empty:
+            return {}
+
         batch_candles = {}
-        for sym in batch:
-            ticker_ns = f"{sym}.NS"
+        for ticker_ns, sym in mapped_to_orig.items():
             try:
                 ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
                 if ticker_df is None or ticker_df.empty:
@@ -598,11 +683,13 @@ def _download_batch_daily(batch, period="1y"):
         return batch_candles
     except Exception as e:
         app.logger.error(f"Error downloading batch ({len(batch)} symbols): {e}")
+        if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
+            reset_yf_session()
         return {}
 
 
 def warm_cache_for_all_symbols(quick_only=False):
-    """Warms daily candles in parallel via ThreadPoolExecutor and instantly derives weekly candles."""
+    """Warms daily candles in controlled sequential batches and instantly derives weekly candles."""
     universe = STATE.get("universe") or []
     if not universe:
         return
@@ -614,35 +701,22 @@ def warm_cache_for_all_symbols(quick_only=False):
     total_missing = len(missing_daily)
 
     if total_missing > 0:
-        app.logger.info(f"Warming daily candles for {total_missing} symbols in parallel...")
-        batch_size = 50
+        app.logger.info(f"Warming daily candles for {total_missing} symbols in sequential batches...")
+        batch_size = 60
         batches = [missing_daily[i:i+batch_size] for i in range(0, total_missing, batch_size)]
         completed = 0
         STATE["scan_progress"] = f"0/{total_missing}"
 
-        # 1. Download Batch 0 (top liquid symbols) first, so alerts appear in 5s!
-        first_batch = batches[0]
-        b0_res = _download_batch_daily(first_batch, period="1y")
-        for sym, candles in b0_res.items():
-            _candle_cache[sym] = candles
-            _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
-        completed += len(first_batch)
-        STATE["scan_progress"] = f"{completed}/{total_missing}"
-        _evaluate_all_symbols()
-
-        # 2. Download remaining batches concurrently with ThreadPoolExecutor (4 threads)
-        remaining_batches = batches[1:]
-        if remaining_batches:
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                future_to_batch = {executor.submit(_download_batch_daily, b, "1y"): b for b in remaining_batches}
-                for future in as_completed(future_to_batch):
-                    b_res = future.result()
-                    for sym, candles in b_res.items():
-                        _candle_cache[sym] = candles
-                        _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
-                    completed += len(future_to_batch[future])
-                    STATE["scan_progress"] = f"{completed}/{total_missing}"
-                    _evaluate_all_symbols()
+        for b in batches:
+            b_res = _download_batch_daily(b, period="1y")
+            for sym, candles in b_res.items():
+                _candle_cache[sym] = candles
+                _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
+            completed += len(b)
+            STATE["scan_progress"] = f"{min(completed, total_missing)}/{total_missing}"
+            _evaluate_all_symbols()
+            if len(batches) > 1:
+                time.sleep(0.5)
 
         save_candle_cache_to_disk()
         app.logger.info("Finished warming daily & weekly candles.")
@@ -702,25 +776,25 @@ _latest_synced_date = None
 
 
 def sync_latest_daily_candles(symbols=None):
-    """Fetch latest 5-day candles for symbols and merge into cache using parallel batches."""
+    """Fetch latest 5-day candles for symbols and merge into cache using sequential pacing."""
     global _latest_synced_date
     target_symbols = symbols or STATE.get("universe") or []
     if not target_symbols:
         return
-    app.logger.info(f"Syncing live daily candles for {len(target_symbols)} symbols in parallel...")
-    batch_size = 50
+    app.logger.info(f"Syncing live daily candles for {len(target_symbols)} symbols...")
+    batch_size = 60
     batches = [target_symbols[i:i+batch_size] for i in range(0, len(target_symbols), batch_size)]
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future_to_batch = {executor.submit(_download_batch_daily, b, "5d"): b for b in batches}
-        for future in as_completed(future_to_batch):
-            b_res = future.result()
-            for sym, new_candles in b_res.items():
-                if sym in _candle_cache:
-                    _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
-                else:
-                    _candle_cache[sym] = new_candles
-                _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
+    for b in batches:
+        b_res = _download_batch_daily(b, period="5d")
+        for sym, new_candles in b_res.items():
+            if sym in _candle_cache:
+                _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
+            else:
+                _candle_cache[sym] = new_candles
+            _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
+        if len(batches) > 1:
+            time.sleep(0.4)
 
     _latest_synced_date = dt.date.today()
     save_candle_cache_to_disk()
@@ -888,18 +962,23 @@ def api_stocks():
         change_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close else 0.0
         highs = [c[2] for c in candles[-252:]]
         lows  = [c[3] for c in candles[-252:]]
+        max_h = max(highs) if highs else None
+        min_l = min(lows) if lows else None
+        dist_52w = round(((max_h - ltp) / max_h) * 100, 2) if max_h and max_h > 0 else None
 
         stocks.append({
-            "symbol":     sym,
-            "close":      round(ltp, 2),
-            "prev_close": round(prev_close, 2),
-            "change_pct": change_pct,
-            "volume":     int(volume),
-            "high_52w":   round(max(highs), 2) if highs else None,
-            "low_52w":    round(min(lows), 2) if lows else None,
-            "pattern":    alert_map.get(sym, {}).get("pattern", ""),
-            "status":     alert_map.get(sym, {}).get("status", ""),
-            "confidence": alert_map.get(sym, {}).get("confidence", 0),
+            "symbol":       sym,
+            "close":        round(ltp, 2),
+            "prev_close":   round(prev_close, 2),
+            "change_pct":   change_pct,
+            "volume":       int(volume),
+            "high_52w":     round(max_h, 2) if max_h else None,
+            "low_52w":      round(min_l, 2) if min_l else None,
+            "dist_52w_pct": dist_52w,
+            "is_52w_high":  (dist_52w is not None and dist_52w <= 0.5),
+            "pattern":      alert_map.get(sym, {}).get("pattern", ""),
+            "status":       alert_map.get(sym, {}).get("status", ""),
+            "confidence":   alert_map.get(sym, {}).get("confidence", 0),
         })
 
     stocks.sort(key=lambda x: (-x["confidence"], x["symbol"]))
@@ -909,6 +988,71 @@ def api_stocks():
         "loaded": sum(1 for s in stocks if s["close"] is not None),
         "last_scan": STATE["last_scan"],
         "scan_progress": STATE["scan_progress"],
+    })
+
+
+@app.route("/api/stocks/52w")
+def api_stocks_52w():
+    """
+    Return all Nifty 500 stocks within 5% of their 52-week high,
+    sorted by proximity ascending (breaking out / nearest 52W high at the top).
+    """
+    universe = STATE.get("universe") or []
+    alert_map = {}
+    for a in STATE.get("confirmed_alerts", []):
+        alert_map[a["symbol"]] = {"pattern": a["strategy_used"], "status": "confirmed", "confidence": a["confidence"]}
+    for a in STATE.get("watch_alerts", []):
+        if a["symbol"] not in alert_map:
+            alert_map[a["symbol"]] = {"pattern": a["strategy_used"], "status": "watch", "confidence": a["confidence"]}
+
+    results = []
+    for sym in universe:
+        candles = _candle_cache.get(sym)
+        if not candles or len(candles) < 20:
+            continue
+        
+        h_bars = candles[-252:]
+        highs = [c[2] for c in h_bars]
+        lows = [c[3] for c in h_bars]
+        if not highs:
+            continue
+        
+        high_52w = max(highs)
+        low_52w = min(lows)
+        ltp = candles[-1][4]
+        prev_close = candles[-2][4] if len(candles) >= 2 else ltp
+        volume = candles[-1][5]
+
+        if high_52w <= 0:
+            continue
+
+        dist_pct = round(((high_52w - ltp) / high_52w) * 100, 2)
+        change_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+
+        if dist_pct <= 5.0:
+            results.append({
+                "symbol": sym,
+                "ltp": round(ltp, 2),
+                "change_pct": change_pct,
+                "high_52w": round(high_52w, 2),
+                "low_52w": round(low_52w, 2),
+                "dist_52w_pct": max(0.0, dist_pct),
+                "is_at_high": dist_pct <= 0.5,
+                "volume": int(volume),
+                "pattern": alert_map.get(sym, {}).get("pattern", ""),
+                "status": alert_map.get(sym, {}).get("status", ""),
+                "confidence": alert_map.get(sym, {}).get("confidence", 0),
+            })
+
+    results.sort(key=lambda x: (x["dist_52w_pct"], -x["confidence"], x["symbol"]))
+
+    return jsonify({
+        "stocks": results,
+        "total": len(results),
+        "at_high_count": sum(1 for s in results if s["is_at_high"]),
+        "within_2pct_count": sum(1 for s in results if s["dist_52w_pct"] <= 2.0),
+        "within_5pct_count": len(results),
+        "last_scan": STATE.get("last_scan"),
     })
 
 
@@ -1086,10 +1230,11 @@ def api_pattern(symbol):
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
             res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
+            sup_line = trendline_pts(0, tri["support_now"], 0, lx, off) if tri["type"] == "Descending Triangle" else trendline_pts(ss, si_, 0, lx, off)
             patterns["triangle"] = {
                 "type": tri["type"],
                 "resistance_line": res_line,
-                "support_line":    trendline_pts(ss, si_, 0, lx, off),
+                "support_line":    sup_line,
                 "resistance_level": tri["resistance_now"],
                 "support_level":    tri["support_now"],
                 "swing_highs": [{"time": dates[off + p[0]], "value": round(p[1], 2)}
@@ -1191,10 +1336,11 @@ def api_pattern_weekly(symbol):
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
             res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
+            sup_line = trendline_pts(0, tri["support_now"], 0, lx, off) if tri["type"] == "Descending Triangle" else trendline_pts(ss, si_, 0, lx, off)
             patterns["triangle"] = {
                 "type": tri["type"],
                 "resistance_line": res_line,
-                "support_line":    trendline_pts(ss, si_, 0, lx, off),
+                "support_line":    sup_line,
                 "resistance_level": tri["resistance_now"],
                 "support_level":    tri["support_now"],
             }

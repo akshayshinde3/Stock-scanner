@@ -373,6 +373,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 }
 .badge-triangle    { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-ascending   { background:rgba(16,208,122,0.12); color:#10d07a; border:1px solid rgba(16,208,122,0.28); }
+.badge-descending  { background:rgba(248,184,50,0.13); color:var(--amber); border:1px solid rgba(248,184,50,0.30); }
 .badge-symmetrical { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-pennant     { background:rgba(38,212,192,0.12); color:#4edfcf; border:1px solid rgba(38,212,192,0.28); }
 .badge-combo       { background:rgba(157,125,255,0.12);color:#c0a8ff; border:1px solid rgba(157,125,255,0.28);}
@@ -424,6 +425,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 /* Active pill colors */
 .pf-all.active-pf,          .wpf-all.active-pf          { background:rgba(77,142,245,0.14); border-color:rgba(77,142,245,0.35); color:var(--blue);   }
 .pf-ascending.active-pf,    .wpf-ascending.active-pf    { background:rgba(16,208,122,0.14); border-color:rgba(16,208,122,0.35); color:var(--green);  }
+.pf-descending.active-pf,   .wpf-descending.active-pf   { background:rgba(248,184,50,0.14); border-color:rgba(248,184,50,0.35); color:var(--amber);  }
 .pf-symmetrical.active-pf,  .wpf-symmetrical.active-pf  { background:rgba(77,142,245,0.13); border-color:rgba(77,142,245,0.35); color:#7aaeff;       }
 .pf-pennant.active-pf,      .wpf-pennant.active-pf      { background:rgba(38,212,192,0.11); border-color:rgba(38,212,192,0.32); color:var(--teal);   }
 .pf-combo.active-pf,        .wpf-combo.active-pf        { background:rgba(157,125,255,0.12);border-color:rgba(157,125,255,0.32);color:var(--purple); }
@@ -723,98 +725,49 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 .journal-setup:focus { border-color:rgba(77,142,245,0.5); }
 
 /* ═══════════════════════════════════════
-   WATCHLIST TAB
+   52-WEEK HIGH TAB
 ═══════════════════════════════════════ */
-.wl-stats {
-  display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+.high52-stats {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
   gap:12px; margin-bottom:20px;
 }
-.wl-stat-card {
+.high52-stat-card {
   background:var(--card); border:1px solid var(--border);
   border-radius:12px; padding:14px 16px;
   position:relative; overflow:hidden;
 }
-.wl-stat-card::before {
+.high52-stat-card::before {
   content:''; position:absolute; top:0; left:0; right:0; height:2px;
-  background:linear-gradient(90deg,var(--purple),var(--blue));
+  background:linear-gradient(90deg,var(--green),var(--teal));
 }
-.wl-stat-card .label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; margin-bottom:6px; font-weight:600; }
-.wl-stat-card .val   { font-size:20px; font-weight:700; font-family:'JetBrains Mono',monospace; }
+.high52-stat-card .label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.07em; margin-bottom:6px; font-weight:600; }
+.high52-stat-card .val   { font-size:20px; font-weight:700; font-family:'JetBrains Mono',monospace; }
 
-.wl-pin-btn {
-  padding:3px 10px; border-radius:7px;
-  background:rgba(157,125,255,0.10); color:var(--purple);
-  border:1px solid rgba(157,125,255,0.28); font-size:11px; font-weight:700;
-  cursor:pointer; transition:all .15s; white-space:nowrap;
-  font-family:'Inter',sans-serif;
+.dist-pill {
+  display:inline-flex; align-items:center; gap:6px;
+  padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700;
+  font-family:'JetBrains Mono',monospace;
 }
-.wl-pin-btn:hover { background:rgba(157,125,255,0.22); transform:translateY(-1px); }
-.wl-pin-btn.pinned { background:rgba(16,208,122,0.10); color:var(--green); border-color:rgba(16,208,122,0.28); }
+.dist-pill.at-high {
+  background:rgba(16,208,122,0.15); color:var(--green);
+  border:1px solid rgba(16,208,122,0.3);
+}
+.dist-pill.near-high {
+  background:rgba(248,184,50,0.12); color:var(--amber);
+  border:1px solid rgba(248,184,50,0.3);
+}
+.dist-pill.within-5 {
+  background:rgba(77,142,245,0.10); color:var(--blue);
+  border:1px solid rgba(77,142,245,0.25);
+}
 
-.wl-remove-btn {
-  padding:3px 10px; border-radius:7px; background:transparent;
-  border:1px solid rgba(255,64,96,0.3); color:var(--red);
-  font-size:11px; font-weight:700; cursor:pointer; transition:all .15s;
+.dist-bar-wrap {
+  width:55px; height:4px; background:rgba(255,255,255,0.08);
+  border-radius:2px; overflow:hidden; display:inline-block; vertical-align:middle; margin-left:6px;
 }
-.wl-remove-btn:hover { background:rgba(255,64,96,0.12); }
-
-.wl-status-hit-t  { background:rgba(16,208,122,0.14); color:var(--green); border:1px solid rgba(16,208,122,0.28); padding:2px 9px; border-radius:6px; font-size:10px; font-weight:700; animation:pulse-glow-g 2s ease-in-out infinite; }
-.wl-status-hit-sl { background:rgba(255,64,96,0.14);  color:var(--red);   border:1px solid rgba(255,64,96,0.28);  padding:2px 9px; border-radius:6px; font-size:10px; font-weight:700; animation:pulse-glow-r 2s ease-in-out infinite; }
-.wl-status-hold   { background:rgba(248,184,50,0.10);  color:var(--amber); border:1px solid rgba(248,184,50,0.28); padding:2px 9px; border-radius:6px; font-size:10px; font-weight:700; }
-.wl-status-new    { background:rgba(77,142,245,0.10);  color:var(--blue);  border:1px solid rgba(77,142,245,0.28); padding:2px 9px; border-radius:6px; font-size:10px; font-weight:700; }
-
-@keyframes pulse-glow-g { 0%,100%{box-shadow:0 0 0 rgba(16,208,122,0);} 50%{box-shadow:0 0 10px rgba(16,208,122,0.45);} }
-@keyframes pulse-glow-r { 0%,100%{box-shadow:0 0 0 rgba(255,64,96,0);} 50%{box-shadow:0 0 10px rgba(255,64,96,0.45);} }
-
-/* Pin modal */
-.pin-modal-overlay {
-  display:none; position:fixed; inset:0;
-  background:rgba(0,0,0,0.75); backdrop-filter:blur(8px);
-  z-index:1100; align-items:center; justify-content:center;
+.dist-bar-fill {
+  height:100%; border-radius:2px;
 }
-.pin-modal-overlay.open { display:flex; }
-.pin-modal {
-  background:var(--card); border:1px solid var(--border-h);
-  border-radius:16px; width:min(480px,94vw);
-  box-shadow:0 24px 80px rgba(0,0,0,0.6), 0 0 28px rgba(157,125,255,0.12);
-  overflow:hidden;
-}
-.pin-modal-header {
-  padding:15px 20px; border-bottom:1px solid var(--border);
-  background:var(--card2); display:flex; align-items:center; gap:10px;
-}
-.pin-modal-header h3 { font-size:15px; font-weight:700; }
-.pin-modal-close {
-  margin-left:auto; background:transparent; border:none;
-  color:var(--muted); font-size:20px; cursor:pointer;
-  padding:2px 7px; border-radius:6px; transition:all .15s;
-}
-.pin-modal-close:hover { background:var(--card3); color:var(--text); }
-.pin-modal-body { padding:18px 20px; }
-.pin-modal-sym {
-  font-size:22px; font-weight:800; letter-spacing:0.01em;
-  color:var(--text); font-family:'JetBrains Mono',monospace; margin-bottom:4px;
-}
-.pin-modal-sub { font-size:12px; color:var(--muted); margin-bottom:16px; }
-.pin-modal-fields { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:14px; }
-.pin-modal-note { margin-bottom:16px; }
-.pin-modal-note label { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:600; display:block; margin-bottom:4px; }
-.pin-modal-note input { width:100%; background:var(--card2); border:1px solid var(--border); color:var(--text); padding:7px 11px; border-radius:8px; font-size:13px; outline:none; font-family:'Inter',sans-serif; transition:border-color .15s; }
-.pin-modal-note input:focus { border-color:rgba(77,142,245,0.5); }
-.pin-modal-footer { display:flex; gap:10px; justify-content:flex-end; }
-.pin-confirm-btn {
-  padding:9px 24px; border-radius:9px;
-  background:linear-gradient(135deg,rgba(157,125,255,0.8),rgba(77,142,245,0.8));
-  color:#fff; border:none; font-weight:700; font-size:13px;
-  cursor:pointer; transition:all .15s; font-family:'Inter',sans-serif;
-}
-.pin-confirm-btn:hover { filter:brightness(1.15); transform:translateY(-1px); }
-.pin-cancel-btn {
-  padding:9px 18px; border-radius:9px; background:var(--card2);
-  color:var(--muted); border:1px solid var(--border);
-  font-size:13px; cursor:pointer; transition:all .15s; font-family:'Inter',sans-serif;
-}
-.pin-cancel-btn:hover { color:var(--text); }
 
 .save-btn {
   padding:4px 10px; border-radius:7px; background:rgba(77,142,245,0.10);
@@ -842,7 +795,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 <div class="tab-bar">
   <button class="tab-btn active" id="tab-alerts-btn" onclick="switchTab('alerts')">🔔 Daily Alerts <span class="tab-count" id="tc-alerts">0</span></button>
   <button class="tab-btn" id="tab-weekly-btn" onclick="switchTab('weekly')">📅 Weekly Alerts <span class="tab-count" id="tc-weekly">0</span></button>
-  <button class="tab-btn" id="tab-watchlist-btn" onclick="switchTab('watchlist')">⭐ Watchlist <span class="tab-count" id="tc-watchlist">0</span></button>
+  <button class="tab-btn" id="tab-52w-btn" onclick="switchTab('52w')">🏆 52-Week High <span class="tab-count" id="tc-52w">0</span></button>
   <button class="tab-btn" id="tab-stocks-btn" onclick="switchTab('stocks')">📊 Nifty 500 <span class="tab-count" id="tc-stocks">500</span></button>
   <button class="tab-btn" id="tab-settings-btn" onclick="switchTab('settings')">⚙️ API Settings</button>
 </div>
@@ -855,6 +808,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div class="pf-row" id="wpfRow">
     <button class="pf-btn wpf-all active-pf" onclick="setWeeklyAF('all')">🔍 All <span class="pc" id="wpfc-all">0</span></button>
     <button class="pf-btn wpf-ascending" onclick="setWeeklyAF('ascending')">📐 Ascending Triangle <span class="pc" id="wpfc-ascending">0</span></button>
+    <button class="pf-btn wpf-descending" onclick="setWeeklyAF('descending')">📐 Descending Triangle <span class="pc" id="wpfc-descending">0</span></button>
     <button class="pf-btn wpf-symmetrical" onclick="setWeeklyAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="wpfc-symmetrical">0</span></button>
     <button class="pf-btn wpf-pennant" onclick="setWeeklyAF('pennant')">🎏 Bullish Pennant <span class="pc" id="wpfc-pennant">0</span></button>
     <button class="pf-btn wpf-combo" onclick="setWeeklyAF('combo')">✦ Multi <span class="pc" id="wpfc-combo">0</span></button>
@@ -873,6 +827,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div class="pf-row" id="pfRow">
     <button class="pf-btn pf-all active-pf" onclick="setAF('all')">🔍 All <span class="pc" id="pfc-all">0</span></button>
     <button class="pf-btn pf-ascending" onclick="setAF('ascending')">📐 Ascending Triangle <span class="pc" id="pfc-ascending">0</span></button>
+    <button class="pf-btn pf-descending" onclick="setAF('descending')">📐 Descending Triangle <span class="pc" id="pfc-descending">0</span></button>
     <button class="pf-btn pf-symmetrical" onclick="setAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="pfc-symmetrical">0</span></button>
     <button class="pf-btn pf-pennant" onclick="setAF('pennant')">🎏 Bullish Pennant <span class="pc" id="pfc-pennant">0</span></button>
     <button class="pf-btn pf-combo" onclick="setAF('combo')">✦ Multi <span class="pc" id="pfc-combo">0</span></button>
@@ -885,45 +840,47 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div class="table-wrap"><div id="wTable"><div class="empty">No alerts yet.</div></div></div>
 </div>
 
-<!-- ═══════ WATCHLIST TAB ═══════ -->
-<div class="tab-panel" id="panel-watchlist">
-  <div class="banner-info" style="margin-bottom:16px">
-    ⭐ Pin any alerted stock here to track it. LTP auto-refreshes every 60s. Remove the stock when Target or SL is hit.
+<!-- ═══════ 52-WEEK HIGH TAB ═══════ -->
+<div class="tab-panel" id="panel-52w">
+  <div class="disclaimer">
+    🏆 High-momentum Nifty 500 stocks trading at or within 5% of their 52-Week High. Sorted by proximity ascending (nearest at the top).
   </div>
 
   <!-- Stats row -->
-  <div class="wl-stats">
-    <div class="wl-stat-card"><div class="label">Total Pinned</div><div class="val blue" id="wlTotal">0</div></div>
-    <div class="wl-stat-card"><div class="label">🟢 Target Hit</div><div class="val" style="color:var(--green)" id="wlTargetHit">0</div></div>
-    <div class="wl-stat-card"><div class="label">🔴 SL Hit</div><div class="val" style="color:var(--red)" id="wlSlHit">0</div></div>
-    <div class="wl-stat-card"><div class="label">🟡 Holding</div><div class="val" style="color:var(--amber)" id="wlHolding">0</div></div>
+  <div class="high52-stats">
+    <div class="high52-stat-card"><div class="label">🚀 At 52W High (≤0.5%)</div><div class="val" style="color:var(--green)" id="h52AtHigh">0</div></div>
+    <div class="high52-stat-card"><div class="label">🎯 Within 2% of High</div><div class="val" style="color:var(--teal)" id="h52Within2">0</div></div>
+    <div class="high52-stat-card"><div class="label">📈 Within 5% of High</div><div class="val" style="color:var(--blue)" id="h52Within5">0</div></div>
+    <div class="high52-stat-card"><div class="label">✦ With Pattern Signal</div><div class="val" style="color:var(--purple)" id="h52Patterns">0</div></div>
   </div>
 
   <!-- Toolbar -->
   <div class="toolbar">
-    <input class="search-box" id="wlSearch" type="text" placeholder="🔍 Search watchlist…" oninput="renderWatchlist()">
-    <button class="filter-btn" onclick="refreshWatchlistLtp()" id="wlRefreshBtn">⟳ Refresh LTP</button>
-    <button class="filter-btn" style="color:var(--red);border-color:rgba(255,64,96,0.3)" onclick="clearAllWatchlist()">🗑 Clear All</button>
-    <span class="meta" id="wlMeta">—</span>
+    <input class="search-box" id="h52Search" type="text" placeholder="🔍 Search symbol…" oninput="render52wTable()">
+    <button class="filter-btn active" id="h52f-all" onclick="set52wF('all')">All (≤5%)</button>
+    <button class="filter-btn" id="h52f-athigh" onclick="set52wF('athigh')">🚀 At High (≤0.5%)</button>
+    <button class="filter-btn" id="h52f-near" onclick="set52wF('near')">🎯 Within 2%</button>
+    <button class="filter-btn" id="h52f-pattern" onclick="set52wF('pattern')">✦ Pattern Match</button>
+    <button class="filter-btn" onclick="load52wStocks()" id="h52RefreshBtn">⟳ Refresh</button>
+    <span class="meta" id="h52Meta">—</span>
   </div>
 
   <!-- Table -->
   <div class="table-wrap">
     <table>
       <thead><tr>
-        <th>Symbol</th>
-        <th>Timeframe</th>
-        <th>Pattern</th>
-        <th>LTP ₹</th>
-        <th>Buy Trigger ₹</th>
-        <th>Stop Loss ₹</th>
-        <th>Target ₹</th>
-        <th>Status</th>
-        <th>Added On</th>
-        <th>Note</th>
+        <th onclick="sort52w('symbol')">Symbol ↕</th>
+        <th onclick="sort52w('ltp')">Price ₹ ↕</th>
+        <th onclick="sort52w('change_pct')">Chg % ↕</th>
+        <th onclick="sort52w('dist_52w_pct')">Dist to 52W High ↕</th>
+        <th onclick="sort52w('high_52w')">52W High ₹ ↕</th>
+        <th onclick="sort52w('low_52w')">52W Low ₹ ↕</th>
+        <th onclick="sort52w('volume')">Volume ↕</th>
+        <th onclick="sort52w('pattern')">Pattern ↕</th>
+        <th onclick="sort52w('confidence')">Conf ↕</th>
         <th>Actions</th>
       </tr></thead>
-      <tbody id="wlTbody"><tr><td colspan="11" class="empty">No stocks pinned yet. Click 📌 on any alert to add one.</td></tr></tbody>
+      <tbody id="h52Tbody"><tr><td colspan="10" class="empty"><span class="spin"></span> Loading 52-Week High stocks…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -933,6 +890,12 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div class="toolbar">
     <input class="search-box" id="sSearch" type="text" placeholder="🔍 Search symbol…" oninput="renderStocks()">
     <button class="filter-btn active" id="sf-all"     onclick="setSF('all')">All</button>
+    <button class="filter-btn"        id="sf-52w"     onclick="setSF('52w')">🏆 52W High (≤3%)</button>
+    <button class="filter-btn"        id="sf-matched" onclick="setSF('matched')">Pattern Match</button>
+    <button class="filter-btn"        id="sf-gainers" onclick="setSF('gainers')">Gainers</button>
+    <button class="filter-btn"        id="sf-losers"  onclick="setSF('losers')">Losers</button>
+    <span class="meta" id="sMeta">—</span>
+  </div>
     <button class="filter-btn"        id="sf-matched" onclick="setSF('matched')">Pattern Match</button>
     <button class="filter-btn"        id="sf-gainers" onclick="setSF('gainers')">Gainers</button>
     <button class="filter-btn"        id="sf-losers"  onclick="setSF('losers')">Losers</button>
@@ -1016,43 +979,6 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 
 </main>
 
-<!-- ═══════ PIN TO WATCHLIST MODAL ═══════ -->
-<div class="pin-modal-overlay" id="pinModalOverlay" onclick="if(event.target===this)closePinModal()">
-  <div class="pin-modal">
-    <div class="pin-modal-header">
-      <span style="font-size:18px">📌</span>
-      <h3>Pin to Watchlist</h3>
-      <button class="pin-modal-close" onclick="closePinModal()">✕</button>
-    </div>
-    <div class="pin-modal-body">
-      <div class="pin-modal-sym" id="pmSym">SYMBOL</div>
-      <div class="pin-modal-sub" id="pmSub">Daily · Pattern</div>
-      <div class="pin-modal-fields">
-        <div class="pin-modal-note">
-          <label>Buy Trigger ₹</label>
-          <input type="number" id="pmBuy" step="0.05" placeholder="0.00">
-        </div>
-        <div class="pin-modal-note">
-          <label>Stop Loss ₹</label>
-          <input type="number" id="pmSl" step="0.05" placeholder="0.00">
-        </div>
-        <div class="pin-modal-note">
-          <label>Target ₹</label>
-          <input type="number" id="pmTgt" step="0.05" placeholder="0.00">
-        </div>
-      </div>
-      <div class="pin-modal-note">
-        <label>Note (optional)</label>
-        <input type="text" id="pmNote" placeholder="e.g. Watch for breakout above 52W high…" maxlength="120">
-      </div>
-      <div class="pin-modal-footer">
-        <button class="pin-cancel-btn" onclick="closePinModal()">Cancel</button>
-        <button class="pin-confirm-btn" onclick="confirmPin()">📌 Add to Watchlist</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ═══════ CHART MODAL ═══════ -->
 <div class="modal-overlay" id="chartOverlay" onclick="if(event.target===this)closeChart()">
   <div class="modal">
@@ -1112,7 +1038,7 @@ function switchTab(t) {
   document.getElementById('panel-' + t).classList.add('active');
   if (t === 'alerts')    refreshAlerts();
   if (t === 'weekly')    refreshWeeklyAlerts();
-  if (t === 'watchlist') renderWatchlist();
+  if (t === '52w')       load52wStocks();
   if (t === 'stocks')    loadStocks();
   if (t === 'settings')  { loadSettings(); loadNtfySettings(); }
 }
@@ -1122,6 +1048,7 @@ function switchTab(t) {
 // ═══════════════════════════════════════════════════════════
 const PK = { 
   ascending: ['ascending'], 
+  descending: ['descending'],
   symmetrical: ['symmetrical'], 
   triangle: ['triangle'], 
   pennant: ['pennant'], 
@@ -1133,6 +1060,7 @@ function pKey(s) {
   const sl = s.toLowerCase();
   if (sl.includes('+')) return 'combo';
   if (sl.includes('ascending')) return 'ascending';
+  if (sl.includes('descending')) return 'descending';
   if (sl.includes('symmetrical')) return 'symmetrical';
   if (sl.includes('pennant')) return 'pennant';
   if (sl.includes('triangle')) return 'triangle';
@@ -1141,6 +1069,7 @@ function pKey(s) {
 
 const BC = { 
   ascending: 'badge-ascending', 
+  descending: 'badge-descending',
   symmetrical: 'badge-symmetrical', 
   triangle: 'badge-triangle', 
   pennant: 'badge-pennant', 
@@ -1192,18 +1121,6 @@ function chartBtn(sym, alert, tf='daily') {
     timeframe: tf
   })) : '';
   return `<button class="icon-btn" onclick="openChart('${sym}','${al}')" title="View Chart">📈</button>`;
-}
-function pinBtn(sym, alert, tf='daily') {
-  const pinned = isInWatchlist(sym);
-  const d = encodeURIComponent(JSON.stringify({
-    symbol: sym, timeframe: tf,
-    pattern: alert?.strategy_used || '',
-    ltp:  alert?.ltp       || 0,
-    buy:  alert?.buy_price || 0,
-    sl:   alert?.stop_loss || 0,
-    tgt:  alert?.target1   || 0,
-  }));
-  return `<button class="wl-pin-btn${pinned?' pinned':''}" onclick="openPinModal('${d}')" title="${pinned?'Already in Watchlist — click to re-pin':'Pin to Watchlist'}">📌 ${pinned?'Pinned':'Pin'}</button>`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1568,7 +1485,6 @@ function renderAlerts(rows, tf='daily') {
     <td>${r.expected_breakout_date}</td>
     <td style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
       ${chartBtn(r.symbol, r, tf)}
-      ${pinBtn(r.symbol, r, tf)}
     </td>
   </tr>`).join('')}
   </tbody></table>`;
@@ -1784,6 +1700,7 @@ function renderStocks() {
   const q = (document.getElementById('sSearch').value||'').toUpperCase().trim();
   let list = allStocks.filter(s=>{
     if(q && !s.symbol.includes(q)) return false;
+    if(activeSF==='52w')     return s.dist_52w_pct!==null && s.dist_52w_pct<=3.0;
     if(activeSF==='matched') return !!s.pattern;
     if(activeSF==='gainers') return s.change_pct!==null && s.change_pct>0;
     if(activeSF==='losers')  return s.change_pct!==null && s.change_pct<0;
@@ -1974,191 +1891,132 @@ function testNtfy() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 52-WEEK HIGH STOCKS TAB
 // ═══════════════════════════════════════════════════════════
-// WATCHLIST  (localStorage-based, persistent across reloads)
-// ═══════════════════════════════════════════════════════════
-const WL_KEY = 'swing_scanner_watchlist_v1';
-let _watchlist = [];
-let _wlLtpCache = {};
-let _pinPayload = null;
+let all52wStocks = [];
+let active52wF = 'all';
+let sort52wKey = 'dist_52w_pct';
+let sort52wDir = 1;
 
-function _loadWL() {
-  try { _watchlist = JSON.parse(localStorage.getItem(WL_KEY) || '[]'); } catch(_) { _watchlist = []; }
-}
-function _saveWL() {
-  try { localStorage.setItem(WL_KEY, JSON.stringify(_watchlist)); } catch(_) {}
-}
-function isInWatchlist(sym) {
-  return _watchlist.some(w => w.symbol === sym.toUpperCase());
-}
-
-// Open the pin confirmation modal
-function openPinModal(encodedData) {
+async function load52wStocks() {
+  const btn = document.getElementById('h52RefreshBtn');
+  if (btn) { btn.textContent = '⟳ Loading…'; btn.disabled = true; }
   try {
-    _pinPayload = JSON.parse(decodeURIComponent(encodedData));
-  } catch(_) { return; }
-  const sym = _pinPayload.symbol;
-  document.getElementById('pmSym').textContent  = sym;
-  document.getElementById('pmSub').textContent  = `${_pinPayload.timeframe || 'Daily'} · ${_pinPayload.pattern || '—'}`;
-  document.getElementById('pmBuy').value  = _pinPayload.buy  || '';
-  document.getElementById('pmSl').value   = _pinPayload.sl   || '';
-  document.getElementById('pmTgt').value  = _pinPayload.tgt  || '';
-  document.getElementById('pmNote').value = '';
-  document.getElementById('pinModalOverlay').classList.add('open');
+    const res = await fetch('/api/stocks/52w').catch(() => null);
+    if (!res || !res.ok) return;
+    const data = await res.json();
+    all52wStocks = data.stocks || [];
+    
+    // Update tab count
+    const tc = document.getElementById('tc-52w');
+    if (tc) {
+      tc.textContent = all52wStocks.length;
+      tc.className = 'tab-count' + (all52wStocks.length > 0 ? ' green' : '');
+    }
+
+    // Update summary stat cards
+    document.getElementById('h52AtHigh').textContent   = data.at_high_count || 0;
+    document.getElementById('h52Within2').textContent  = data.within_2pct_count || 0;
+    document.getElementById('h52Within5').textContent  = data.within_5pct_count || 0;
+    document.getElementById('h52Patterns').textContent = all52wStocks.filter(s => !!s.pattern).length;
+
+    render52wTable();
+  } catch (e) {
+    console.warn("load52wStocks error:", e);
+  } finally {
+    if (btn) { btn.textContent = '⟳ Refresh'; btn.disabled = false; }
+  }
 }
 
-function closePinModal() {
-  document.getElementById('pinModalOverlay').classList.remove('open');
-  _pinPayload = null;
+function set52wF(filter) {
+  active52wF = filter;
+  document.querySelectorAll('#panel-52w .toolbar .filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('h52f-' + filter)?.classList.add('active');
+  render52wTable();
 }
 
-function confirmPin() {
-  if (!_pinPayload) return;
-  const sym = _pinPayload.symbol;
-  // Remove existing entry if re-pinning
-  _watchlist = _watchlist.filter(w => w.symbol !== sym);
-  const entry = {
-    symbol:    sym,
-    timeframe: _pinPayload.timeframe || 'Daily',
-    pattern:   _pinPayload.pattern   || '',
-    ltp:       parseFloat(document.getElementById('pmBuy').value) || _pinPayload.ltp || 0, // show buy as ref
-    buy:       parseFloat(document.getElementById('pmBuy').value) || 0,
-    sl:        parseFloat(document.getElementById('pmSl').value)  || 0,
-    tgt:       parseFloat(document.getElementById('pmTgt').value) || 0,
-    note:      document.getElementById('pmNote').value.trim(),
-    added:     new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}),
-    addedTs:   Date.now(),
-    currentLtp: _pinPayload.ltp || 0,
-    status:    'new',
-  };
-  _watchlist.unshift(entry);
-  _saveWL();
-  closePinModal();
-  updateWLBadge();
-  // If watchlist tab is active, re-render
-  if (document.getElementById('panel-watchlist')?.classList.contains('active')) renderWatchlist();
-  // Visual feedback: flash the pin buttons
-  document.querySelectorAll('[id]').forEach(() => {});
+function sort52w(col) {
+  if (sort52wKey === col) {
+    sort52wDir *= -1;
+  } else {
+    sort52wKey = col;
+    sort52wDir = (col === 'symbol') ? 1 : (col === 'dist_52w_pct' ? 1 : -1);
+  }
+  render52wTable();
 }
 
-function removeFromWatchlist(sym) {
-  _watchlist = _watchlist.filter(w => w.symbol !== sym.toUpperCase());
-  _saveWL();
-  renderWatchlist();
-  updateWLBadge();
-}
+function render52wTable() {
+  const q = (document.getElementById('h52Search')?.value || '').toUpperCase().trim();
+  let list = all52wStocks.filter(s => {
+    if (q && !s.symbol.includes(q)) return false;
+    if (active52wF === 'athigh')  return s.is_at_high || s.dist_52w_pct <= 0.5;
+    if (active52wF === 'near')    return s.dist_52w_pct <= 2.0;
+    if (active52wF === 'pattern') return !!s.pattern;
+    return true;
+  });
 
-function clearAllWatchlist() {
-  if (!_watchlist.length) return;
-  if (!confirm(`Remove all ${_watchlist.length} stocks from watchlist?`)) return;
-  _watchlist = [];
-  _saveWL();
-  renderWatchlist();
-  updateWLBadge();
-}
+  list.sort((a, b) => {
+    let av = a[sort52wKey], bv = b[sort52wKey];
+    if (av === null || av === undefined) av = sort52wDir > 0 ? 999999 : -Infinity;
+    if (bv === null || bv === undefined) bv = sort52wDir > 0 ? 999999 : -Infinity;
+    if (typeof av === 'string') return sort52wDir * av.localeCompare(bv);
+    return sort52wDir * (av - bv);
+  });
 
-function updateWLBadge() {
-  const tc = document.getElementById('tc-watchlist');
-  if (!tc) return;
-  tc.textContent = _watchlist.length;
-  tc.className   = 'tab-count' + (_watchlist.length > 0 ? ' green' : '');
-}
+  const meta = document.getElementById('h52Meta');
+  if (meta) meta.textContent = `Showing ${list.length} of ${all52wStocks.length} candidates`;
 
-function _getWLStatus(entry) {
-  const ltp = entry.currentLtp || 0;
-  if (entry.tgt && ltp > 0 && ltp >= entry.tgt) return 'hit_t';
-  if (entry.sl  && ltp > 0 && ltp <= entry.sl)  return 'hit_sl';
-  if (ltp > 0)                                   return 'holding';
-  return 'new';
-}
-
-function renderWatchlist() {
-  const q = (document.getElementById('wlSearch')?.value || '').toUpperCase().trim();
-  let rows = _watchlist.filter(w => !q || w.symbol.includes(q));
-
-  // Stats
-  const total   = _watchlist.length;
-  const hitT    = _watchlist.filter(w => _getWLStatus(w) === 'hit_t').length;
-  const hitSl   = _watchlist.filter(w => _getWLStatus(w) === 'hit_sl').length;
-  const holding = _watchlist.filter(w => _getWLStatus(w) === 'holding').length;
-  document.getElementById('wlTotal').textContent     = total;
-  document.getElementById('wlTargetHit').textContent = hitT;
-  document.getElementById('wlSlHit').textContent     = hitSl;
-  document.getElementById('wlHolding').textContent   = holding;
-
-  const meta = document.getElementById('wlMeta');
-  if (meta) meta.textContent = `Showing ${rows.length} of ${total}`;
-
-  const tbody = document.getElementById('wlTbody');
+  const tbody = document.getElementById('h52Tbody');
   if (!tbody) return;
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="11" class="empty">${total === 0 ? 'No stocks pinned yet. Click 📌 on any alert to add one.' : 'No matches.'}</td></tr>`;
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="10" class="empty">${all52wStocks.length === 0 ? 'No 52-Week High candidates found in current scan.' : 'No matching stocks.'}</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = rows.map(w => {
-    const status = _getWLStatus(w);
-    const ltp    = w.currentLtp || 0;
-    let statusHtml;
-    switch(status) {
-      case 'hit_t':   statusHtml = `<span class="wl-status-hit-t">🟢 Target Hit</span>`;   break;
-      case 'hit_sl':  statusHtml = `<span class="wl-status-hit-sl">🔴 SL Hit</span>`;      break;
-      case 'holding': statusHtml = `<span class="wl-status-hold">🟡 Holding</span>`;      break;
-      default:        statusHtml = `<span class="wl-status-new">🔵 Tracking</span>`;      break;
-    }
-    const ltpColor = ltp > 0
-      ? (status === 'hit_t' ? 'var(--green)' : status === 'hit_sl' ? 'var(--red)' : 'var(--text)')
-      : 'var(--muted)';
-    const buyPct = w.buy && ltp ? ((ltp - w.buy) / w.buy * 100).toFixed(2) : null;
-    const pctHtml = buyPct !== null
-      ? `<br><span style="font-size:10px;font-weight:700;color:${parseFloat(buyPct)>=0?'var(--green)':'var(--red)'}">${parseFloat(buyPct)>=0?'+':''}${buyPct}%</span>`
-      : '';
+  tbody.innerHTML = list.map(s => {
+    const chg = s.change_pct;
+    const cc2 = chg === null ? 'flat' : chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
+    const chgT = chg === null ? '—' : (chg > 0 ? '+' : '') + chg.toFixed(2) + '%';
+    const pb = s.pattern ? `<span class="badge ${bClass(s.pattern)}">${s.pattern}</span>` : `<span style="color:var(--muted)">—</span>`;
+    const sb = s.status === 'confirmed' ? `<span class="s-confirmed">✅</span>` : s.status === 'watch' ? `<span class="s-watch">👀</span>` : '';
+    const cf = s.confidence ? `<span class="conf ${cc(s.confidence)}">${s.confidence}%</span>` : `<span style="color:var(--muted)">—</span>`;
 
-    return `<tr data-wl-sym="${w.symbol}">
-      <td><span class="sym">${w.symbol}</span></td>
-      <td><span style="font-size:11px;color:var(--muted2)">${w.timeframe}</span></td>
-      <td><span class="badge ${bClass(w.pattern)}">${w.pattern || '—'}</span></td>
-      <td class="wl-ltp-cell" style="font-family:'JetBrains Mono',monospace;font-weight:700;color:${ltpColor}">${ltp > 0 ? '₹'+fmt(ltp) : '<span style="color:var(--muted)">—</span>'}${pctHtml}</td>
-      <td style="color:var(--green);font-family:'JetBrains Mono',monospace;font-weight:700">${w.buy ? '₹'+fmt(w.buy) : '—'}</td>
-      <td style="color:var(--red);font-family:'JetBrains Mono',monospace;font-weight:700">${w.sl  ? '₹'+fmt(w.sl)  : '—'}</td>
-      <td style="color:var(--blue);font-family:'JetBrains Mono',monospace;font-weight:700">${w.tgt ? '₹'+fmt(w.tgt) : '—'}</td>
-      <td>${statusHtml}</td>
-      <td style="font-size:11px;color:var(--muted)">${w.added}</td>
-      <td style="font-size:12px;color:var(--muted2);max-width:160px;white-space:normal">${esc(w.note || '—')}</td>
-      <td style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-        <button class="icon-btn" onclick="openChart('${w.symbol}','')" title="View Chart">📈</button>
-        <button class="wl-remove-btn" onclick="removeFromWatchlist('${w.symbol}')" title="Remove from Watchlist">✕ Remove</button>
+    const dist = s.dist_52w_pct;
+    let distBadge = '';
+    let barColor = 'var(--blue)';
+    if (dist <= 0.5) {
+      distBadge = `<span class="dist-pill at-high">🚀 At High (${dist.toFixed(2)}%)</span>`;
+      barColor = 'var(--green)';
+    } else if (dist <= 2.0) {
+      distBadge = `<span class="dist-pill near-high">🎯 -${dist.toFixed(2)}%</span>`;
+      barColor = 'var(--amber)';
+    } else {
+      distBadge = `<span class="dist-pill within-5">📈 -${dist.toFixed(2)}%</span>`;
+      barColor = 'var(--blue)';
+    }
+
+    const fillPct = Math.max(0, Math.min(100, Math.round((1 - (dist / 5.0)) * 100)));
+
+    return `<tr data-sym="${s.symbol}">
+      <td><span class="sym">${s.symbol}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700">₹${fmt(s.ltp)}</td>
+      <td class="${cc2}">${chgT}</td>
+      <td>
+        ${distBadge}
+        <div class="dist-bar-wrap" title="${dist.toFixed(2)}% away from 52W High">
+          <div class="dist-bar-fill" style="width:${fillPct}%;background:${barColor}"></div>
+        </div>
+      </td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--green);font-weight:600">₹${fmt(s.high_52w)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--muted2)">₹${fmt(s.low_52w)}</td>
+      <td>${fmtVol(s.volume)}</td>
+      <td>${pb} ${sb}</td>
+      <td>${cf}</td>
+      <td style="display:flex;gap:5px;align-items:center">
+        ${chartBtn(s.symbol, null)}
       </td>
     </tr>`;
   }).join('');
-}
-
-async function refreshWatchlistLtp() {
-  if (!_watchlist.length) return;
-  const btn = document.getElementById('wlRefreshBtn');
-  if (btn) { btn.textContent = '⟳ Loading…'; btn.disabled = true; }
-  try {
-    const syms = _watchlist.map(w => w.symbol);
-    const CHUNK = 400;
-    for (let i = 0; i < syms.length; i += CHUNK) {
-      const batch = syms.slice(i, i + CHUNK);
-      const res = await fetch('/api/ltp?symbols=' + batch.join(',')).catch(() => null);
-      if (!res || !res.ok) continue;
-      const data = await res.json();
-      _watchlist.forEach(w => {
-        const q = data[w.symbol];
-        if (q) { w.currentLtp = q.ltp; }
-      });
-    }
-    _saveWL();
-    renderWatchlist();
-    if (btn) {
-      const t = new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
-      document.getElementById('wlMeta').textContent = `LTP updated at ${t}`;
-    }
-  } finally {
-    if (btn) { btn.textContent = '⟳ Refresh LTP'; btn.disabled = false; }
-  }
 }
 
 async function triggerQuickScan() {
@@ -2173,6 +2031,7 @@ async function triggerQuickScan() {
       refreshAlerts();
       refreshWeeklyAlerts();
       loadStocks();
+      load52wStocks();
     }, 2500);
   } catch (e) {
     alert('Quick scan error: ' + e);
@@ -2199,6 +2058,7 @@ async function triggerRescan() {
       refreshAlerts();
       refreshWeeklyAlerts();
       loadStocks();
+      load52wStocks();
     }, 1500);
   } catch (e) {
     alert('Rescan error: ' + e);
@@ -2215,17 +2075,16 @@ async function triggerRescan() {
 // ═══════════════════════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════════════════════
-_loadWL();
-updateWLBadge();
 refreshAlerts();
 refreshWeeklyAlerts();
 loadStocks();
+load52wStocks();
 // Real-time live price patches — run every 8s across active panels
-setInterval(patchLivePrices,    8000);  // Stocks tab: price/change% flash
-setInterval(patchAlertLtps,     8000);  // Alerts tab: LTP flash
-// Watchlist LTP auto-refresh every 60s (lightweight)
-setInterval(()=>{ if(document.getElementById('panel-watchlist')?.classList.contains('active')) refreshWatchlistLtp(); }, 60000);
-window.addEventListener('resize', ()=>{ if(chartObj) chartObj.applyOptions({width:document.getElementById('chartContainer').clientWidth}); });
+setInterval(patchLivePrices, 8000);  // Stocks tab: price/change% flash
+setInterval(patchAlertLtps,  8000);  // Alerts tab: LTP flash
+// 52W High stocks auto-refresh every 60s
+setInterval(() => { if (document.getElementById('panel-52w')?.classList.contains('active')) load52wStocks(); }, 60000);
+window.addEventListener('resize', () => { if (chartObj) chartObj.applyOptions({ width: document.getElementById('chartContainer').clientWidth }); });
 </script>
 </body>
 </html>

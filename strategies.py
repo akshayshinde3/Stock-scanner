@@ -150,19 +150,58 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         range_10_1d < range_10_11d
     )
 
-    if not is_ascending and not is_symmetrical:
+    # 6. Check CASE C: Descending Triangle (Lower Highs, Flat Horizontal Support, Volume Expansion)
+    # Chartink Formula:
+    # daily max(20, 1d ago high) < daily max(20, 21d ago high)
+    # daily max(20, 21d ago high) < daily max(20, 41d ago high)
+    # daily min(20, 11d ago low) < daily min(20, 31d ago low) * 1.02
+    # daily min(20, 11d ago low) > daily min(20, 31d ago low) * 0.98
+    # daily volume > daily sma(volume, 20) and daily volume > 1d ago volume
+    is_descending = False
+    max_high_20_1d = None
+    min_low_20_11d = None
+    if len(candles) >= 61:
+        max_high_20_1d = max(highs[-21:-1])
+        max_high_20_21d = max(highs[-41:-21])
+        max_high_20_41d = max(highs[-61:-41])
+
+        min_low_20_11d = min(lows[-31:-11])
+        min_low_20_31d = min(lows[-51:-31])
+
+        cur_vol = volumes[-1]
+        prev_vol = volumes[-2] if len(volumes) >= 2 else 0
+
+        lower_highs_desc = (max_high_20_1d < max_high_20_21d) and (max_high_20_21d < max_high_20_41d)
+        flat_support_desc = (min_low_20_11d <= min_low_20_31d * 1.02) and (min_low_20_11d >= min_low_20_31d * 0.98)
+        vol_expansion_desc = (v20 is not None and cur_vol > v20 and cur_vol > prev_vol)
+
+        is_descending = lower_highs_desc and flat_support_desc and vol_expansion_desc
+
+    if not is_ascending and not is_symmetrical and not is_descending:
         return None
 
-    triangle_type = "Ascending Triangle" if is_ascending else "Symmetrical Triangle"
-    res_level = max_high_30_1d if is_ascending else max_high_10_1d
-    sup_level = min_low_10_1d
+    if is_descending:
+        triangle_type = "Descending Triangle"
+        res_level = max_high_20_1d
+        sup_level = min_low_20_11d
+        lookback = 60
+    elif is_ascending:
+        triangle_type = "Ascending Triangle"
+        res_level = max_high_30_1d
+        sup_level = min_low_10_1d
+        lookback = 35
+    else:
+        triangle_type = "Symmetrical Triangle"
+        res_level = max_high_10_1d
+        sup_level = min_low_10_1d
+        lookback = 25
 
     # Status check:
     breakout_now = cur_price >= res_level or today_close >= res_level
     recent_breakout = (len(closes) >= 3 and 
                        (closes[-2] >= res_level or closes[-3] >= res_level) and 
                        cur_price >= res_level * 0.97)
-    is_watch = (cur_price >= res_level * 0.95 and cur_price <= res_level * 1.01)
+    is_watch = (cur_price >= sup_level * 0.97 and cur_price <= res_level * 1.01)
 
     if breakout_now or recent_breakout:
         status = "confirmed"
@@ -178,11 +217,12 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         "fit_quality": 0.90,
         "contraction": round(max(0.15, 1 - (range_10_1d / range_10_11d)) if range_10_11d > 0 else 0.25, 2),
         "bars_to_apex": 4,
-        "touches": 4 if is_ascending else 3,
+        "touches": 4 if (is_ascending or is_descending) else 3,
         "status": status,
-        "vol_dry_up": vol_dry_up,
+        "vol_dry_up": vol_dry_up if not is_descending else False,
+        "vol_expansion": is_descending,
         "source": "Chartink Strategy",
-        "lookback": 35 if is_ascending else 25,
+        "lookback": lookback,
         "timeframe": "daily",
     }
 
@@ -243,18 +283,45 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
         range_5_1w < range_5_6w
     )
 
-    if not is_ascending and not is_symmetrical:
+    # 5. CASE C: Weekly Descending Triangle
+    is_descending = False
+    max_high_10_1w = None
+    min_low_10_6w = None
+    if len(candles) >= 30:
+        max_high_10_1w = max(highs[-11:-1])
+        max_high_10_11w = max(highs[-21:-11])
+        min_low_10_6w = min(lows[-16:-6])
+        min_low_10_16w = min(lows[-26:-16])
+        is_descending = (
+            max_high_10_1w < max_high_10_11w and
+            min_low_10_6w <= min_low_10_16w * 1.025 and
+            min_low_10_6w >= min_low_10_16w * 0.975
+        )
+
+    if not is_ascending and not is_symmetrical and not is_descending:
         return None
 
-    triangle_type = "Ascending Triangle" if is_ascending else "Symmetrical Triangle"
-    res_level = max_high_15_1w if is_ascending else max_high_5_1w
-    sup_level = min_low_5_1w
+    if is_descending:
+        triangle_type = "Descending Triangle"
+        res_level = max_high_10_1w
+        sup_level = min_low_10_6w
+        lookback = 30
+    elif is_ascending:
+        triangle_type = "Ascending Triangle"
+        res_level = max_high_15_1w
+        sup_level = min_low_5_1w
+        lookback = 20
+    else:
+        triangle_type = "Symmetrical Triangle"
+        res_level = max_high_5_1w
+        sup_level = min_low_5_1w
+        lookback = 15
 
     breakout_now = cur_price >= res_level or today_close >= res_level
     recent_breakout = (len(closes) >= 3 and 
                        (closes[-2] >= res_level or closes[-3] >= res_level) and 
                        cur_price >= res_level * 0.97)
-    is_watch = (cur_price >= res_level * 0.95 and cur_price <= res_level * 1.01)
+    is_watch = (cur_price >= sup_level * 0.97 and cur_price <= res_level * 1.01)
 
     if breakout_now or recent_breakout:
         status = "confirmed"
@@ -270,10 +337,10 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
         "fit_quality": 0.92,
         "contraction": round(max(0.15, 1 - (range_5_1w / range_5_6w)) if range_5_6w > 0 else 0.25, 2),
         "bars_to_apex": 4,
-        "touches": 4 if is_ascending else 3,
+        "touches": 4 if (is_ascending or is_descending) else 3,
         "status": status,
         "source": "Chartink Weekly Strategy",
-        "lookback": 20 if is_ascending else 15,
+        "lookback": lookback,
         "timeframe": "weekly",
     }
 
@@ -308,12 +375,15 @@ def _detect_triangle_window(candles, lookback=40):
         return None
 
     res_flat = abs(res_slope_norm) < FLAT_SLOPE_THRESHOLD
+    sup_flat = abs(sup_slope_norm) < FLAT_SLOPE_THRESHOLD
 
     triangle_type = None
     if res_flat and sup_slope_norm > 0.0003:
         triangle_type = "Ascending Triangle"
     elif res_slope_norm < -0.0003 and sup_slope_norm > 0.0003:
         triangle_type = "Symmetrical Triangle"
+    elif res_slope_norm < -0.0003 and sup_flat:
+        triangle_type = "Descending Triangle"
     else:
         return None
 
@@ -565,14 +635,22 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
             strategies_used.append(t_name)
             status = triangle["status"]
             if status == "confirmed":
-                reasons.append(f"{t_name}: Breakout at ₹{triangle['resistance_now']} (Targeting higher highs)")
+                if t_name == "Descending Triangle":
+                    reasons.append(f"{t_name}: Breakout above descending resistance ₹{triangle['resistance_now']} with volume expansion")
+                else:
+                    reasons.append(f"{t_name}: Breakout at ₹{triangle['resistance_now']} (Targeting higher highs)")
                 score += 50
             else:
-                reasons.append(f"{t_name}: Tightening near resistance ₹{triangle['resistance_now']} (Pre-breakout watch)")
+                if t_name == "Descending Triangle":
+                    reasons.append(f"{t_name}: Support floor ₹{triangle['support_now']} holding with volume expansion (Pre-breakout watch)")
+                else:
+                    reasons.append(f"{t_name}: Tightening near resistance ₹{triangle['resistance_now']} (Pre-breakout watch)")
                 score += 35
 
             if triangle.get("vol_dry_up"):
                 reasons.append("Volume dry-up confirmed: 5-day volume < 20-day average")
+            if triangle.get("vol_expansion"):
+                reasons.append("Volume expansion confirmed: Daily Volume > 20 SMA & > 1-day ago volume")
             if timeframe == "daily":
                 reasons.append("Trend confirmed: Daily Close > 50 EMA")
             elif timeframe == "weekly":
