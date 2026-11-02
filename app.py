@@ -33,7 +33,7 @@ import strategies
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# CONFIG
+# CONFIG & TIMEZONE
 # ---------------------------------------------------------------------------
 # Optional: free NewsAPI.org key for headline-based news filter (leave blank to skip)
 NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
@@ -44,11 +44,40 @@ POLL_INTERVAL_SECONDS = 180         # how often to re-scan (Nifty 500 is heavy �
 MARKET_OPEN = dt.time(9, 15)
 MARKET_CLOSE = dt.time(15, 30)
 
+# Exact Indian Standard Time (IST = UTC+5:30)
+IST_TZ = dt.timezone(dt.timedelta(hours=5, minutes=30))
+
+def get_ist_now():
+    """Return current datetime in Indian Standard Time (IST, UTC+5:30)."""
+    return dt.datetime.now(dt.timezone.utc).astimezone(IST_TZ)
+
 # Liquidity filter: skip stocks whose 20-day average daily turnover (price * volume)
 # is below this, in INR crore. Filters out illiquid names prone to false breakouts.
 MIN_AVG_DAILY_TURNOVER_CR = 5
 
 NIFTY500_URL = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+
+# Nifty Midcap 100 constituent universe
+MIDCAP100_SYMBOLS = {
+    "FEDERALBNK", "IDFCFIRSTB", "BANDHANBNK", "AUBANK", "AUROPHARMA", "LUPIN", 
+    "BIOCON", "GLENMARK", "TORNTPHARM", "ALKEM", "IPCALAB", "VOLTAS", "WHIRLPOOL", 
+    "CROMPTON", "POLYCAB", "KEI", "DIXON", "ASTRAL", "SUPREMEIND", "ASHOKLEY", 
+    "BHARATFORG", "BALKRISIND", "MRF", "APOLLOTYRE", "EXIDEIND", "ESCORTS", 
+    "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "TATAELXSI", "KPITTECH", 
+    "CYIENT", "SONACOMS", "SUNDRMFAST", "SCHAEFFLER", "SKFINDIA", "AIAENG", 
+    "CUMMINSIND", "THERMAX", "OBEROIRLTY", "PHOENIXLTD", "PRESTIGE", "BRIGADE", 
+    "GODREJPROP", "CONCOR", "GMRINFRA", "ABCAPITAL", "MFSL", "L&TFH", "CHOLAFIN", 
+    "POONAWALLA", "SHRIRAMFIN", "MUTHOOTFIN", "MANAPPURAM", "CANFINHOME", "LICHSGFIN", 
+    "HUDCO", "PETRONET", "GUJGASLTD", "IGL", "MGL", "OIL", "CASTROLIND", 
+    "DEEPAKNTR", "TATACHEM", "PIIND", "UPL", "COROMANDEL", "CHAMBLFERT", "GNFC", 
+    "ATUL", "SRF", "NAVINFLUOR", "FLUOROCHEM", "SAIL", "JINDALSTEL", "NATIONALUM", 
+    "NMDC", "APLAPOLLO", "RATNAMANI", "PAGEIND", "BATAINDIA", "RELAXO", "DEVYANI", 
+    "JUBLFOOD", "KALYANKJIL", "RADICO", "ZYDUSLIFE", "ABFRL", "TRENT", "JUBLPHARMA", 
+    "MAXHEALTH", "FORTIS", "SYNGENE", "GLAXO", "PFIZER", "SANOFI", "AJANTPHARM", 
+    "JBCHEPHARM", "METROPOLIS", "LALPATHLAB", "SUZLON", "BHEL", "COCHINSHIP", 
+    "MAZDOCK", "BDL", "BEL", "HAL", "IDEA", "YESBANK", "NHPC", "SJVN", "IREDA", 
+    "TATACOMM", "INDIAMART", "JUBLINGREA", "PVRINOX", "ZEEL", "SUNTV", "DELHIVERY"
+}
 
 # ---------------------------------------------------------------------------
 # ntfy.sh Push Notifications (100% free, no signup)
@@ -728,10 +757,11 @@ def warm_cache_for_all_symbols(quick_only=False):
 
 
 def is_market_open():
-    now = dt.datetime.now()
-    if now.weekday() >= 5:
+    """True if Indian stock market is open: Mon-Fri, 9:15 AM to 3:30 PM IST."""
+    now_ist = get_ist_now()
+    if now_ist.weekday() >= 5:  # Saturday = 5, Sunday = 6
         return False
-    return MARKET_OPEN <= now.time() <= MARKET_CLOSE
+    return MARKET_OPEN <= now_ist.time() <= MARKET_CLOSE
 
 
 def chunked(lst, n):
@@ -746,13 +776,16 @@ def _evaluate_all_symbols():
     confirmed, watch = [], []
     w_confirmed, w_watch = [], []
 
+    ist_time_str = get_ist_now().strftime("%H:%M:%S")
+
     for sym in universe:
         candles = _candle_cache.get(sym)
         if candles:
             live_price = candles[-1][4]
             res = evaluate_symbol(sym, candles, live_price)
             if res:
-                res["timestamp"] = dt.datetime.now().strftime("%H:%M:%S")
+                res["timestamp"] = ist_time_str
+                res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                 (confirmed if res["status"] == "confirmed" else watch).append(res)
                 
             if passes_liquidity_filter(candles):
@@ -761,7 +794,8 @@ def _evaluate_all_symbols():
                     last_close_w = w_candles[-1][4]
                     w_res = evaluate_symbol_weekly(sym, w_candles, last_close_w)
                     if w_res:
-                        w_res["timestamp"] = dt.datetime.now().strftime("%H:%M:%S")
+                        w_res["timestamp"] = ist_time_str
+                        w_res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                         (w_confirmed if w_res["status"] == "confirmed" else w_watch).append(w_res)
 
     STATE["confirmed_alerts"] = sorted(confirmed, key=lambda x: -x["confidence"])
@@ -796,7 +830,7 @@ def sync_latest_daily_candles(symbols=None):
         if len(batches) > 1:
             time.sleep(0.4)
 
-    _latest_synced_date = dt.date.today()
+    _latest_synced_date = get_ist_now().date()
     save_candle_cache_to_disk()
 
 
@@ -811,7 +845,7 @@ def scan_loop():
     if _candle_cache:
         try:
             _evaluate_all_symbols()
-            STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S") + " (Cache)"
+            STATE["last_scan"] = get_ist_now().strftime("%H:%M:%S") + " (IST - Cache)"
         except Exception as e:
             app.logger.warning(f"Initial cache evaluation error: {e}")
 
@@ -846,10 +880,10 @@ def scan_loop():
                 app.logger.warning(f"Notification error: {e}")
 
             if market_open:
-                STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S")
+                STATE["last_scan"] = get_ist_now().strftime("%H:%M:%S") + " (IST - Live)"
             else:
-                STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S") + " (EOD)"
-                STATE["error"] = "Market closed — showing EOD pattern signals. Live scanning resumes at 9:15 IST."
+                STATE["last_scan"] = get_ist_now().strftime("%H:%M:%S") + " (IST - EOD)"
+                STATE["error"] = "Market closed (9:15 AM – 3:30 PM IST). Showing EOD patterns. Live scanning resumes tomorrow at 9:15 AM IST."
 
         except Exception as e:
             STATE["error"] = f"Scan error: {e}"
@@ -976,6 +1010,7 @@ def api_stocks():
             "low_52w":      round(min_l, 2) if min_l else None,
             "dist_52w_pct": dist_52w,
             "is_52w_high":  (dist_52w is not None and dist_52w <= 0.5),
+            "is_midcap":    sym in MIDCAP100_SYMBOLS,
             "pattern":      alert_map.get(sym, {}).get("pattern", ""),
             "status":       alert_map.get(sym, {}).get("status", ""),
             "confidence":   alert_map.get(sym, {}).get("confidence", 0),
@@ -995,7 +1030,8 @@ def api_stocks():
 def api_stocks_52w():
     """
     Return all Nifty 500 stocks within 5% of their 52-week high,
-    sorted by proximity ascending (breaking out / nearest 52W high at the top).
+    identifying 52W Box Breakouts and Midcap 100 stocks.
+    Sorted by proximity ascending (breaking out / nearest 52W high at the top).
     """
     universe = STATE.get("universe") or []
     alert_map = {}
@@ -1030,6 +1066,33 @@ def api_stocks_52w():
         change_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close else 0.0
 
         if dist_pct <= 5.0:
+            # Detect Box Breakout / 52W Box Consolidation
+            is_box = False
+            box_label = ""
+            box_top = high_52w
+            if len(candles) >= 25:
+                c_bars = candles[-35:-1]
+                c_highs = [c[2] for c in c_bars]
+                c_lows = [c[3] for c in c_bars]
+                box_top = max(c_highs)
+                box_bottom = min(c_lows)
+                box_h_pct = ((box_top - box_bottom) / box_bottom) * 100 if box_bottom > 0 else 999
+
+                if ltp >= box_top * 0.995 or dist_pct <= 0.5:
+                    is_box = True
+                    box_label = "📦 52W Box Breakout"
+                elif dist_pct <= 2.5 and box_h_pct <= 16.0:
+                    is_box = True
+                    box_label = "📦 52W Box Setup"
+
+            existing_pattern = alert_map.get(sym, {}).get("pattern", "")
+            existing_status = alert_map.get(sym, {}).get("status", "")
+            existing_conf = alert_map.get(sym, {}).get("confidence", 0)
+
+            final_pattern = existing_pattern if existing_pattern else (box_label if box_label else "52W High")
+            final_status = existing_status if existing_status else ("confirmed" if (dist_pct <= 0.5 or (is_box and ltp >= box_top * 0.995)) else "watch")
+            final_conf = existing_conf if existing_conf > 0 else (88 if is_box else 75)
+
             results.append({
                 "symbol": sym,
                 "ltp": round(ltp, 2),
@@ -1038,10 +1101,13 @@ def api_stocks_52w():
                 "low_52w": round(low_52w, 2),
                 "dist_52w_pct": max(0.0, dist_pct),
                 "is_at_high": dist_pct <= 0.5,
+                "is_box_breakout": is_box,
+                "box_label": box_label,
+                "is_midcap": sym in MIDCAP100_SYMBOLS,
                 "volume": int(volume),
-                "pattern": alert_map.get(sym, {}).get("pattern", ""),
-                "status": alert_map.get(sym, {}).get("status", ""),
-                "confidence": alert_map.get(sym, {}).get("confidence", 0),
+                "pattern": final_pattern,
+                "status": final_status,
+                "confidence": final_conf,
             })
 
     results.sort(key=lambda x: (x["dist_52w_pct"], -x["confidence"], x["symbol"]))
@@ -1052,6 +1118,8 @@ def api_stocks_52w():
         "at_high_count": sum(1 for s in results if s["is_at_high"]),
         "within_2pct_count": sum(1 for s in results if s["dist_52w_pct"] <= 2.0),
         "within_5pct_count": len(results),
+        "box_count": sum(1 for s in results if s["is_box_breakout"]),
+        "midcap_count": sum(1 for s in results if s["is_midcap"]),
         "last_scan": STATE.get("last_scan"),
     })
 

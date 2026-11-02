@@ -377,9 +377,26 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 .badge-symmetrical { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-pennant     { background:rgba(38,212,192,0.12); color:#4edfcf; border:1px solid rgba(38,212,192,0.28); }
 .badge-combo       { background:rgba(157,125,255,0.12);color:#c0a8ff; border:1px solid rgba(157,125,255,0.28);}
+.badge-box         { background:rgba(38,212,192,0.14); color:#4edfcf; border:1px solid rgba(38,212,192,0.35); }
+.badge-midcap      { background:rgba(255,133,51,0.14); color:var(--orange); border:1px solid rgba(255,133,51,0.35); }
 .badge-none        { background:var(--card3); color:var(--muted); border:1px solid var(--border); }
 .badge-profit      { background:rgba(16,208,122,0.12); color:var(--green); border:1px solid rgba(16,208,122,0.25); }
 .badge-loss        { background:rgba(255,64,96,0.12);  color:var(--red);   border:1px solid rgba(255,64,96,0.25);  }
+
+.midcap-tag {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255,133,51,0.12);
+  color: var(--orange);
+  border: 1px solid rgba(255,133,51,0.32);
+  font-weight: 700;
+  margin-left: 6px;
+  display: inline-block;
+  vertical-align: middle;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.02em;
+}
 
 .s-confirmed {
   background:rgba(16,208,122,0.10); color:var(--green);
@@ -393,11 +410,42 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 }
 
 /* ═══════════════════════════════════════
+   STATUS TOGGLE BUTTONS (Confirmed vs Pre-Breakout)
+═══════════════════════════════════════ */
+.status-btn-row {
+  display: flex; gap: 10px; margin: 10px 0 16px; flex-wrap: wrap; align-items: center;
+}
+.status-filter-btn {
+  padding: 8px 16px; border-radius: 10px; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; background: var(--card2); border: 1px solid var(--border);
+  color: var(--muted2); transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex; align-items: center; gap: 8px; font-family: 'Inter', sans-serif;
+}
+.status-filter-btn:hover { color: var(--text); border-color: var(--border-h); transform: translateY(-1px); }
+.status-filter-btn.active {
+  background: rgba(77,142,245,0.15); border-color: var(--blue); color: #fff;
+  box-shadow: 0 0 16px rgba(77,142,245,0.25);
+}
+.status-filter-btn.btn-confirmed.active {
+  background: rgba(16,208,122,0.15); border-color: var(--green); color: var(--green);
+  box-shadow: 0 0 16px rgba(16,208,122,0.25);
+}
+.status-filter-btn.btn-watch.active {
+  background: rgba(248,184,50,0.15); border-color: var(--amber); color: var(--amber);
+  box-shadow: 0 0 16px rgba(248,184,50,0.25);
+}
+.status-filter-btn .pc {
+  font-size: 10px; padding: 2px 7px; border-radius: 12px;
+  background: rgba(255,255,255,0.08); min-width: 20px; text-align: center;
+  font-family: 'JetBrains Mono', monospace; font-weight: 700;
+}
+
+/* ═══════════════════════════════════════
    PATTERN FILTER PILLS
 ═══════════════════════════════════════ */
 .pf-row {
   display: flex; flex-wrap:wrap; gap:8px;
-  margin-bottom: 18px; align-items:center;
+  margin-bottom: 12px; align-items:center;
 }
 .pf-btn {
   padding: 6px 14px;
@@ -429,6 +477,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 .pf-symmetrical.active-pf,  .wpf-symmetrical.active-pf  { background:rgba(77,142,245,0.13); border-color:rgba(77,142,245,0.35); color:#7aaeff;       }
 .pf-pennant.active-pf,      .wpf-pennant.active-pf      { background:rgba(38,212,192,0.11); border-color:rgba(38,212,192,0.32); color:var(--teal);   }
 .pf-combo.active-pf,        .wpf-combo.active-pf        { background:rgba(157,125,255,0.12);border-color:rgba(157,125,255,0.32);color:var(--purple); }
+.pf-midcap.active-pf,       .wpf-midcap.active-pf       { background:rgba(255,133,51,0.14); border-color:rgba(255,133,51,0.35); color:var(--orange); }
 
 /* ═══════════════════════════════════════
    TOOLBAR & SEARCH
@@ -805,8 +854,22 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 <!-- ═══════ WEEKLY ALERTS TAB ═══════ -->
 <div class="tab-panel" id="panel-weekly">
   <div class="disclaimer">Rule-based screener based on WEEKLY candles. Confirmed = triggered. Watch = forming. Min R:R 1:2.</div>
+  
+  <div class="status-btn-row">
+    <button class="status-filter-btn active" id="wsf-all-btn" onclick="setWeeklyStatusFilter('all')">
+      ⚡ All Signals <span class="pc" id="wsfc-all">0</span>
+    </button>
+    <button class="status-filter-btn btn-confirmed" id="wsf-confirmed-btn" onclick="setWeeklyStatusFilter('confirmed')">
+      ✅ Confirmed Breakout <span class="pc" id="wsfc-confirmed">0</span>
+    </button>
+    <button class="status-filter-btn btn-watch" id="wsf-watch-btn" onclick="setWeeklyStatusFilter('watch')">
+      👀 Pre-Breakout Watch <span class="pc" id="wsfc-watch">0</span>
+    </button>
+  </div>
+
   <div class="pf-row" id="wpfRow">
-    <button class="pf-btn wpf-all active-pf" onclick="setWeeklyAF('all')">🔍 All <span class="pc" id="wpfc-all">0</span></button>
+    <button class="pf-btn wpf-all active-pf" onclick="setWeeklyAF('all')">🔍 All Patterns <span class="pc" id="wpfc-all">0</span></button>
+    <button class="pf-btn wpf-midcap" onclick="setWeeklyAF('midcap')">⚡ Midcap 100 <span class="pc" id="wpfc-midcap">0</span></button>
     <button class="pf-btn wpf-ascending" onclick="setWeeklyAF('ascending')">📐 Ascending Triangle <span class="pc" id="wpfc-ascending">0</span></button>
     <button class="pf-btn wpf-descending" onclick="setWeeklyAF('descending')">📐 Descending Triangle <span class="pc" id="wpfc-descending">0</span></button>
     <button class="pf-btn wpf-symmetrical" onclick="setWeeklyAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="wpfc-symmetrical">0</span></button>
@@ -815,17 +878,35 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   </div>
 
   <div id="weeklyAlertsBanner"></div>
-  <h2 class="section">✅ Confirmed Weekly Breakouts <span class="section-tag" id="wcCount">0</span></h2>
-  <div class="table-wrap"><div id="wcTable"><div class="empty">No weekly alerts yet.</div></div></div>
-  <h2 class="section">👀 Pre-Breakout Weekly Watchlist <span class="section-tag" id="wwCount">0</span></h2>
-  <div class="table-wrap"><div id="wwTable"><div class="empty">No weekly alerts yet.</div></div></div>
+  <div id="wConfirmedSection">
+    <h2 class="section" onclick="setWeeklyStatusFilter('confirmed')" style="cursor:pointer" title="Click to view only Confirmed Breakouts">✅ Confirmed Weekly Breakouts <span class="section-tag" id="wcCount">0</span></h2>
+    <div class="table-wrap"><div id="wcTable"><div class="empty">No weekly alerts yet.</div></div></div>
+  </div>
+  <div id="wWatchSection">
+    <h2 class="section" onclick="setWeeklyStatusFilter('watch')" style="cursor:pointer" title="Click to view only Pre-Breakouts">👀 Pre-Breakout Weekly Watchlist <span class="section-tag" id="wwCount">0</span></h2>
+    <div class="table-wrap"><div id="wwTable"><div class="empty">No weekly alerts yet.</div></div></div>
+  </div>
 </div>
 
 <!-- ═══════ ALERTS TAB ═══════ -->
 <div class="tab-panel active" id="panel-alerts">
   <div class="disclaimer">Rule-based screener — not investment advice. Confirmed = triggered. Watch = forming. Min R:R 1:2.</div>
+  
+  <div class="status-btn-row">
+    <button class="status-filter-btn active" id="sf-all-btn" onclick="setStatusFilter('all')">
+      ⚡ All Signals <span class="pc" id="sfc-all">0</span>
+    </button>
+    <button class="status-filter-btn btn-confirmed" id="sf-confirmed-btn" onclick="setStatusFilter('confirmed')">
+      ✅ Confirmed Breakout <span class="pc" id="sfc-confirmed">0</span>
+    </button>
+    <button class="status-filter-btn btn-watch" id="sf-watch-btn" onclick="setStatusFilter('watch')">
+      👀 Pre-Breakout Watch <span class="pc" id="sfc-watch">0</span>
+    </button>
+  </div>
+
   <div class="pf-row" id="pfRow">
-    <button class="pf-btn pf-all active-pf" onclick="setAF('all')">🔍 All <span class="pc" id="pfc-all">0</span></button>
+    <button class="pf-btn pf-all active-pf" onclick="setAF('all')">🔍 All Patterns <span class="pc" id="pfc-all">0</span></button>
+    <button class="pf-btn pf-midcap" onclick="setAF('midcap')">⚡ Midcap 100 <span class="pc" id="pfc-midcap">0</span></button>
     <button class="pf-btn pf-ascending" onclick="setAF('ascending')">📐 Ascending Triangle <span class="pc" id="pfc-ascending">0</span></button>
     <button class="pf-btn pf-descending" onclick="setAF('descending')">📐 Descending Triangle <span class="pc" id="pfc-descending">0</span></button>
     <button class="pf-btn pf-symmetrical" onclick="setAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="pfc-symmetrical">0</span></button>
@@ -834,16 +915,20 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   </div>
 
   <div id="alertsBanner"></div>
-  <h2 class="section">✅ Confirmed Breakouts <span class="section-tag" id="cCount">0</span></h2>
-  <div class="table-wrap"><div id="cTable"><div class="empty">No alerts yet.</div></div></div>
-  <h2 class="section">👀 Pre-Breakout Watchlist <span class="section-tag" id="wCount">0</span></h2>
-  <div class="table-wrap"><div id="wTable"><div class="empty">No alerts yet.</div></div></div>
+  <div id="confirmedSection">
+    <h2 class="section" onclick="setStatusFilter('confirmed')" style="cursor:pointer" title="Click to view only Confirmed Breakouts">✅ Confirmed Breakouts <span class="section-tag" id="cCount">0</span></h2>
+    <div class="table-wrap"><div id="cTable"><div class="empty">No alerts yet.</div></div></div>
+  </div>
+  <div id="watchSection">
+    <h2 class="section" onclick="setStatusFilter('watch')" style="cursor:pointer" title="Click to view only Pre-Breakouts">👀 Pre-Breakout Watchlist <span class="section-tag" id="wCount">0</span></h2>
+    <div class="table-wrap"><div id="wTable"><div class="empty">No alerts yet.</div></div></div>
+  </div>
 </div>
 
 <!-- ═══════ 52-WEEK HIGH TAB ═══════ -->
 <div class="tab-panel" id="panel-52w">
   <div class="disclaimer">
-    🏆 High-momentum Nifty 500 stocks trading at or within 5% of their 52-Week High. Sorted by proximity ascending (nearest at the top).
+    🏆 High-momentum Nifty 500 &amp; Midcap stocks trading at or within 5% of their 52-Week High. Identified with <b>52W Box Breakouts</b>.
   </div>
 
   <!-- Stats row -->
@@ -851,7 +936,8 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <div class="high52-stat-card"><div class="label">🚀 At 52W High (≤0.5%)</div><div class="val" style="color:var(--green)" id="h52AtHigh">0</div></div>
     <div class="high52-stat-card"><div class="label">🎯 Within 2% of High</div><div class="val" style="color:var(--teal)" id="h52Within2">0</div></div>
     <div class="high52-stat-card"><div class="label">📈 Within 5% of High</div><div class="val" style="color:var(--blue)" id="h52Within5">0</div></div>
-    <div class="high52-stat-card"><div class="label">✦ With Pattern Signal</div><div class="val" style="color:var(--purple)" id="h52Patterns">0</div></div>
+    <div class="high52-stat-card"><div class="label">📦 Box Breakouts</div><div class="val" style="color:var(--teal)" id="h52Box">0</div></div>
+    <div class="high52-stat-card"><div class="label">⚡ Midcap 100</div><div class="val" style="color:var(--orange)" id="h52Midcap">0</div></div>
   </div>
 
   <!-- Toolbar -->
@@ -860,6 +946,8 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <button class="filter-btn active" id="h52f-all" onclick="set52wF('all')">All (≤5%)</button>
     <button class="filter-btn" id="h52f-athigh" onclick="set52wF('athigh')">🚀 At High (≤0.5%)</button>
     <button class="filter-btn" id="h52f-near" onclick="set52wF('near')">🎯 Within 2%</button>
+    <button class="filter-btn" id="h52f-box" onclick="set52wF('box')">📦 Box Breakout</button>
+    <button class="filter-btn" id="h52f-midcap" onclick="set52wF('midcap')">⚡ Midcap 100</button>
     <button class="filter-btn" id="h52f-pattern" onclick="set52wF('pattern')">✦ Pattern Match</button>
     <button class="filter-btn" onclick="load52wStocks()" id="h52RefreshBtn">⟳ Refresh</button>
     <span class="meta" id="h52Meta">—</span>
@@ -876,7 +964,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
         <th onclick="sort52w('high_52w')">52W High ₹ ↕</th>
         <th onclick="sort52w('low_52w')">52W Low ₹ ↕</th>
         <th onclick="sort52w('volume')">Volume ↕</th>
-        <th onclick="sort52w('pattern')">Pattern ↕</th>
+        <th onclick="sort52w('pattern')">Box / Pattern ↕</th>
         <th onclick="sort52w('confidence')">Conf ↕</th>
         <th>Actions</th>
       </tr></thead>
@@ -890,12 +978,8 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div class="toolbar">
     <input class="search-box" id="sSearch" type="text" placeholder="🔍 Search symbol…" oninput="renderStocks()">
     <button class="filter-btn active" id="sf-all"     onclick="setSF('all')">All</button>
+    <button class="filter-btn"        id="sf-midcap"  onclick="setSF('midcap')">⚡ Midcap 100</button>
     <button class="filter-btn"        id="sf-52w"     onclick="setSF('52w')">🏆 52W High (≤3%)</button>
-    <button class="filter-btn"        id="sf-matched" onclick="setSF('matched')">Pattern Match</button>
-    <button class="filter-btn"        id="sf-gainers" onclick="setSF('gainers')">Gainers</button>
-    <button class="filter-btn"        id="sf-losers"  onclick="setSF('losers')">Losers</button>
-    <span class="meta" id="sMeta">—</span>
-  </div>
     <button class="filter-btn"        id="sf-matched" onclick="setSF('matched')">Pattern Match</button>
     <button class="filter-btn"        id="sf-gainers" onclick="setSF('gainers')">Gainers</button>
     <button class="filter-btn"        id="sf-losers"  onclick="setSF('losers')">Losers</button>
@@ -1058,6 +1142,7 @@ const PK = {
 function pKey(s) {
   if (!s) return 'none';
   const sl = s.toLowerCase();
+  if (sl.includes('box')) return 'box';
   if (sl.includes('+')) return 'combo';
   if (sl.includes('ascending')) return 'ascending';
   if (sl.includes('descending')) return 'descending';
@@ -1074,6 +1159,8 @@ const BC = {
   triangle: 'badge-triangle', 
   pennant: 'badge-pennant', 
   combo: 'badge-combo', 
+  box: 'badge-box',
+  midcap: 'badge-midcap',
   none: 'badge-none' 
 };
 
@@ -1379,13 +1466,11 @@ let _liveRefreshTimer = null;
 
 function _isMarketHours() {
   const now = new Date();
-  const day = now.getDay(); // 0=Sun, 6=Sat
+  // Standard IST (UTC+5:30) calculation
+  const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  const day = ist.getUTCDay(); // 0=Sun, 6=Sat in IST
   if (day === 0 || day === 6) return false;
-  // Convert to IST (UTC+5:30)
-  const istMs = now.getTime() + (5.5 * 60 * 60 * 1000);
-  const ist   = new Date(istMs);
-  const h = ist.getUTCHours(), m = ist.getUTCMinutes();
-  const mins = h * 60 + m;
+  const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
   return mins >= 555 && mins <= 930; // 9:15 – 15:30 IST
 }
 
@@ -1435,8 +1520,51 @@ function closeChart() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ALERTS TAB
+// ALERTS TAB (Pre-Breakout & Confirmed Breakout Filtering)
 // ═══════════════════════════════════════════════════════════
+let currentStatusFilter = 'all';
+let currentWeeklyStatusFilter = 'all';
+
+function setStatusFilter(status) {
+  currentStatusFilter = status;
+  document.querySelectorAll('#panel-alerts .status-filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('sf-' + status + '-btn')?.classList.add('active');
+  const cSec = document.getElementById('confirmedSection');
+  const wSec = document.getElementById('watchSection');
+  if (cSec && wSec) {
+    if (status === 'confirmed') {
+      cSec.style.display = 'block';
+      wSec.style.display = 'none';
+    } else if (status === 'watch') {
+      cSec.style.display = 'none';
+      wSec.style.display = 'block';
+    } else {
+      cSec.style.display = 'block';
+      wSec.style.display = 'block';
+    }
+  }
+}
+
+function setWeeklyStatusFilter(status) {
+  currentWeeklyStatusFilter = status;
+  document.querySelectorAll('#panel-weekly .status-filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('wsf-' + status + '-btn')?.classList.add('active');
+  const cSec = document.getElementById('wConfirmedSection');
+  const wSec = document.getElementById('wWatchSection');
+  if (cSec && wSec) {
+    if (status === 'confirmed') {
+      cSec.style.display = 'block';
+      wSec.style.display = 'none';
+    } else if (status === 'watch') {
+      cSec.style.display = 'none';
+      wSec.style.display = 'block';
+    } else {
+      cSec.style.display = 'block';
+      wSec.style.display = 'block';
+    }
+  }
+}
+
 function setAF(key) {
   activeAF = key;
   document.querySelectorAll('.pf-btn').forEach(b => b.classList.remove('active-pf'));
@@ -1445,10 +1573,17 @@ function setAF(key) {
 }
 
 function applyAF() {
-  const fn = r => activeAF==='all' || pKey(r.strategy_used)===activeAF;
+  const fn = r => {
+    if (activeAF === 'all') return true;
+    if (activeAF === 'midcap') return !!r.is_midcap;
+    return pKey(r.strategy_used) === activeAF;
+  };
   const fc = rawConfirmed.filter(fn), fw = rawWatch.filter(fn);
   document.getElementById('cCount').textContent = fc.length;
   document.getElementById('wCount').textContent  = fw.length;
+  document.getElementById('sfc-confirmed').textContent = fc.length;
+  document.getElementById('sfc-watch').textContent = fw.length;
+  document.getElementById('sfc-all').textContent = fc.length + fw.length;
   document.getElementById('cTable').innerHTML    = renderAlerts(fc);
   document.getElementById('wTable').innerHTML    = renderAlerts(fw);
 }
@@ -1456,21 +1591,26 @@ function applyAF() {
 function updatePFC(confirmed, watch) {
   const all = [...confirmed, ...watch];
   document.getElementById('pfc-all').textContent = all.length;
+  document.getElementById('sfc-all').textContent = all.length;
+  document.getElementById('sfc-confirmed').textContent = confirmed.length;
+  document.getElementById('sfc-watch').textContent = watch.length;
   Object.keys(PK).forEach(k => { const el=document.getElementById('pfc-'+k); if(el) el.textContent='0'; });
+  const midEl = document.getElementById('pfc-midcap');
+  if (midEl) midEl.textContent = all.filter(r => !!r.is_midcap).length;
   const cnts = {};
   all.forEach(r => { const k=pKey(r.strategy_used); cnts[k]=(cnts[k]||0)+1; });
   Object.entries(cnts).forEach(([k,v]) => { const el=document.getElementById('pfc-'+k); if(el) el.textContent=v; });
 }
 
 function renderAlerts(rows, tf='daily') {
-  if (!rows?.length) return `<div class="empty">No alerts for this pattern.</div>`;
+  if (!rows?.length) return `<div class="empty">No alerts found for this filter.</div>`;
   return `<table><thead><tr>
     <th>Symbol</th><th>LTP</th><th>Pattern</th><th>Reason</th>
     <th>Buy @ Trigger</th><th>SL</th><th>T1</th><th>T2</th><th>R:R</th>
     <th>Vol Ratio</th><th>RSI</th><th>Conf</th><th>Breakout</th><th>Actions</th>
   </tr></thead><tbody>
   ${rows.map(r=>`<tr data-sym="${r.symbol}">
-    <td class="sym">${r.symbol}</td>
+    <td class="sym">${r.symbol}${r.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
     <td class="alert-ltp">₹${fmt(r.ltp)}</td>
     <td><span class="badge ${bClass(r.strategy_used)}">${r.strategy_used}</span></td>
     <td class="reasons">${r.reasons.map(x=>`<div>• ${x}</div>`).join('')}</td>
@@ -1501,7 +1641,7 @@ async function refreshAlerts() {
   const data = await res.json();
 
   document.getElementById('marketDot').className = 'dot '+(data.market_open?'open':'closed');
-  document.getElementById('marketText').textContent = data.market_open?'Market open — live':'Market closed';
+  document.getElementById('marketText').textContent = data.market_open?'Market open — live (9:15–15:30 IST)':'Market closed (9:15–15:30 IST)';
   document.getElementById('lastScan').textContent = data.last_scan?'Scan: '+data.last_scan:'';
   document.getElementById('uSize').textContent = data.universe_size?data.universe_size+' stocks':'';
   document.getElementById('hdrProg').textContent = data.scan_progress?'⏳ '+data.scan_progress:'';
@@ -1533,7 +1673,7 @@ async function refreshWeeklyAlerts() {
   const data = await res.json();
 
   document.getElementById('marketDot').className = 'dot '+(data.market_open?'open':'closed');
-  document.getElementById('marketText').textContent = data.market_open?'Market open — live':'Market closed';
+  document.getElementById('marketText').textContent = data.market_open?'Market open — live (9:15–15:30 IST)':'Market closed (9:15–15:30 IST)';
   document.getElementById('lastScan').textContent = data.last_scan?'Scan: '+data.last_scan:'';
   document.getElementById('uSize').textContent = data.universe_size?data.universe_size+' stocks':'';
   document.getElementById('hdrProg').textContent = data.scan_progress?'⏳ '+data.scan_progress:'';
@@ -1562,10 +1702,17 @@ function setWeeklyAF(key) {
 }
 
 function applyWeeklyAF() {
-  const fn = r => activeWeeklyAF==='all' || pKey(r.strategy_used)===activeWeeklyAF;
+  const fn = r => {
+    if (activeWeeklyAF === 'all') return true;
+    if (activeWeeklyAF === 'midcap') return !!r.is_midcap;
+    return pKey(r.strategy_used) === activeWeeklyAF;
+  };
   const fc = weeklyRawConfirmed.filter(fn), fw = weeklyRawWatch.filter(fn);
   document.getElementById('wcCount').textContent = fc.length;
   document.getElementById('wwCount').textContent  = fw.length;
+  document.getElementById('wsfc-confirmed').textContent = fc.length;
+  document.getElementById('wsfc-watch').textContent = fw.length;
+  document.getElementById('wsfc-all').textContent = fc.length + fw.length;
   document.getElementById('wcTable').innerHTML    = renderAlerts(fc, 'weekly');
   document.getElementById('wwTable').innerHTML    = renderAlerts(fw, 'weekly');
 }
@@ -1573,7 +1720,12 @@ function applyWeeklyAF() {
 function updateWeeklyPFC(confirmed, watch) {
   const all = [...confirmed, ...watch];
   document.getElementById('wpfc-all').textContent = all.length;
+  document.getElementById('wsfc-all').textContent = all.length;
+  document.getElementById('wsfc-confirmed').textContent = confirmed.length;
+  document.getElementById('wsfc-watch').textContent = watch.length;
   Object.keys(PK).forEach(k => { const el=document.getElementById('wpfc-'+k); if(el) el.textContent='0'; });
+  const midEl = document.getElementById('wpfc-midcap');
+  if (midEl) midEl.textContent = all.filter(r => !!r.is_midcap).length;
   const cnts = {};
   all.forEach(r => { const k=pKey(r.strategy_used); cnts[k]=(cnts[k]||0)+1; });
   Object.entries(cnts).forEach(([k,v]) => { const el=document.getElementById('wpfc-'+k); if(el) el.textContent=v; });
@@ -1700,6 +1852,7 @@ function renderStocks() {
   const q = (document.getElementById('sSearch').value||'').toUpperCase().trim();
   let list = allStocks.filter(s=>{
     if(q && !s.symbol.includes(q)) return false;
+    if(activeSF==='midcap')  return !!s.is_midcap;
     if(activeSF==='52w')     return s.dist_52w_pct!==null && s.dist_52w_pct<=3.0;
     if(activeSF==='matched') return !!s.pattern;
     if(activeSF==='gainers') return s.change_pct!==null && s.change_pct>0;
@@ -1722,7 +1875,7 @@ function renderStocks() {
     const sb=s.status==='confirmed'?`<span class="s-confirmed">✅</span>`:s.status==='watch'?`<span class="s-watch">👀</span>`:'';
     const cf=s.confidence?`<span class="conf ${cc(s.confidence)}">${s.confidence}%</span>`:`<span style="color:var(--muted)">—</span>`;
     return `<tr data-sym="${s.symbol}">
-      <td><span class="sym">${s.symbol}</span></td>
+      <td><span class="sym">${s.symbol}</span>${s.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
       <td>${s.close!==null?'₹'+fmt(s.close):'<span style="color:var(--muted)">Loading…</span>'}</td>
       <td class="${cc2}">${chgT}</td><td>${fmtVol(s.volume)}</td>
       <td>${s.high_52w!==null?'₹'+fmt(s.high_52w):'—'}</td>
@@ -1918,7 +2071,10 @@ async function load52wStocks() {
     document.getElementById('h52AtHigh').textContent   = data.at_high_count || 0;
     document.getElementById('h52Within2').textContent  = data.within_2pct_count || 0;
     document.getElementById('h52Within5').textContent  = data.within_5pct_count || 0;
-    document.getElementById('h52Patterns').textContent = all52wStocks.filter(s => !!s.pattern).length;
+    const boxEl = document.getElementById('h52Box');
+    if (boxEl) boxEl.textContent = data.box_count || 0;
+    const midEl = document.getElementById('h52Midcap');
+    if (midEl) midEl.textContent = data.midcap_count || 0;
 
     render52wTable();
   } catch (e) {
@@ -1951,6 +2107,8 @@ function render52wTable() {
     if (q && !s.symbol.includes(q)) return false;
     if (active52wF === 'athigh')  return s.is_at_high || s.dist_52w_pct <= 0.5;
     if (active52wF === 'near')    return s.dist_52w_pct <= 2.0;
+    if (active52wF === 'box')     return !!s.is_box_breakout;
+    if (active52wF === 'midcap')  return !!s.is_midcap;
     if (active52wF === 'pattern') return !!s.pattern;
     return true;
   });
@@ -1978,6 +2136,8 @@ function render52wTable() {
     const cc2 = chg === null ? 'flat' : chg > 0 ? 'up' : chg < 0 ? 'down' : 'flat';
     const chgT = chg === null ? '—' : (chg > 0 ? '+' : '') + chg.toFixed(2) + '%';
     const pb = s.pattern ? `<span class="badge ${bClass(s.pattern)}">${s.pattern}</span>` : `<span style="color:var(--muted)">—</span>`;
+    const boxTag = s.is_box_breakout ? `<span class="badge badge-box">${s.box_label || '📦 52W Box Breakout'}</span>` : '';
+    const midcapTag = s.is_midcap ? `<span class="midcap-tag">⚡ Midcap</span>` : '';
     const sb = s.status === 'confirmed' ? `<span class="s-confirmed">✅</span>` : s.status === 'watch' ? `<span class="s-watch">👀</span>` : '';
     const cf = s.confidence ? `<span class="conf ${cc(s.confidence)}">${s.confidence}%</span>` : `<span style="color:var(--muted)">—</span>`;
 
@@ -1998,7 +2158,7 @@ function render52wTable() {
     const fillPct = Math.max(0, Math.min(100, Math.round((1 - (dist / 5.0)) * 100)));
 
     return `<tr data-sym="${s.symbol}">
-      <td><span class="sym">${s.symbol}</span></td>
+      <td><span class="sym">${s.symbol}</span>${midcapTag}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-weight:700">₹${fmt(s.ltp)}</td>
       <td class="${cc2}">${chgT}</td>
       <td>
@@ -2010,7 +2170,7 @@ function render52wTable() {
       <td style="font-family:'JetBrains Mono',monospace;color:var(--green);font-weight:600">₹${fmt(s.high_52w)}</td>
       <td style="font-family:'JetBrains Mono',monospace;color:var(--muted2)">₹${fmt(s.low_52w)}</td>
       <td>${fmtVol(s.volume)}</td>
-      <td>${pb} ${sb}</td>
+      <td>${boxTag ? boxTag + ' ' : ''}${pb} ${sb}</td>
       <td>${cf}</td>
       <td style="display:flex;gap:5px;align-items:center">
         ${chartBtn(s.symbol, null)}
