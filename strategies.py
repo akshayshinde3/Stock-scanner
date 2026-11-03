@@ -1,20 +1,20 @@
 """
-strategies.py — Focused Swing Trading Engine (Ascending/Symmetrical Triangle, Pennant)
+strategies.py — Multi-Pattern Swing Trading Engine
+=================================================
+Includes:
+  1. Descending Channel Breakout Engine (price action, volume expansion, retest confirmation, double bottom)
+  2. Triangle Patterns (Ascending / Symmetrical)
+  3. Bullish Pennant Pattern
 
-Implements:
-  1.  Triangle pattern  (Ascending / Symmetrical)
-  2.  Pennant pattern  (pole + converging consolidation with volume confirmation)
-
-All patterns include:
-  - Confirmed breakout detection
-  - Pre-breakout / watch-list detection
-  - Confidence scoring
-  - Trade levels (buy, stop-loss, target1, target2)
-  - Strict confidence filter: Confirmed stocks returned ONLY with confidence >= 60%
+Strict rules:
+  - NO RSI or ADX used anywhere.
+  - Quality score weighted out of 100.
+  - Minimum R:R 1:2.
 """
 
 import datetime as dt
 import statistics
+import descending_channel
 
 
 # ---------------------------------------------------------------------------
@@ -78,26 +78,12 @@ def ema(values, period):
 # 1. TRIANGLE PATTERNS — Ascending & Symmetrical (Chartink + Geometric Fallback)
 # ---------------------------------------------------------------------------
 FLAT_SLOPE_THRESHOLD = 0.0025       # realistic flat slope threshold (0.25% per day)
-MIN_TOUCHES = 2                     # require ≥2 touches per trendline
-MIN_FIT_QUALITY = 0.35              # minimum R² fit quality
+MIN_TOUCHES = 2                     # require >=2 touches per trendline
+MIN_FIT_QUALITY = 0.35              # minimum R2 fit quality
 TOUCH_TOLERANCE = 0.035             # 3.5% touch tolerance for real-world wicks
 
 
 def detect_triangle_chartink_daily(candles, live_price=None):
-    """
-    Chartink Daily Triangle Strategy:
-      - Daily Close > 50 EMA
-      - 1 day ago min(10, low) > 11 days ago min(10, low)  [Higher Lows]
-      - Daily SMA(volume, 5) < Daily SMA(volume, 20)        [Volume Dry-Up]
-      - Case A (Ascending Triangle):
-          11 days ago max(20, high) >= 1 day ago max(30, high) * 0.985
-          1 day ago max(10, high) >= 1 day ago max(30, high) * 0.985
-          Close in [max(30, high)*0.95, max(30, high)]
-      - Case B (Symmetrical Triangle):
-          1 day ago max(10, high) < 11 days ago max(20, high) * 0.985
-          10-day range (H-L) < 10-day range from 11 days ago (H-L) [Range Contraction]
-          Close in [max(10, high)*0.95, max(10, high)]
-    """
     if len(candles) < 40:
         return None
 
@@ -109,22 +95,19 @@ def detect_triangle_chartink_daily(candles, live_price=None):
     cur_price = live_price if live_price is not None else closes[-1]
     today_close = closes[-1]
 
-    # 1. Trend filter: Daily Close > 50 EMA
+    # Trend filter: Daily Close > 50 EMA
     e50 = ema(closes, 50)
     if e50 is not None and today_close < e50 * 0.985:
         return None
 
-    # 2. Volume dry-up: SMA(Vol, 5) < SMA(Vol, 20)
     v5 = sma(volumes, 5)
     v20 = sma(volumes, 20)
     vol_dry_up = (v5 is not None and v20 is not None and v5 < v20)
 
-    # 3. Higher Lows: 1 day ago min(10, low) > 11 days ago min(10, low)
     min_low_10_1d = min(lows[-11:-1])
     min_low_10_11d = min(lows[-21:-11])
     higher_lows = min_low_10_1d >= min_low_10_11d * 0.995
 
-    # 4. Check CASE A: Ascending Triangle (Flat Top Resistance, Higher Lows)
     max_high_30_1d = max(highs[-31:-1])
     max_high_20_11d = max(highs[-31:-11])
     max_high_10_1d = max(highs[-11:-1])
@@ -135,7 +118,6 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         max_high_10_1d >= max_high_30_1d * 0.980
     )
 
-    # 5. Check CASE B: Symmetrical Triangle (Lower Highs, Higher Lows, Range Contraction)
     range_10_1d = max_high_10_1d - min_low_10_1d
     max_high_10_11d = max(highs[-21:-11])
     min_low_10_11d_val = min(lows[-21:-11])
@@ -161,7 +143,6 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         sup_level = min_low_10_1d
         lookback = 25
 
-    # Status check:
     breakout_now = cur_price >= res_level or today_close >= res_level
     recent_breakout = (len(closes) >= 3 and 
                        (closes[-2] >= res_level or closes[-3] >= res_level) and 
@@ -192,19 +173,6 @@ def detect_triangle_chartink_daily(candles, live_price=None):
 
 
 def detect_triangle_chartink_weekly(candles, live_price=None):
-    """
-    Chartink Weekly Triangle Strategy:
-      - Weekly Close > Weekly 20 EMA
-      - 1 week ago min(5, low) > 6 weeks ago min(5, low) [Higher Lows]
-      - Case A (Weekly Ascending Triangle):
-          1 week ago max(5, high) >= 1 week ago max(15, high) * 0.985
-          6 weeks ago max(10, high) >= 1 week ago max(15, high) * 0.985
-          Weekly Close in [max(15, high)*0.95, max(15, high)]
-      - Case B (Weekly Symmetrical Triangle):
-          1 week ago max(5, high) < 6 weeks ago max(10, high) * 0.985
-          5-week range (H-L) < 5-week range from 6 weeks ago (H-L) [Range Contraction]
-          Weekly Close in [max(5, high)*0.95, max(5, high)]
-    """
     if len(candles) < 20:
         return None
 
@@ -215,17 +183,14 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
     cur_price = live_price if live_price is not None else closes[-1]
     today_close = closes[-1]
 
-    # 1. Weekly Close > Weekly 20 EMA
     e20 = ema(closes, 20)
     if e20 is not None and today_close < e20 * 0.985:
         return None
 
-    # 2. Higher Lows: 1 week ago min(5, low) > 6 weeks ago min(5, low)
     min_low_5_1w = min(lows[-6:-1])
     min_low_5_6w = min(lows[-11:-6])
     higher_lows = min_low_5_1w >= min_low_5_6w * 0.995
 
-    # 3. CASE A: Weekly Ascending Triangle
     max_high_15_1w = max(highs[-16:-1])
     max_high_5_1w = max(highs[-6:-1])
     max_high_10_6w = max(highs[-16:-6])
@@ -236,7 +201,6 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
         max_high_10_6w >= max_high_15_1w * 0.980
     )
 
-    # 4. CASE B: Weekly Symmetrical Triangle
     range_5_1w = max_high_5_1w - min_low_5_1w
     max_high_5_6w = max(highs[-11:-6])
     range_5_6w = max_high_5_6w - min_low_5_6w
@@ -341,7 +305,6 @@ def _detect_triangle_window(candles, lookback=40):
     else:
         bars_to_apex = None
 
-    # Validate swing points actually touch the trendlines (within tolerance)
     res_touches = 0
     for idx, val in swing_highs:
         expected = line_value(res_slope, res_intercept, idx)
@@ -391,13 +354,6 @@ def detect_triangle(candles, timeframe="daily", live_price=None):
 # 2. PENNANT STRATEGY — Bullish Pennant with volume confirmation
 # ---------------------------------------------------------------------------
 def detect_pennant(candles):
-    """
-    Pennant Pattern (Bullish):
-    - Sharp rise (pole) of at least 6% in the last 15-25 bars.
-    - Small symmetrical triangle consolidation (converging lines) over 5-20 bars.
-    - Confirmed: breakout above resistance with green candle AND volume spike.
-    - Forming: price approaching resistance within 1.5%.
-    """
     if len(candles) < 25:
         return None
 
@@ -441,7 +397,6 @@ def detect_pennant(candles):
     if consol_fit < 0.30:
         return None
 
-    # Converging lines (resistance slopes down, support slopes up)
     if res_slope_norm < -0.0003 and sup_slope_norm > 0.0003:
         last_x = len(consol_window) - 1
         res_now = line_value(res_slope, res_intercept, last_x)
@@ -497,11 +452,17 @@ def detect_pennant(candles):
 # Per-pattern alert builder helpers
 # ---------------------------------------------------------------------------
 def _pattern_levels(pattern_type, pattern, candles):
-    """Compute buy/sl/target levels based on pattern type."""
     today_close = candles[-1][4]
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (candles[-1][2] - candles[-1][3])
 
-    if pattern_type == "triangle":
+    if pattern_type == "channel":
+        entry = pattern.get("entry_price", today_close)
+        sl = pattern.get("stop_loss", entry - 1.5 * atr)
+        t1 = pattern.get("target1", entry + 2 * (entry - sl))
+        t2 = pattern.get("target2", entry + 3 * (entry - sl))
+        return entry, sl, t1, t2
+
+    elif pattern_type == "triangle":
         res = pattern["resistance_now"]
         buy_price = round(max(res * 1.002, today_close), 2) if today_close > res else round(res * 1.002, 2)
         stop_loss = round(pattern["support_now"], 2)
@@ -533,11 +494,12 @@ def _pattern_levels(pattern_type, pattern, candles):
 # ---------------------------------------------------------------------------
 def build_alert(symbol, candles, live_price, timeframe="daily"):
     """
-    Runs strategies (Triangle, Pennant), picks the single
-    best qualifying signal, returns full alert dict or None.
-    Confirmed breakouts strictly filtered to confidence >= 60%.
+    Evaluates:
+      1. Descending Channel Breakout Strategy (price action, volume expansion, retest confirmation)
+      2. Triangle patterns (Ascending / Symmetrical)
+      3. Bullish Pennant
     """
-    min_candles = 20 if timeframe == "weekly" else 40
+    min_candles = 20 if timeframe == "weekly" else 30
     if len(candles) < min_candles:
         return None
 
@@ -545,14 +507,40 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     today_open, today_close = today[1], today[4]
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (today[2] - today[3])
 
-    # Run detectors
-    triangle = detect_triangle(candles, timeframe=timeframe, live_price=live_price)
-    pennant  = detect_pennant(candles) if timeframe == "daily" else None
-
-    # Candidate evaluation list: pick the single best pattern (no multi/combo)
     candidates = []
 
-    # 1. Triangle Candidate (Ascending / Symmetrical)
+    # 1. Advanced Descending Channel Strategy Engine
+    try:
+        dc_res = descending_channel.scan_descending_channel(
+            symbol=symbol,
+            candles=candles,
+            live_price=live_price,
+            timeframe=timeframe
+        )
+        if dc_res and dc_res.get("signal_type") != "REJECTED":
+            dc_status = "confirmed" if dc_res["signal_type"] in ["CONFIRMED BUY", "EARLY BREAKOUT"] else "pre_breakout_watch"
+            candidates.append({
+                "type_key": "channel",
+                "name": "Descending Channel",
+                "status": dc_status,
+                "score": dc_res["setup_quality_score"],
+                "reasons": dc_res["reasons"][:3],
+                "pattern": dc_res,
+                "custom_levels": (
+                    dc_res["entry_price"],
+                    dc_res["stop_loss"],
+                    dc_res["target1"],
+                    dc_res["target2"]
+                ),
+                "breakout_candle_date": dc_res.get("breakout_date"),
+                "signal_type": dc_res["signal_type"],
+                "dc_details": dc_res,
+            })
+    except Exception:
+        pass
+
+    # 2. Triangle Candidate
+    triangle = detect_triangle(candles, timeframe=timeframe, live_price=live_price)
     if triangle:
         t_name = triangle["type"]
         t_status = triangle.get("status", "confirmed")
@@ -581,7 +569,8 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
             "pattern": triangle
         })
 
-    # 2. Pennant Candidate
+    # 3. Pennant Candidate
+    pennant = detect_pennant(candles) if timeframe == "daily" else None
     if pennant:
         p_status = "confirmed" if pennant["status"] == "confirmed" else "pre_breakout_watch"
         p_score = 58 if p_status == "confirmed" else 36
@@ -589,7 +578,7 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         if p_status == "confirmed":
             p_reasons.append(f"Breakout > ₹{pennant['resistance']}")
             if pennant.get("volume_spike"):
-                p_reasons.append(f"Vol {pennant.get('volume_ratio', 1.2):.1f}×")
+                p_reasons.append(f"Vol {pennant.get('volume_ratio', 1.2):.1f}x")
                 p_score += 10
             else:
                 p_score += 4
@@ -619,8 +608,11 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     best_pattern_type = best["type_key"]
     best_pattern = best["pattern"]
 
-    # Calculate trade levels
-    buy_price, stop_loss, target1, target2 = _pattern_levels(best_pattern_type, best_pattern, candles)
+    if best.get("custom_levels"):
+        buy_price, stop_loss, target1, target2 = best["custom_levels"]
+    else:
+        buy_price, stop_loss, target1, target2 = _pattern_levels(best_pattern_type, best_pattern, candles)
+
     if buy_price is None:
         buy_price = round(today_close, 2)
         stop_loss = round(today_close - 1.5 * atr, 2)
@@ -636,28 +628,19 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
 
     rr = round((target1 - buy_price) / risk, 2)
     if rr < 1.8:
-        return None  # enforce minimum ~1:2 R:R
-
-    # Pre-breakout: If LTP has crossed the buy trigger, it's a confirmed breakout
-    if status == "pre_breakout_watch" and live_price >= buy_price:
-        status = "confirmed"
-        reasons.append(f"Triggered > ₹{buy_price}")
-        score += 18
-
-    # For watch alerts, drop if trigger is more than 10% away
-    if status == "pre_breakout_watch" and buy_price > live_price * 1.10:
         return None
 
-    confidence = min(round(score), 95)
+    confidence = min(round(score), 100)
 
-    # ── STRICT FILTER: Show confirmation stocks ONLY above 60% confidence ──
-    if status == "confirmed" and confidence < 60:
+    # Strict confidence filter
+    min_required_conf = 80 if best_pattern_type == "channel" else 60
+    if status == "confirmed" and confidence < min_required_conf:
         return None
 
     expected_breakout_date = "Today / already triggered" if status == "confirmed" else \
         (dt.date.today() + dt.timedelta(days=1)).strftime("%d-%b-%Y")
 
-    return {
+    res_dict = {
         "symbol": symbol,
         "ltp": round(live_price, 2),
         "status": status,
@@ -670,5 +653,9 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         "risk_reward": f"1:{rr}",
         "confidence": confidence,
         "expected_breakout_date": expected_breakout_date,
-        "breakout_candle_date": best.get("breakout_candle_date") or (best_pattern.get("breakout_candle_date") if isinstance(best_pattern, dict) else None),
+        "breakout_candle_date": best.get("breakout_candle_date"),
     }
+    if best.get("dc_details"):
+        res_dict["descending_channel"] = best["dc_details"]
+
+    return res_dict

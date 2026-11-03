@@ -831,6 +831,18 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   font-size:11px; font-weight:700; cursor:pointer; transition:all .15s;
 }
 .save-btn:hover { background:rgba(77,142,245,0.2); }
+
+/* ── DESCENDING CHANNEL STYLES ── */
+.sig-confirmed { background: rgba(16,208,122,0.16); color: var(--green); border: 1px solid rgba(16,208,122,0.35); font-weight: 700; padding: 3px 8px; border-radius: 6px; font-size: 11px; display: inline-block; white-space: nowrap; }
+.sig-early     { background: rgba(77,142,245,0.16); color: var(--blue);  border: 1px solid rgba(77,142,245,0.35); font-weight: 700; padding: 3px 8px; border-radius: 6px; font-size: 11px; display: inline-block; white-space: nowrap; }
+.sig-watchlist { background: rgba(248,184,50,0.16); color: var(--amber); border: 1px solid rgba(248,184,50,0.35); font-weight: 700; padding: 3px 8px; border-radius: 6px; font-size: 11px; display: inline-block; white-space: nowrap; }
+.sig-rejected  { background: rgba(255,64,96,0.16);  color: var(--red);   border: 1px solid rgba(255,64,96,0.35);  font-weight: 700; padding: 3px 8px; border-radius: 6px; font-size: 11px; display: inline-block; white-space: nowrap; }
+.channel-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.channel-stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; position: relative; overflow: hidden; }
+.channel-stat-card::before { content: ''; position: absolute; top:0; left:0; right:0; height:2px; background: linear-gradient(90deg, var(--green), var(--blue)); }
+.channel-stat-card .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px; font-weight: 600; }
+.channel-stat-card .val { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.backtest-modal-card { background: var(--card2); border: 1px solid var(--border-h); border-radius: 12px; padding: 16px; margin-top: 15px; }
 </style>
 </head>
 <body>
@@ -851,6 +863,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 <div class="tab-bar">
   <button class="tab-btn active" id="tab-alerts-btn" onclick="switchTab('alerts')">🔔 Daily Alerts <span class="tab-count" id="tc-alerts">0</span></button>
   <button class="tab-btn" id="tab-weekly-btn" onclick="switchTab('weekly')">📅 Weekly Alerts <span class="tab-count" id="tc-weekly">0</span></button>
+  <button class="tab-btn" id="tab-channel-btn" onclick="switchTab('channel')">📉 Descending Channel <span class="tab-count green" id="tc-channel">0</span></button>
   <button class="tab-btn" id="tab-52w-btn" onclick="switchTab('52w')">🏆 52-Week High <span class="tab-count" id="tc-52w">0</span></button>
   <button class="tab-btn" id="tab-stocks-btn" onclick="switchTab('stocks')">📊 Nifty 500 <span class="tab-count" id="tc-stocks">500</span></button>
   <button class="tab-btn" id="tab-settings-btn" onclick="switchTab('settings')">⚙️ API Settings</button>
@@ -929,6 +942,100 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
   <div id="watchSection">
     <h2 class="section" onclick="setStatusFilter('watch')" style="cursor:pointer" title="Click to view only Pre-Breakouts">👀 Pre-Breakout Watchlist <span class="section-tag" id="wCount">0</span></h2>
     <div class="table-wrap"><div id="wTable"><div class="empty">No alerts yet.</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════ DESCENDING CHANNEL TAB ═══════ -->
+<div class="tab-panel" id="panel-channel">
+  <div class="disclaimer">
+    📉 <b>Advanced Descending Channel Bullish Breakout Scanner</b> — Identifies downward sloping parallel channels (min 3 LH &amp; 3 LL), volume expansion (RVOL ≥ 1.5x), resistance retest confirmation, and 1:2+ R:R setups. Strict Price Action &amp; Volume only (No RSI, No ADX).
+  </div>
+
+  <!-- Summary stats row -->
+  <div class="channel-stats">
+    <div class="channel-stat-card"><div class="label">Total Setups</div><div class="val" id="dcStatTotal" style="color:var(--text)">0</div></div>
+    <div class="channel-stat-card"><div class="label">Confirmed Buy (Green)</div><div class="val" id="dcStatConfirmed" style="color:var(--green)">0</div></div>
+    <div class="channel-stat-card"><div class="label">Early Breakout (Blue)</div><div class="val" id="dcStatEarly" style="color:var(--blue)">0</div></div>
+    <div class="channel-stat-card"><div class="label">Watchlist (Yellow)</div><div class="val" id="dcStatWatch" style="color:var(--amber)">0</div></div>
+    <div class="channel-stat-card"><div class="label">Rejected (Red)</div><div class="val" id="dcStatRejected" style="color:var(--red)">0</div></div>
+  </div>
+
+  <!-- Toolbar / Filters -->
+  <div class="toolbar" style="flex-wrap:wrap; gap:8px;">
+    <input class="search-box" id="dcSearch" type="text" placeholder="🔍 Search symbol..." oninput="renderChannelTable()">
+    
+    <!-- Timeframe Filter -->
+    <button class="filter-btn active" id="dcTf-daily" onclick="setChannelTimeframe('daily')">📅 Daily</button>
+    <button class="filter-btn" id="dcTf-weekly" onclick="setChannelTimeframe('weekly')">📅 Weekly</button>
+    
+    <span style="border-left:1px solid var(--border);height:20px;margin:0 4px;"></span>
+
+    <!-- Signal Filter -->
+    <button class="filter-btn active" id="dcSig-all" onclick="setChannelSigFilter('all')">All Signals</button>
+    <button class="filter-btn" id="dcSig-confirmed" onclick="setChannelSigFilter('CONFIRMED BUY')">🟢 Confirmed Buy</button>
+    <button class="filter-btn" id="dcSig-early" onclick="setChannelSigFilter('EARLY BREAKOUT')">🔵 Early Breakout</button>
+    <button class="filter-btn" id="dcSig-watch" onclick="setChannelSigFilter('WATCHLIST')">🟡 Watchlist</button>
+    <button class="filter-btn" id="dcSig-rejected" onclick="setChannelSigFilter('REJECTED')">🔴 Rejected</button>
+
+    <span style="border-left:1px solid var(--border);height:20px;margin:0 4px;"></span>
+
+    <!-- Setup Score Filter -->
+    <select id="dcScoreFilter" onchange="renderChannelTable()" style="background:var(--card2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:8px;font-size:12px;outline:none;">
+      <option value="60">Score ≥ 60 (All Valid)</option>
+      <option value="80">Score ≥ 80 (Actionable)</option>
+      <option value="85">Score ≥ 85 (Excellent)</option>
+    </select>
+
+    <button class="filter-btn" onclick="loadDescendingChannelSignals()" id="dcRefreshBtn">⟳ Refresh</button>
+    
+    <button class="filter-btn" style="background:linear-gradient(135deg,rgba(77,142,245,0.2),rgba(16,208,122,0.2));border-color:rgba(16,208,122,0.4);color:var(--green);font-weight:700;" onclick="triggerChannelBacktestModal()">📊 Run Backtest</button>
+
+    <span class="meta" id="dcMeta">—</span>
+  </div>
+
+  <!-- Backtest Card (collapsible / toggleable) -->
+  <div id="dcBacktestCard" class="backtest-modal-card" style="display:none;margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="font-size:14px;color:var(--text);font-weight:700;">📈 Descending Channel Backtest Report (NSE Walk-Forward, Brokerage &amp; Slippage Deducted)</h3>
+      <button class="icon-btn" onclick="document.getElementById('dcBacktestCard').style.display='none'">✕ Close</button>
+    </div>
+    <div id="dcBacktestContent"><span class="spin"></span> Running backtest over historical candles...</div>
+  </div>
+
+  <!-- Main Table -->
+  <div class="table-wrap" style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th onclick="sortChannel('symbol')">Symbol ↕</th>
+          <th onclick="sortChannel('company_name')">Company</th>
+          <th>Exchange</th>
+          <th onclick="sortChannel('current_price')">Price ₹ ↕</th>
+          <th>TF</th>
+          <th onclick="sortChannel('channel_start_date')">Formed ↕</th>
+          <th onclick="sortChannel('channel_duration')">Dur (Bars) ↕</th>
+          <th>Upper TL</th>
+          <th>Lower TL</th>
+          <th onclick="sortChannel('breakout_price')">Breakout ₹ ↕</th>
+          <th onclick="sortChannel('breakout_pct')">BO % ↕</th>
+          <th onclick="sortChannel('relative_volume')">RVOL ↕</th>
+          <th onclick="sortChannel('breakout_candle_strength')">Candle Str ↕</th>
+          <th>Double Bottom</th>
+          <th>Retest Status</th>
+          <th>Entry ₹</th>
+          <th>SL ₹</th>
+          <th>T1 ₹</th>
+          <th>T2 ₹</th>
+          <th>T3 ₹</th>
+          <th onclick="sortChannel('risk_reward')">R:R ↕</th>
+          <th onclick="sortChannel('setup_quality_score')">Score ↕</th>
+          <th onclick="sortChannel('signal_type')">Signal Type ↕</th>
+        </tr>
+      </thead>
+      <tbody id="dcTbody">
+        <tr><td colspan="23" class="empty"><span class="spin"></span> Loading Descending Channel setups...</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -1130,6 +1237,7 @@ function switchTab(t) {
   document.getElementById('panel-' + t).classList.add('active');
   if (t === 'alerts')    refreshAlerts();
   if (t === 'weekly')    refreshWeeklyAlerts();
+  if (t === 'channel')   loadDescendingChannelSignals();
   if (t === '52w')       load52wStocks();
   if (t === 'stocks')    loadStocks();
   if (t === 'settings')  { loadSettings(); loadNtfySettings(); }
@@ -1330,12 +1438,16 @@ async function fetchAndDrawPattern(sym, tf='daily') {
     const pats    = data.patterns;
     let patLabel  = '';
 
-    const ORDER = ['triangle', 'pennant'];
+    const ORDER = ['channel', 'triangle', 'pennant'];
     for (const key of ORDER) {
       if (!pats[key]) continue;
       const p = pats[key];
 
-      if (false) {
+      if (key === 'channel') {
+        if (p.resistance_line) addLine(p.resistance_line, '#10d07a', 2, 0);
+        if (p.support_line)    addLine(p.support_line, '#4d8ef5', 2, 0);
+        patLabel = p.type + (p.status ? ' [' + p.status + ']' : '');
+      } else if (false) {
         addLine(p.resistance_line, W, 1, 0);
         addLine(p.support_line,    W, 1, 0);
         patLabel = '';
@@ -2252,6 +2364,7 @@ async function triggerQuickScan() {
       refreshWeeklyAlerts();
       loadStocks();
       load52wStocks();
+loadDescendingChannelSignals();
     }, 2500);
   } catch (e) {
     alert('Quick scan error: ' + e);
@@ -2279,6 +2392,7 @@ async function triggerRescan() {
       refreshWeeklyAlerts();
       loadStocks();
       load52wStocks();
+loadDescendingChannelSignals();
     }, 1500);
   } catch (e) {
     alert('Rescan error: ' + e);
@@ -2293,17 +2407,206 @@ async function triggerRescan() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// DESCENDING CHANNEL SCANNER
+// ═══════════════════════════════════════════════════════════
+let allChannelSignals = [];
+let currentChannelTf = 'daily';
+let activeChannelSig = 'all';
+let sortChannelKey = 'setup_quality_score';
+let sortChannelDir = -1;
+
+async function loadDescendingChannelSignals() {
+  const btn = document.getElementById('dcRefreshBtn');
+  if (btn) { btn.textContent = '⟳ Loading…'; btn.disabled = true; }
+  try {
+    const res = await fetch(`/api/signals/descending_channel?timeframe=${currentChannelTf}&min_score=60`).catch(() => null);
+    if (!res || !res.ok) return;
+    const data = await res.json();
+    allChannelSignals = data.all_signals || [];
+
+    const tc = document.getElementById('tc-channel');
+    if (tc) {
+      const actionableCount = (data.confirmed_buy || []).length + (data.early_breakout || []).length;
+      tc.textContent = actionableCount;
+      tc.className = 'tab-count' + (actionableCount > 0 ? ' green' : '');
+    }
+
+    const setTotal = document.getElementById('dcStatTotal');
+    if (setTotal) setTotal.textContent = allChannelSignals.length;
+    const setConf = document.getElementById('dcStatConfirmed');
+    if (setConf) setConf.textContent = (data.confirmed_buy || []).length;
+    const setEarly = document.getElementById('dcStatEarly');
+    if (setEarly) setEarly.textContent = (data.early_breakout || []).length;
+    const setWatch = document.getElementById('dcStatWatch');
+    if (setWatch) setWatch.textContent = (data.watchlist || []).length;
+    const setRej = document.getElementById('dcStatRejected');
+    if (setRej) setRej.textContent = (data.rejected || []).length;
+
+    renderChannelTable();
+  } catch (e) {
+    console.warn("loadDescendingChannelSignals error:", e);
+  } finally {
+    if (btn) { btn.textContent = '⟳ Refresh'; btn.disabled = false; }
+  }
+}
+
+function setChannelTimeframe(tf) {
+  currentChannelTf = tf;
+  document.getElementById('dcTf-daily')?.classList.toggle('active', tf === 'daily');
+  document.getElementById('dcTf-weekly')?.classList.toggle('active', tf === 'weekly');
+  loadDescendingChannelSignals();
+}
+
+function setChannelSigFilter(sig) {
+  activeChannelSig = sig;
+  ['all', 'CONFIRMED BUY', 'EARLY BREAKOUT', 'WATCHLIST', 'REJECTED'].forEach(k => {
+    const id = 'dcSig-' + (k === 'CONFIRMED BUY' ? 'confirmed' : k === 'EARLY BREAKOUT' ? 'early' : k === 'WATCHLIST' ? 'watch' : k === 'REJECTED' ? 'rejected' : 'all');
+    document.getElementById(id)?.classList.toggle('active', activeChannelSig === k);
+  });
+  renderChannelTable();
+}
+
+function sortChannel(col) {
+  if (sortChannelKey === col) {
+    sortChannelDir *= -1;
+  } else {
+    sortChannelKey = col;
+    sortChannelDir = (col === 'symbol' || col === 'company_name' || col === 'signal_type') ? 1 : -1;
+  }
+  renderChannelTable();
+}
+
+function renderChannelTable() {
+  const q = (document.getElementById('dcSearch')?.value || '').toUpperCase().trim();
+  const minScore = parseInt(document.getElementById('dcScoreFilter')?.value || '60');
+
+  let list = allChannelSignals.filter(s => {
+    if (q && !s.symbol.includes(q)) return false;
+    if (s.setup_quality_score < minScore) return false;
+    if (activeChannelSig !== 'all' && s.signal_type !== activeChannelSig) return false;
+    return true;
+  });
+
+  list.sort((a, b) => {
+    let av = a[sortChannelKey], bv = b[sortChannelKey];
+    if (av === null || av === undefined) av = sortChannelDir > 0 ? 999999 : -Infinity;
+    if (bv === null || bv === undefined) bv = sortChannelDir > 0 ? 999999 : -Infinity;
+    if (typeof av === 'string') return sortChannelDir * av.localeCompare(bv);
+    return sortChannelDir * (av - bv);
+  });
+
+  const meta = document.getElementById('dcMeta');
+  if (meta) meta.textContent = `Showing ${list.length} of ${allChannelSignals.length} setups`;
+
+  const tbody = document.getElementById('dcTbody');
+  if (!tbody) return;
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="23" class="empty">${allChannelSignals.length === 0 ? 'No descending channel setups detected in current cache.' : 'No setups matching selected filters.'}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map(s => {
+    let sigBadge = '';
+    if (s.signal_type === 'CONFIRMED BUY') {
+      sigBadge = `<span class="sig-confirmed">🟢 CONFIRMED BUY</span>`;
+    } else if (s.signal_type === 'EARLY BREAKOUT') {
+      sigBadge = `<span class="sig-early">🔵 EARLY BREAKOUT</span>`;
+    } else if (s.signal_type === 'WATCHLIST') {
+      sigBadge = `<span class="sig-watchlist">🟡 WATCHLIST</span>`;
+    } else {
+      sigBadge = `<span class="sig-rejected">🔴 REJECTED</span>`;
+    }
+
+    const rvolVal = s.relative_volume || 0;
+    const rvolColor = rvolVal >= 2.0 ? 'var(--green)' : rvolVal >= 1.5 ? 'var(--teal)' : 'var(--muted)';
+    const scoreColor = s.setup_quality_score >= 85 ? 'var(--green)' : s.setup_quality_score >= 80 ? 'var(--teal)' : s.setup_quality_score >= 75 ? 'var(--amber)' : 'var(--red)';
+    const dbText = s.double_bottom ? `<span style="color:var(--green);font-weight:700">✓ Formed</span>` : `<span style="color:var(--muted)">—</span>`;
+    const retestText = s.retest_status === 'Confirmed' ? `<span style="color:var(--green);font-weight:700">✓ Retested</span>` : s.retest_status === 'Pending' ? `<span style="color:var(--amber)">Pending</span>` : `<span style="color:var(--muted)">—</span>`;
+
+    const al = encodeURIComponent(JSON.stringify({
+      buy: s.entry_price,
+      sl: s.stop_loss,
+      tgt: s.target1,
+      strategy: 'Descending Channel',
+      timeframe: currentChannelTf
+    }));
+
+    return `<tr data-sym="${s.symbol}">
+      <td><span class="sym click-sym" onclick="openChart('${s.symbol}','${al}')" title="Click to view chart">${s.symbol}</span>${s.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
+      <td style="color:var(--muted2);font-size:12px;">${esc(s.company_name || s.symbol + ' Ltd.')}</td>
+      <td><span style="font-size:10.5px;color:var(--muted);font-weight:600;">${s.exchange || 'NSE'}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700">₹${fmt(s.current_price)}</td>
+      <td style="font-size:11px;color:var(--muted2);text-transform:uppercase">${s.timeframe || currentChannelTf}</td>
+      <td style="font-size:11px;color:var(--muted2);font-family:'JetBrains Mono',monospace;">${s.channel_start_date || '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;text-align:center">${s.channel_duration || '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--amber)">₹${fmt(s.upper_trendline)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--blue)">₹${fmt(s.lower_trendline)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:600">₹${fmt(s.breakout_price)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:${s.breakout_pct >= 0 ? 'var(--green)' : 'var(--red)'}">${s.breakout_pct !== null && s.breakout_pct !== undefined ? (s.breakout_pct >= 0 ? '+' : '') + s.breakout_pct.toFixed(2) + '%' : '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;color:${rvolColor}">${s.relative_volume ? s.relative_volume.toFixed(2) + 'x' : '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;text-align:center">${s.breakout_candle_strength ? s.breakout_candle_strength.toFixed(1) + '%' : '—'}</td>
+      <td style="text-align:center">${dbText}</td>
+      <td style="text-align:center">${retestText}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--green);font-weight:700">₹${fmt(s.entry_price)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--red);font-weight:600">₹${fmt(s.stop_loss)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--teal)">₹${fmt(s.target1)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--teal)">₹${fmt(s.target2)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--green)">₹${fmt(s.target3)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--text)">1:${s.risk_reward ? s.risk_reward.toFixed(2) : '—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-weight:700;color:${scoreColor};text-align:center">${s.setup_quality_score}/100</td>
+      <td>${sigBadge}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function triggerChannelBacktestModal() {
+  const card = document.getElementById('dcBacktestCard');
+  const content = document.getElementById('dcBacktestContent');
+  if (!card || !content) return;
+  card.style.display = 'block';
+  content.innerHTML = '<div style="padding:20px;text-align:center;"><span class="spin"></span> Running comprehensive backtest across historical NSE stock data (deducting 0.10% brokerage/slippage)...</div>';
+  
+  try {
+    const res = await fetch('/api/backtest/descending_channel?min_score=80&require_retest=true');
+    const data = await res.json();
+    if (!data.success) {
+      content.innerHTML = `<div class="form-msg err">❌ Backtest error: ${esc(data.error || 'Failed')}</div>`;
+      return;
+    }
+    const r = data.report;
+    content.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px;">
+        <div class="channel-stat-card"><div class="label">Total Trades</div><div class="val">${r.total_trades}</div></div>
+        <div class="channel-stat-card"><div class="label">Win Rate</div><div class="val" style="color:${r.win_rate_pct >= 50 ? 'var(--green)' : 'var(--red)'}">${r.win_rate_pct}%</div></div>
+        <div class="channel-stat-card"><div class="label">Profit Factor</div><div class="val" style="color:var(--teal)">${r.profit_factor}</div></div>
+        <div class="channel-stat-card"><div class="label">Net Profit After Charges</div><div class="val" style="color:${r.net_profit_pct >= 0 ? 'var(--green)' : 'var(--red)'}">${r.net_profit_pct >= 0 ? '+' : ''}${r.net_profit_pct}%</div></div>
+        <div class="channel-stat-card"><div class="label">Max Drawdown</div><div class="val" style="color:var(--red)">-${r.max_drawdown_pct}%</div></div>
+        <div class="channel-stat-card"><div class="label">Expectancy / Trade</div><div class="val" style="color:var(--green)">${r.expectancy_pct >= 0 ? '+' : ''}${r.expectancy_pct}%</div></div>
+        <div class="channel-stat-card"><div class="label">Avg Holding Period</div><div class="val">${r.average_holding_period_bars} bars</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);background:var(--card);padding:10px 14px;border-radius:8px;border:1px solid var(--border);">
+        <b>Trade Breakdown:</b> Winning Trades: <b style="color:var(--green)">${r.winning_trades}</b> | Losing Trades: <b style="color:var(--red)">${r.losing_trades}</b> | Avg Profit: <b style="color:var(--green)">+${r.avg_profit_pct}%</b> | Avg Loss: <b style="color:var(--red)">-${r.avg_loss_pct}%</b> | Avg R:R: <b>1:${r.avg_risk_reward}</b>
+      </div>
+    `;
+  } catch (e) {
+    content.innerHTML = `<div class="form-msg err">❌ Network error: ${esc(e.message)}</div>`;
+  }
+}
+
 // BOOT
 // ═══════════════════════════════════════════════════════════
 refreshAlerts();
 refreshWeeklyAlerts();
 loadStocks();
 load52wStocks();
+loadDescendingChannelSignals();
 // Real-time live price patches — run every 8s across active panels
 setInterval(patchLivePrices, 8000);  // Stocks tab: price/change% flash
 setInterval(patchAlertLtps,  8000);  // Alerts tab: LTP flash
 // 52W High stocks auto-refresh every 60s
-setInterval(() => { if (document.getElementById('panel-52w')?.classList.contains('active')) load52wStocks(); }, 60000);
+setInterval(() => { if (document.getElementById('panel-52w')?.classList.contains('active')) load52wStocks();
+}, 60000); setInterval(() => { if (document.getElementById('panel-channel')?.classList.contains('active')) loadDescendingChannelSignals(); }, 60000);
 window.addEventListener('resize', () => { if (chartObj) chartObj.applyOptions({ width: document.getElementById('chartContainer').clientWidth }); });
 </script>
 </body>

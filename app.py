@@ -28,6 +28,8 @@ from flask import Flask, request, redirect, jsonify, render_template, session, u
 from dotenv import load_dotenv
 
 import strategies
+import descending_channel
+import backtest_descending_channel
 
 # Load environment variables from .env file
 load_dotenv()
@@ -968,6 +970,70 @@ def api_signals_weekly():
     })
 
 
+@app.route("/api/signals/descending_channel")
+def api_signals_descending_channel():
+    tf = request.args.get("timeframe", "daily").lower()
+    min_score = int(request.args.get("min_score", 65))
+    universe = STATE.get("universe") or []
+    
+    results = []
+    for sym in universe:
+        candles = _weekly_candle_cache.get(sym) if tf == "weekly" else _candle_cache.get(sym)
+        if not candles or len(candles) < 25:
+            continue
+        live_p = candles[-1][4]
+        try:
+            res = descending_channel.scan_descending_channel(
+                symbol=sym,
+                candles=candles,
+                live_price=live_p,
+                timeframe=tf
+            )
+            if res and res["setup_quality_score"] >= min_score:
+                res["is_midcap"] = sym in MIDCAP100_SYMBOLS
+                results.append(res)
+        except Exception:
+            continue
+            
+    results.sort(key=lambda x: -x["setup_quality_score"])
+    
+    confirmed = [r for r in results if r["signal_type"] == "CONFIRMED BUY"]
+    early = [r for r in results if r["signal_type"] == "EARLY BREAKOUT"]
+    watchlist = [r for r in results if r["signal_type"] == "WATCHLIST"]
+    rejected = [r for r in results if r["signal_type"] == "REJECTED"]
+    
+    return jsonify({
+        "all_signals": results,
+        "confirmed_buy": confirmed,
+        "early_breakout": early,
+        "watchlist": watchlist,
+        "rejected": rejected,
+        "total": len(results),
+        "last_scan": STATE.get("last_scan"),
+        "timeframe": tf
+    })
+
+
+@app.route("/api/backtest/descending_channel", methods=["GET", "POST"])
+def api_backtest_descending_channel():
+    req_data = request.get_json(silent=True) or {}
+    min_score = int(request.args.get("min_score") or req_data.get("min_score") or 80)
+    req_retest = (request.args.get("require_retest", "true").lower() == "true") or bool(req_data.get("require_retest", True))
+    
+    if not _candle_cache:
+        load_candle_cache_from_disk()
+        
+    try:
+        report = backtest_descending_channel.run_full_backtest(
+            candle_dict=_candle_cache,
+            min_score=min_score,
+            require_retest=req_retest
+        )
+        return jsonify({"success": True, "report": report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/news/<symbol>")
 def api_news(symbol):
     return jsonify({"news": get_news_flag(symbol)})
@@ -1295,6 +1361,29 @@ def api_pattern(symbol):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
 
+    # ── DESCENDING CHANNEL ───────────────────────────────────────────────────
+    try:
+        dc = descending_channel.scan_descending_channel(sym, candles, timeframe="daily")
+        if dc:
+            patterns["channel"] = {
+                "type": "Descending Channel",
+                "resistance_line": dc["res_points"],
+                "support_line": dc["sup_points"],
+                "resistance_level": dc["upper_trendline"],
+                "support_level": dc["lower_trendline"],
+                "channel_height": dc["channel_height"],
+                "breakout_candle_date": dc.get("breakout_date"),
+                "status": dc.get("signal_type"),
+                "entry_price": dc["entry_price"],
+                "stop_loss": dc["stop_loss"],
+                "target1": dc["target1"],
+                "target2": dc["target2"],
+                "target3": dc["target3"],
+                "score": dc["setup_quality_score"],
+            }
+    except Exception:
+        pass
+
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
         tri = strategies.detect_triangle(candles, timeframe="daily")
@@ -1385,6 +1474,29 @@ def api_pattern_weekly(symbol):
             if 0 <= idx < len(dates):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
+
+    # ── DESCENDING CHANNEL WEEKLY ────────────────────────────────────────────
+    try:
+        dc = descending_channel.scan_descending_channel(sym, candles, timeframe="weekly")
+        if dc:
+            patterns["channel"] = {
+                "type": "Descending Channel (Weekly)",
+                "resistance_line": dc["res_points"],
+                "support_line": dc["sup_points"],
+                "resistance_level": dc["upper_trendline"],
+                "support_level": dc["lower_trendline"],
+                "channel_height": dc["channel_height"],
+                "breakout_candle_date": dc.get("breakout_date"),
+                "status": dc.get("signal_type"),
+                "entry_price": dc["entry_price"],
+                "stop_loss": dc["stop_loss"],
+                "target1": dc["target1"],
+                "target2": dc["target2"],
+                "target3": dc["target3"],
+                "score": dc["setup_quality_score"],
+            }
+    except Exception:
+        pass
 
     # ── TRIANGLE WEEKLY ──────────────────────────────────────────────────────
     try:
