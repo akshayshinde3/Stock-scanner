@@ -378,7 +378,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 }
 .badge-triangle    { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-ascending   { background:rgba(16,208,122,0.12); color:#10d07a; border:1px solid rgba(16,208,122,0.28); }
-.badge-channel   { background:rgba(255,107,107,0.14); color:#ff8787; border:1px solid rgba(255,107,107,0.35); }
+
 .click-sym       { cursor:pointer; transition:all 0.15s ease; color:var(--blue); }
 .click-sym:hover { color:#7aaeff !important; text-decoration:underline; text-shadow:0 0 8px rgba(77,142,245,0.4); }
 .badge-symmetrical { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
@@ -480,7 +480,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 /* Active pill colors */
 .pf-all.active-pf,          .wpf-all.active-pf          { background:rgba(77,142,245,0.14); border-color:rgba(77,142,245,0.35); color:var(--blue);   }
 .pf-ascending.active-pf,    .wpf-ascending.active-pf    { background:rgba(16,208,122,0.14); border-color:rgba(16,208,122,0.35); color:var(--green);  }
-.pf-channel.active-pf,      .wpf-channel.active-pf      { background:rgba(255,107,107,0.14);border-color:rgba(255,107,107,0.35);color:#ff8787;      }
+
 .pf-symmetrical.active-pf,  .wpf-symmetrical.active-pf  { background:rgba(77,142,245,0.13); border-color:rgba(77,142,245,0.35); color:#7aaeff;       }
 .pf-pennant.active-pf,      .wpf-pennant.active-pf      { background:rgba(38,212,192,0.11); border-color:rgba(38,212,192,0.32); color:var(--teal);   }
 .pf-combo.active-pf,        .wpf-combo.active-pf        { background:rgba(157,125,255,0.12);border-color:rgba(157,125,255,0.32);color:var(--purple); }
@@ -878,7 +878,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <button class="pf-btn wpf-all active-pf" onclick="setWeeklyAF('all')">🔍 All Patterns <span class="pc" id="wpfc-all">0</span></button>
     <button class="pf-btn wpf-midcap" onclick="setWeeklyAF('midcap')">⚡ Midcap 100 <span class="pc" id="wpfc-midcap">0</span></button>
     <button class="pf-btn wpf-ascending" onclick="setWeeklyAF('ascending')">📐 Ascending Triangle <span class="pc" id="wpfc-ascending">0</span></button>
-    <button class="pf-btn wpf-channel" onclick="setWeeklyAF('channel')">📉 Descending Channel <span class="pc" id="wpfc-channel">0</span></button>
+
     <button class="pf-btn wpf-symmetrical" onclick="setWeeklyAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="wpfc-symmetrical">0</span></button>
     <button class="pf-btn wpf-pennant" onclick="setWeeklyAF('pennant')">🎏 Bullish Pennant <span class="pc" id="wpfc-pennant">0</span></button>
 
@@ -915,7 +915,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
     <button class="pf-btn pf-all active-pf" onclick="setAF('all')">🔍 All Patterns <span class="pc" id="pfc-all">0</span></button>
     <button class="pf-btn pf-midcap" onclick="setAF('midcap')">⚡ Midcap 100 <span class="pc" id="pfc-midcap">0</span></button>
     <button class="pf-btn pf-ascending" onclick="setAF('ascending')">📐 Ascending Triangle <span class="pc" id="pfc-ascending">0</span></button>
-    <button class="pf-btn pf-channel" onclick="setAF('channel')">📉 Descending Channel <span class="pc" id="pfc-channel">0</span></button>
+
     <button class="pf-btn pf-symmetrical" onclick="setAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="pfc-symmetrical">0</span></button>
     <button class="pf-btn pf-pennant" onclick="setAF('pennant')">🎏 Bullish Pennant <span class="pc" id="pfc-pennant">0</span></button>
 
@@ -1140,7 +1140,7 @@ function switchTab(t) {
 // ═══════════════════════════════════════════════════════════
 const PK = { 
   ascending: ['ascending'], 
-  channel: ['channel'],
+
   symmetrical: ['symmetrical'], 
   triangle: ['triangle'], 
   pennant: ['pennant'], 
@@ -1151,18 +1151,18 @@ function pKey(s) {
   if (!s) return 'none';
   const sl = s.toLowerCase();
   if (sl.includes('box')) return 'box';
-  if (sl.includes('channel')) return 'channel';
+
   if (sl.includes('ascending')) return 'ascending';
-  if (sl.includes('descending')) return 'channel';
+
   if (sl.includes('symmetrical')) return 'symmetrical';
   if (sl.includes('pennant')) return 'pennant';
   if (sl.includes('triangle')) return 'triangle';
-  return 'channel';
+  return 'none';
 }
 
 const BC = { 
   ascending: 'badge-ascending', 
-  channel: 'badge-channel',
+
   symmetrical: 'badge-symmetrical', 
   triangle: 'badge-triangle', 
   pennant: 'badge-pennant', 
@@ -1330,15 +1330,15 @@ async function fetchAndDrawPattern(sym, tf='daily') {
     const pats    = data.patterns;
     let patLabel  = '';
 
-    const ORDER = ['channel', 'triangle', 'pennant'];
+    const ORDER = ['triangle', 'pennant'];
     for (const key of ORDER) {
       if (!pats[key]) continue;
       const p = pats[key];
 
-      if (key === 'channel') {
+      if (false) {
         addLine(p.resistance_line, W, 1, 0);
         addLine(p.support_line,    W, 1, 0);
-        patLabel = p.type || 'Descending Channel';
+        patLabel = '';
       }
       else if (key === 'triangle') {
         addLine(p.resistance_line, W, 1, 0);
@@ -1353,7 +1353,7 @@ async function fetchAndDrawPattern(sym, tf='daily') {
       }
     }
 
-    let breakoutDate = (currentAlertInfo && currentAlertInfo.breakout_candle_date) || (pats.channel && pats.channel.breakout_candle_date);
+    let breakoutDate = (currentAlertInfo && currentAlertInfo.breakout_candle_date);
     if (!breakoutDate) {
       for (const k of ORDER) {
         if (pats[k] && pats[k].breakout_candle_date) { breakoutDate = pats[k].breakout_candle_date; break; }
@@ -1607,8 +1607,8 @@ function setAF(key) {
 
 function applyAF() {
   const fn = r => {
-    const isCh = (r.strategy_used || '').toLowerCase().includes('channel');
-    if (r.status === 'confirmed' && (r.confidence || 0) < (isCh ? 80 : 60)) return false;
+
+    if (r.status === 'confirmed' && (r.confidence || 0) < 60) return false;
     if (activeAF === 'all') return true;
     if (activeAF === 'midcap') return !!r.is_midcap;
     return pKey(r.strategy_used) === activeAF;
@@ -1624,7 +1624,7 @@ function applyAF() {
 }
 
 function updatePFC(confirmed, watch) {
-  const vConf = confirmed.filter(r => (r.confidence||0) >= ((r.strategy_used||'').toLowerCase().includes('channel') ? 80 : 60));
+  const vConf = confirmed.filter(r => (r.confidence||0) >= 60);
   const all = [...vConf, ...watch];
   document.getElementById('pfc-all').textContent = all.length;
   document.getElementById('sfc-all').textContent = all.length;
@@ -1759,8 +1759,8 @@ function setWeeklyAF(key) {
 
 function applyWeeklyAF() {
   const fn = r => {
-    const isCh = (r.strategy_used || '').toLowerCase().includes('channel');
-    if (r.status === 'confirmed' && (r.confidence || 0) < (isCh ? 80 : 60)) return false;
+
+    if (r.status === 'confirmed' && (r.confidence || 0) < 60) return false;
     if (activeWeeklyAF === 'all') return true;
     if (activeWeeklyAF === 'midcap') return !!r.is_midcap;
     return pKey(r.strategy_used) === activeWeeklyAF;
@@ -1776,7 +1776,7 @@ function applyWeeklyAF() {
 }
 
 function updateWeeklyPFC(confirmed, watch) {
-  const vConf = confirmed.filter(r => (r.confidence||0) >= ((r.strategy_used||'').toLowerCase().includes('channel') ? 80 : 60));
+  const vConf = confirmed.filter(r => (r.confidence||0) >= 60);
   const all = [...vConf, ...watch];
   document.getElementById('wpfc-all').textContent = all.length;
   document.getElementById('wsfc-all').textContent = all.length;

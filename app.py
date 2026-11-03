@@ -3,7 +3,7 @@ Swing Trading Scanner — Upstox Edition
 ----------------------------------------
 Runs locally on your PC. Logs into your Upstox account (OAuth),
 polls your watchlist during market hours, evaluates swing-trading
-pattern strategies (Descending Channel, Triangle, Pennant), and shows live
+pattern strategies (Triangle, Pennant), and shows live
 BUY signals on a dashboard at http://localhost:5000.
 Free push notifications via ntfy.sh.
 
@@ -819,8 +819,7 @@ def _evaluate_all_symbols():
                 res["timestamp"] = ist_time_str
                 res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                 if res["status"] == "confirmed":
-                    min_c = 80 if "Channel" in res.get("strategy_used", "") else 60
-                    if res.get("confidence", 0) >= min_c:
+                    if res.get("confidence", 0) >= 60:
                         confirmed.append(res)
                 else:
                     watch.append(res)
@@ -834,8 +833,7 @@ def _evaluate_all_symbols():
                         w_res["timestamp"] = ist_time_str
                         w_res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                         if w_res["status"] == "confirmed":
-                            min_wc = 80 if "Channel" in w_res.get("strategy_used", "") else 60
-                            if w_res.get("confidence", 0) >= min_wc:
+                            if w_res.get("confidence", 0) >= 60:
                                 w_confirmed.append(w_res)
                         else:
                             w_watch.append(w_res)
@@ -1062,7 +1060,7 @@ def api_stocks():
 def api_stocks_52w():
     """
     Return all Nifty 500 stocks within 5% of their 52-week high,
-    identifying 52W Box Breakouts, Descending Channels, and Midcap 100 stocks.
+    identifying 52W Box Breakouts and Midcap 100 stocks.
     """
     universe = STATE.get("universe") or []
     alert_map = {}
@@ -1118,14 +1116,6 @@ def api_stocks_52w():
             existing_pattern = alert_map.get(sym, {}).get("pattern", "")
             existing_status = alert_map.get(sym, {}).get("status", "")
             existing_conf = alert_map.get(sym, {}).get("confidence", 0)
-
-            # Check descending channel if not already in alert map
-            if not existing_pattern:
-                ch = strategies.detect_descending_channel(candles, timeframe="daily", live_price=ltp)
-                if ch:
-                    existing_pattern = "Descending Channel"
-                    existing_status = ch["status"]
-                    existing_conf = 78 if ch["status"] == "confirmed" else 62
 
             final_pattern = existing_pattern if existing_pattern else (box_label if box_label else "52W High")
             final_status = existing_status if existing_status else ("confirmed" if (dist_pct <= 0.5 or (is_box and ltp >= box_top * 0.995)) else "watch")
@@ -1305,28 +1295,6 @@ def api_pattern(symbol):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
 
-    # ── DESCENDING CHANNEL ───────────────────────────────────────────────────
-    try:
-        ch = strategies.detect_descending_channel(candles, timeframe="daily")
-        if ch:
-            LOOKBACK = ch.get("lookback", 30)
-            off = n - LOOKBACK
-            lx = LOOKBACK - 1
-            res_line = trendline_pts(ch["res_slope"], ch["res_intercept"], 0, lx, off)
-            sup_line = trendline_pts(ch["sup_slope"], ch["sup_intercept"], 0, lx, off)
-            patterns["channel"] = {
-                "type": ch["type"],
-                "resistance_line": res_line,
-                "support_line": sup_line,
-                "resistance_level": ch["resistance_now"],
-                "support_level": ch["support_now"],
-                "channel_height": ch["channel_height"],
-                "breakout_candle_date": ch.get("breakout_candle_date"),
-                "status": ch.get("status"),
-            }
-    except Exception:
-        pass
-
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
         tri = strategies.detect_triangle(candles, timeframe="daily")
@@ -1417,28 +1385,6 @@ def api_pattern_weekly(symbol):
             if 0 <= idx < len(dates):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
-
-    # ── DESCENDING CHANNEL WEEKLY ────────────────────────────────────────────
-    try:
-        ch = strategies.detect_descending_channel(candles, timeframe="weekly")
-        if ch:
-            LOOKBACK = ch.get("lookback", 20)
-            off = n - LOOKBACK
-            lx = LOOKBACK - 1
-            res_line = trendline_pts(ch["res_slope"], ch["res_intercept"], 0, lx, off)
-            sup_line = trendline_pts(ch["sup_slope"], ch["sup_intercept"], 0, lx, off)
-            patterns["channel"] = {
-                "type": ch["type"],
-                "resistance_line": res_line,
-                "support_line": sup_line,
-                "resistance_level": ch["resistance_now"],
-                "support_level": ch["support_now"],
-                "channel_height": ch["channel_height"],
-                "breakout_candle_date": ch.get("breakout_candle_date"),
-                "status": ch.get("status"),
-            }
-    except Exception:
-        pass
 
     # ── TRIANGLE WEEKLY ──────────────────────────────────────────────────────
     try:
