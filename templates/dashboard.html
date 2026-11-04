@@ -1220,6 +1220,9 @@ function chartBtn(sym, alert, tf='daily') {
     sl:  alert.stop_loss,
     tgt: alert.target1,
     strategy: alert.strategy_used || '',
+    status: alert.status || '',
+    confidence: alert.confidence || 0,
+    breakout_candle_date: alert.breakout_candle_date || '',
     timeframe: tf
   })) : '';
   return `<button class="icon-btn" onclick="openChart('${sym}','${al}')" title="View Chart">📈</button>`;
@@ -1229,10 +1232,104 @@ function chartBtn(sym, alert, tf='daily') {
 // CHART
 // ═══════════════════════════════════════════════════════════
 
+// Client-side in-memory chart cache for 0ms instantaneous opening
+const chartCache = new Map(); // key: `${sym}_${tf}` -> { candles, patterns, ts }
+
 // Refs to the three price-line objects so we can update them live
 let plBuy = null, plSL = null, plTgt = null;
 let patternLineSeries = [];   // line series drawn for pattern overlays
 let currentAlertInfo  = null; // full alert JSON passed to openChart
+
+async function loadAndRenderChart(sym, tf, force=false) {
+  const cacheKey = `${sym}_${tf}`;
+  const now = Date.now();
+  let hasRenderedFromCache = false;
+
+  // 1. Instant Cache hit (< 60s) — render immediately with ZERO lag
+  if (!force && chartCache.has(cacheKey)) {
+    const cached = chartCache.get(cacheKey);
+    if (cached && cached.candles && cached.candles.length) {
+      renderChart(cached.candles);
+      redrawLevels();
+      if (cached.patterns) {
+        drawPatternLines(cached.patterns, tf);
+      }
+      hasRenderedFromCache = true;
+      if (now - cached.ts < 30000) {
+        _startLiveRefresh();
+        return;
+      }
+    }
+  }
+
+  // 2. High-speed combined API request (returns candles AND pattern geometries together)
+  try {
+    const chartUrl = `/api/chart/${sym}?tf=${tf}${force ? '&force=1' : ''}`;
+    let chartData = null;
+
+    try {
+      const res = await fetch(chartUrl);
+      if (res.ok) {
+        chartData = await res.json();
+      }
+    } catch (_) {}
+
+    // Fallback: parallel fetch if /api/chart is unavailable
+    if (!chartData || !chartData.candles) {
+      const candleUrl = tf === 'daily'
+        ? `/api/candles/${sym}${force ? '?force=1' : ''}`
+        : `/api/candles/${sym}/weekly${force ? '?force=1' : ''}`;
+      const patternUrl = tf === 'daily'
+        ? `/api/pattern/${sym}`
+        : `/api/pattern/${sym}/weekly`;
+
+      const [cRes, pRes] = await Promise.all([
+        fetch(candleUrl).catch(() => null),
+        fetch(patternUrl).catch(() => null)
+      ]);
+
+      if (!cRes || !cRes.ok) {
+        if (!hasRenderedFromCache) {
+          document.getElementById('chartMeta').textContent = 'Candle data not available yet — wait for cache warm-up.';
+        }
+        return;
+      }
+      const cJson = await cRes.json();
+      const pJson = pRes && pRes.ok ? await pRes.json() : null;
+      chartData = {
+        candles: cJson.candles,
+        patterns: pJson ? pJson.patterns : {}
+      };
+    }
+
+    if (!chartData || !chartData.candles || !chartData.candles.length) {
+      if (!hasRenderedFromCache) {
+        document.getElementById('chartMeta').textContent = 'No candle data available.';
+      }
+      return;
+    }
+
+    // Cache the fresh data
+    chartCache.set(cacheKey, {
+      candles: chartData.candles,
+      patterns: chartData.patterns || {},
+      ts: Date.now()
+    });
+
+    // Guard: ignore if user switched to another stock/timeframe during fetch
+    if (chartSymbol !== sym || currentChartTimeframe !== tf) return;
+
+    // Render chart and pattern simultaneously
+    renderChart(chartData.candles);
+    redrawLevels();
+    drawPatternLines(chartData.patterns, tf);
+    _startLiveRefresh();
+  } catch (e) {
+    if (!hasRenderedFromCache) {
+      document.getElementById('chartMeta').textContent = 'Error: ' + e;
+    }
+  }
+}
 
 async function openChart(sym, alertJson) {
   chartSymbol = sym;
@@ -1257,20 +1354,16 @@ async function openChart(sym, alertJson) {
 
   document.getElementById('chartTitle').textContent = '📈 ' + sym + ' — ' + (initialTf === 'daily' ? 'Daily' : 'Weekly') + ' Chart';
   document.getElementById('chartOverlay').classList.add('open');
-  document.getElementById('chartMeta').innerHTML = '<span class="spin"></span> Loading candles\u2026';
-  document.getElementById('chartLegend').style.display = 'none';
-  document.getElementById('patternLegend').innerHTML = '';
 
-  try {
-    const url = initialTf === 'daily' ? '/api/candles/' + sym : '/api/candles/' + sym + '/weekly';
-    const res  = await fetch(url);
-    if (!res.ok) { document.getElementById('chartMeta').textContent = 'Candle data not available yet — wait for cache warm-up.'; return; }
-    const data = await res.json();
-    renderChart(data.candles);
-    redrawLevels();
-    fetchAndDrawPattern(sym, initialTf);
-    _startLiveRefresh(); // start live candle polling during market hours
-  } catch(e) { document.getElementById('chartMeta').textContent = 'Error: ' + e; }
+  // If already in client cache, loadAndRenderChart will render instantly (0ms).
+  // Otherwise show loading spinner.
+  if (!chartCache.has(`${sym}_${initialTf}`)) {
+    document.getElementById('chartMeta').innerHTML = '<span class="spin"></span> Loading candles\u2026';
+    document.getElementById('chartLegend').style.display = 'none';
+    document.getElementById('patternLegend').innerHTML = '';
+  }
+
+  await loadAndRenderChart(sym, initialTf, false);
 }
 
 async function changeChartTimeframe(tf) {
@@ -1279,39 +1372,26 @@ async function changeChartTimeframe(tf) {
   document.getElementById('tf-daily-btn').classList.toggle('active', tf === 'daily');
   document.getElementById('tf-weekly-btn').classList.toggle('active', tf === 'weekly');
   
-  document.getElementById('chartMeta').innerHTML = '<span class="spin"></span> Loading candles\u2026';
   document.getElementById('chartTitle').textContent = '📈 ' + chartSymbol + ' — ' + (tf === 'daily' ? 'Daily' : 'Weekly') + ' Chart';
-  
-  try {
-    const url = tf === 'daily' ? '/api/candles/' + chartSymbol : '/api/candles/' + chartSymbol + '/weekly';
-    const res  = await fetch(url);
-    if (!res.ok) { document.getElementById('chartMeta').textContent = 'Candle data not available yet.'; return; }
-    const data = await res.json();
-    renderChart(data.candles);
-    redrawLevels();
-    fetchAndDrawPattern(chartSymbol, tf);
-    _startLiveRefresh(); // restart live candle polling
-  } catch(e) { document.getElementById('chartMeta').textContent = 'Error: ' + e; }
+
+  if (!chartCache.has(`${chartSymbol}_${tf}`)) {
+    document.getElementById('chartMeta').innerHTML = '<span class="spin"></span> Loading candles\u2026';
+    document.getElementById('patternLegend').innerHTML = '';
+  }
+
+  await loadAndRenderChart(chartSymbol, tf, false);
 }
 
-// Force-clear server-side cache and reload chart with fresh data
+// Refresh chart with fresh data for current symbol only (never clear global cache)
 async function refreshChartData() {
   const btn = document.getElementById('chart-refresh-btn');
   btn.textContent = '⟳ Refreshing…';
   btn.disabled = true;
   try {
-    // Clear the server-side candle cache for today
-    await fetch('/api/cache/clear', { method: 'POST' });
-    // Reload candles fresh from Upstox
     const tf = currentChartTimeframe;
-    const url = tf === 'daily' ? '/api/candles/' + chartSymbol : '/api/candles/' + chartSymbol + '/weekly';
-    const res  = await fetch(url);
-    if (!res.ok) { document.getElementById('chartMeta').textContent = 'Candle data unavailable.'; return; }
-    const data = await res.json();
-    renderChart(data.candles);
-    redrawLevels();
-    fetchAndDrawPattern(chartSymbol, tf);
-    _startLiveRefresh(); // restart live candle polling after refresh
+    // Clear only this symbol from client cache and force-fetch fresh candles
+    chartCache.delete(`${chartSymbol}_${tf}`);
+    await loadAndRenderChart(chartSymbol, tf, true);
   } catch(e) {
     document.getElementById('chartMeta').textContent = 'Refresh error: ' + e;
   } finally {
@@ -1321,67 +1401,79 @@ async function refreshChartData() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PATTERN DRAWING — all lines drawn in white
+// PATTERN DRAWING — fast rendering of pattern geometry and markers
 // ─────────────────────────────────────────────────────────────────────────────
 const W = '#ffffff'; // single white colour for all pattern lines
 
-async function fetchAndDrawPattern(sym, tf='daily') {
+function drawPatternLines(pats, tf='daily') {
   clearPatternLines();
+  if (!pats) return;
+
+  let patLabel = '';
+  const ORDER = ['falling_channel', 'pennant', 'triangle', 'box'];
+  for (const key of ORDER) {
+    if (!pats[key]) continue;
+    const p = pats[key];
+
+    if (key === 'falling_channel') {
+      addLine(p.resistance_line, W, 2, 0);
+      addLine(p.support_line,    W, 2, 0);
+      patLabel = p.type;
+    }
+    else if (key === 'triangle') {
+      addLine(p.resistance_line, W, 2, 0);
+      addLine(p.support_line,    W, 2, 0);
+      patLabel = p.type;
+    }
+    else if (key === 'pennant') {
+      addLine(p.pole,            W, 2, 0);
+      addLine(p.resistance_line, W, 2, 0);
+      addLine(p.support_line,    W, 2, 0);
+      patLabel = p.type;
+    }
+    else if (key === 'box') {
+      addLine(p.resistance_line, '#10d07a', 2, 0);
+      addLine(p.support_line,    '#4a9eff', 2, 0);
+      patLabel = p.type;
+    }
+  }
+
+  let breakoutDate = (currentAlertInfo && currentAlertInfo.breakout_candle_date);
+  if (!breakoutDate) {
+    for (const k of ORDER) {
+      if (pats[k] && pats[k].breakout_candle_date) { breakoutDate = pats[k].breakout_candle_date; break; }
+    }
+  }
+  if (breakoutDate && candleSeries) {
+    try {
+      candleSeries.setMarkers([{
+        time: breakoutDate,
+        position: 'aboveBar',
+        color: '#10d07a',
+        shape: 'arrowDown',
+        text: '🚀 Breakout (' + breakoutDate + ')',
+        size: 2
+      }]);
+    } catch(_) {}
+  }
+
+  if (patLabel) {
+    document.getElementById('patternLegend').innerHTML =
+      `<div class="pat-legend">📐 ${patLabel} (${tf === 'daily' ? 'Daily' : 'Weekly'})</div>`;
+  } else if (currentAlertInfo && currentAlertInfo.strategy) {
+    document.getElementById('patternLegend').innerHTML =
+      `<div class="pat-legend">📐 ${currentAlertInfo.strategy} (${tf === 'daily' ? 'Daily' : 'Weekly'})</div>`;
+  }
+}
+
+async function fetchAndDrawPattern(sym, tf='daily') {
   try {
     const url = tf === 'daily' ? '/api/pattern/' + sym : '/api/pattern/' + sym + '/weekly';
     const res  = await fetch(url);
     if (!res.ok) return;
     const data = await res.json();
-    if (!data.patterns) return;
-
-    const pats    = data.patterns;
-    let patLabel  = '';
-
-    const ORDER = ['falling_channel', 'pennant', 'triangle'];
-    for (const key of ORDER) {
-      if (!pats[key]) continue;
-      const p = pats[key];
-
-      if (key === 'falling_channel') {
-        addLine(p.resistance_line, W, 1, 0);
-        addLine(p.support_line,    W, 1, 0);
-        patLabel = p.type;
-      }
-      else if (key === 'triangle') {
-        addLine(p.resistance_line, W, 1, 0);
-        addLine(p.support_line,    W, 1, 0);
-        patLabel = p.type;
-      }
-      else if (key === 'pennant') {
-        addLine(p.pole,            W, 1, 0);
-        addLine(p.resistance_line, W, 1, 0);
-        addLine(p.support_line,    W, 1, 0);
-        patLabel = p.type;
-      }
-    }
-
-    let breakoutDate = (currentAlertInfo && currentAlertInfo.breakout_candle_date);
-    if (!breakoutDate) {
-      for (const k of ORDER) {
-        if (pats[k] && pats[k].breakout_candle_date) { breakoutDate = pats[k].breakout_candle_date; break; }
-      }
-    }
-    if (breakoutDate && candleSeries) {
-      try {
-        candleSeries.setMarkers([{
-          time: breakoutDate,
-          position: 'aboveBar',
-          color: '#10d07a',
-          shape: 'arrowDown',
-          text: '🚀 Breakout Candle (' + breakoutDate + ')',
-          size: 2
-        }]);
-      } catch(_) {}
-    }
-
-    if (patLabel) {
-      document.getElementById('patternLegend').innerHTML =
-        `<div class="pat-legend">📐 ${patLabel} (${tf === 'daily' ? 'Daily' : 'Weekly'})</div>`;
+    if (data && data.patterns) {
+      drawPatternLines(data.patterns, tf);
     }
   } catch(_) {}
 }
@@ -1938,8 +2030,14 @@ function renderStocks() {
     const pb=s.pattern?`<span class="badge ${bClass(s.pattern)}">${s.pattern}</span>`:`<span style="color:var(--muted)">—</span>`;
     const sb=s.status==='confirmed'?`<span class="s-confirmed">✅</span>`:s.status==='watch'?`<span class="s-watch">👀</span>`:'';
     const cf=s.confidence?`<span class="conf ${cc(s.confidence)}">${s.confidence}%</span>`:`<span style="color:var(--muted)">—</span>`;
+    const al = encodeURIComponent(JSON.stringify({
+      strategy: s.pattern || '',
+      status: s.status || '',
+      confidence: s.confidence || 0,
+      timeframe: 'daily'
+    }));
     return `<tr data-sym="${s.symbol}">
-      <td><span class="sym click-sym" onclick="openChart('${s.symbol}',null)" title="Click to view chart">${s.symbol}</span>${s.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
+      <td><span class="sym click-sym" onclick="openChart('${s.symbol}','${al}')" title="Click to view chart">${s.symbol}</span>${s.is_midcap ? '<span class="midcap-tag">⚡ Midcap</span>' : ''}</td>
       <td>${s.close!==null?'₹'+fmt(s.close):'<span style="color:var(--muted)">Loading…</span>'}</td>
       <td class="${cc2}">${chgT}</td><td>${fmtVol(s.volume)}</td>
       <td>${s.high_52w!==null?'₹'+fmt(s.high_52w):'—'}</td>
@@ -2218,9 +2316,15 @@ function render52wTable() {
     }
 
     const fillPct = Math.max(0, Math.min(100, Math.round((1 - (dist / 5.0)) * 100)));
+    const al = encodeURIComponent(JSON.stringify({
+      strategy: s.pattern || (s.is_box_breakout ? '52W Box Breakout' : ''),
+      status: s.status || '',
+      confidence: s.confidence || 0,
+      timeframe: 'daily'
+    }));
 
     return `<tr data-sym="${s.symbol}">
-      <td><span class="sym click-sym" onclick="openChart('${s.symbol}',null)" title="Click to view chart">${s.symbol}</span>${midcapTag}</td>
+      <td><span class="sym click-sym" onclick="openChart('${s.symbol}','${al}')" title="Click to view chart">${s.symbol}</span>${midcapTag}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-weight:700">₹${fmt(s.ltp)}</td>
       <td class="${cc2}">${chgT}</td>
       <td>

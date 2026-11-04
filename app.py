@@ -737,6 +737,11 @@ def load_candle_cache_from_disk():
             _weekly_candle_cache.update(cached_weekly)
             _weekly_cache_date = dt.date.today()
             app.logger.info(f"Loaded {len(_weekly_candle_cache)} weekly candles from disk cache.")
+        elif cached_daily:
+            for sym, c in cached_daily.items():
+                _weekly_candle_cache[sym] = resample_daily_to_weekly(c)
+            _weekly_cache_date = dt.date.today()
+            app.logger.info(f"Generated {len(_weekly_candle_cache)} weekly candles from daily cache.")
         if not STATE.get("universe") and _candle_cache:
             STATE["universe"] = sorted(list(_candle_cache.keys()))
     except Exception as e:
@@ -1242,27 +1247,47 @@ def api_stocks_52w():
     })
 
 
-def get_or_fetch_candles(symbol):
+def get_or_fetch_candles(symbol, force=False):
     _maybe_invalidate_candle_cache()
     sym = symbol.upper()
+    if force:
+        try:
+            candles = get_daily_candles(sym)
+            if candles:
+                _candle_cache[sym] = candles
+                _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
+                return candles
+        except Exception:
+            pass
     candles = _candle_cache.get(sym)
     if not candles:
         try:
             candles = get_daily_candles(sym)
-            _candle_cache[sym] = candles
+            if candles:
+                _candle_cache[sym] = candles
+                _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
         except Exception:
             pass
     return candles
 
 
-def get_or_fetch_weekly_candles(symbol):
+def get_or_fetch_weekly_candles(symbol, force=False):
     _maybe_invalidate_candle_cache()
     sym = symbol.upper()
+    if force:
+        try:
+            candles = get_weekly_candles(sym)
+            if candles:
+                _weekly_candle_cache[sym] = candles
+                return candles
+        except Exception:
+            pass
     candles = _weekly_candle_cache.get(sym)
     if not candles:
         try:
             candles = get_weekly_candles(sym)
-            _weekly_candle_cache[sym] = candles
+            if candles:
+                _weekly_candle_cache[sym] = candles
         except Exception:
             pass
     return candles
@@ -1297,8 +1322,14 @@ def api_scan_force():
 
 
 @app.route("/api/cache/clear", methods=["POST"])
-def api_clear_cache():
+@app.route("/api/cache/clear/<symbol>", methods=["POST"])
+def api_clear_cache(symbol=None):
     global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
+    if symbol:
+        sym = symbol.upper()
+        _candle_cache.pop(sym, None)
+        _weekly_candle_cache.pop(sym, None)
+        return jsonify({"success": True, "cleared_symbols": 1, "symbol": sym})
     count = len(_candle_cache) + len(_weekly_candle_cache)
     _candle_cache.clear()
     _weekly_candle_cache.clear()
@@ -1308,65 +1339,13 @@ def api_clear_cache():
     return jsonify({"success": True, "cleared_symbols": count})
 
 
-@app.route("/api/candles/<symbol>")
-def api_candles(symbol):
-    sym = symbol.upper()
-    candles = get_or_fetch_candles(sym)
-    if not candles:
-        return jsonify({"error": "Symbol candle data not loaded or unavailable."}), 404
-
-    result = []
-    for c in candles[-120:]:
-        ts = c[0]
-        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
-        result.append({
-            "time":   date_str,
-            "open":   round(c[1], 2),
-            "high":   round(c[2], 2),
-            "low":    round(c[3], 2),
-            "close":  round(c[4], 2),
-            "volume": int(c[5]),
-        })
-
-    return jsonify({"symbol": sym, "candles": result})
-
-
-@app.route("/api/candles/<symbol>/weekly")
-def api_candles_weekly(symbol):
-    sym = symbol.upper()
-    candles = get_or_fetch_weekly_candles(sym)
-    if not candles:
-        return jsonify({"error": "Symbol weekly candle data not loaded or unavailable."}), 404
-
-    result = []
-    for c in candles[-120:]:
-        ts = c[0]
-        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
-        result.append({
-            "time":   date_str,
-            "open":   round(c[1], 2),
-            "high":   round(c[2], 2),
-            "low":    round(c[3], 2),
-            "close":  round(c[4], 2),
-            "volume": int(c[5]),
-        })
-
-    return jsonify({"symbol": sym, "candles": result})
-
-
-# ---------------------------------------------------------------------------
-# Pattern geometry endpoint — returns trendline data for chart drawing
-# ---------------------------------------------------------------------------
-@app.route("/api/pattern/<symbol>")
-def api_pattern(symbol):
+def extract_pattern_geometries(candles, timeframe="daily", live_price=None):
     """
-    Re-runs all pattern detectors on cached candles and returns geometric
-    drawing data so the frontend can overlay trendlines on the chart.
+    Computes geometric drawing data (trendline coordinates and breakout points)
+    for chart overlays. Operates entirely in-memory for instant rendering.
     """
-    sym = symbol.upper()
-    candles = get_or_fetch_candles(sym)
-    if not candles:
-        return jsonify({"error": "No candle data"}), 404
+    if not candles or len(candles) < 20:
+        return {}
 
     window = candles[-120:]
     dates = []
@@ -1385,11 +1364,14 @@ def api_pattern(symbol):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
 
+    cur_p = live_price if live_price is not None else candles[-1][4]
+
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
-        tri = strategies.detect_triangle(candles, timeframe="daily")
+        tri = strategies.detect_triangle(candles, timeframe=timeframe, live_price=cur_p)
         if tri:
-            LOOKBACK = tri.get("lookback", 40)
+            LOOKBACK = tri.get("lookback", 40 if timeframe == "daily" else 20)
+            LOOKBACK = min(LOOKBACK, n)
             w = candles[-LOOKBACK:]
             highs = [c[2] for c in w]
             lows  = [c[3] for c in w]
@@ -1398,14 +1380,31 @@ def api_pattern(symbol):
             ss, si_, _ = strategies.linreg(sl_)
             off = n - LOOKBACK
             lx  = LOOKBACK - 1
-            res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
-            sup_line = trendline_pts(ss, si_, 0, lx, off)
+
+            if tri["type"] == "Ascending Triangle":
+                res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off)
+            else:
+                if len(sh) >= 2 and rs < 0:
+                    res_line = trendline_pts(rs, ri, 0, lx, off)
+                else:
+                    start_h = max(highs[:5]) if highs else tri["resistance_now"]
+                    m = (tri["resistance_now"] - start_h) / max(1, lx)
+                    res_line = trendline_pts(m, start_h, 0, lx, off)
+
+            if len(sl_) >= 2 and ss > 0:
+                sup_line = trendline_pts(ss, si_, 0, lx, off)
+            else:
+                start_l = min(lows[:5]) if lows else tri["support_now"]
+                m = (tri["support_now"] - start_l) / max(1, lx)
+                sup_line = trendline_pts(m, start_l, 0, lx, off)
+
             patterns["triangle"] = {
                 "type": tri["type"],
                 "resistance_line": res_line,
                 "support_line":    sup_line,
                 "resistance_level": tri["resistance_now"],
                 "support_level":    tri["support_now"],
+                "breakout_candle_date": candles[-1][0][:10] if tri.get("status") == "confirmed" else None,
             }
     except Exception:
         pass
@@ -1441,15 +1440,17 @@ def api_pattern(symbol):
                     "resistance_level": pennant["resistance"],
                     "support_level":    pennant["support"],
                     "pole_move_pct":    pennant["pole_move_pct"],
+                    "breakout_candle_date": candles[-1][0][:10] if pennant.get("status") == "confirmed" else None,
                 }
     except Exception:
         pass
 
     # ── FALLING CHANNEL ──────────────────────────────────────────────────────
     try:
-        fc = strategies.detect_falling_channel_reversal(candles, timeframe="daily")
+        fc = strategies.detect_falling_channel_reversal(candles, timeframe=timeframe, live_price=cur_p)
         if fc:
-            LOOKBACK = fc.get("lookback", 35)
+            LOOKBACK = fc.get("lookback", 35 if timeframe == "daily" else 22)
+            LOOKBACK = min(LOOKBACK, n)
             rs = fc["res_slope"]
             ri = fc["res_intercept"]
             ss = fc["sup_slope"]
@@ -1464,124 +1465,157 @@ def api_pattern(symbol):
                 "support_line":    sup_line,
                 "resistance_level": fc["resistance_now"],
                 "support_level":    fc["support_now"],
+                "breakout_candle_date": fc.get("breakout_candle_date"),
             }
     except Exception:
         pass
 
+    # ── 52W BOX SETUP / BREAKOUT ─────────────────────────────────────────────
+    try:
+        if timeframe == "daily" and len(candles) >= 35:
+            c_bars = candles[-35:-1]
+            c_highs = [c[2] for c in c_bars]
+            c_lows = [c[3] for c in c_bars]
+            box_top = max(c_highs)
+            box_bottom = min(c_lows)
+            box_h_pct = ((box_top - box_bottom) / box_bottom) * 100 if box_bottom > 0 else 999
+            if box_h_pct <= 16.0 and (cur_p >= box_top * 0.985):
+                is_breakout = cur_p >= box_top * 0.995
+                patterns["box"] = {
+                    "type": "52W Box Breakout" if is_breakout else "52W Box Setup",
+                    "resistance_line": trendline_pts(0, box_top, 0, 34, n - 35),
+                    "support_line": trendline_pts(0, box_bottom, 0, 34, n - 35),
+                    "resistance_level": round(box_top, 2),
+                    "support_level": round(box_bottom, 2),
+                    "breakout_candle_date": candles[-1][0][:10] if is_breakout else None,
+                }
+    except Exception:
+        pass
+
+    return patterns
+
+
+# ---------------------------------------------------------------------------
+# High-speed combined Chart Endpoint (Candles + Patterns in ONE request)
+# ---------------------------------------------------------------------------
+@app.route("/api/chart/<symbol>")
+@app.route("/api/chart/<symbol>/<timeframe>")
+def api_chart(symbol, timeframe="daily"):
+    """
+    Combined high-performance endpoint: returns both candles and pattern
+    geometry in a single call, eliminating network waterfall delays and rendering
+    instantly.
+    """
+    sym = symbol.upper()
+    force = request.args.get("force") == "1"
+    tf = request.args.get("tf", timeframe).lower()
+
+    if tf == "weekly":
+        candles = get_or_fetch_weekly_candles(sym, force=force)
+    else:
+        tf = "daily"
+        candles = get_or_fetch_candles(sym, force=force)
+
+    if not candles:
+        return jsonify({"error": f"Candle data for {sym} unavailable."}), 404
+
+    result = []
+    for c in candles[-120:]:
+        ts = c[0]
+        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+        result.append({
+            "time":   date_str,
+            "open":   round(c[1], 2),
+            "high":   round(c[2], 2),
+            "low":    round(c[3], 2),
+            "close":  round(c[4], 2),
+            "volume": int(c[5]),
+        })
+
+    live_price = _live_ltp_cache.get(sym, candles[-1][4])
+    patterns = extract_pattern_geometries(candles, timeframe=tf, live_price=live_price)
+
+    return jsonify({
+        "symbol": sym,
+        "timeframe": tf,
+        "candles": result,
+        "patterns": patterns,
+        "ltp": round(live_price, 2),
+    })
+
+
+@app.route("/api/candles/<symbol>")
+def api_candles(symbol):
+    sym = symbol.upper()
+    force = request.args.get("force") == "1"
+    candles = get_or_fetch_candles(sym, force=force)
+    if not candles:
+        return jsonify({"error": "Symbol candle data not loaded or unavailable."}), 404
+
+    result = []
+    for c in candles[-120:]:
+        ts = c[0]
+        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+        result.append({
+            "time":   date_str,
+            "open":   round(c[1], 2),
+            "high":   round(c[2], 2),
+            "low":    round(c[3], 2),
+            "close":  round(c[4], 2),
+            "volume": int(c[5]),
+        })
+
+    return jsonify({"symbol": sym, "candles": result})
+
+
+@app.route("/api/candles/<symbol>/weekly")
+def api_candles_weekly(symbol):
+    sym = symbol.upper()
+    force = request.args.get("force") == "1"
+    candles = get_or_fetch_weekly_candles(sym, force=force)
+    if not candles:
+        return jsonify({"error": "Symbol weekly candle data not loaded or unavailable."}), 404
+
+    result = []
+    for c in candles[-120:]:
+        ts = c[0]
+        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
+        result.append({
+            "time":   date_str,
+            "open":   round(c[1], 2),
+            "high":   round(c[2], 2),
+            "low":    round(c[3], 2),
+            "close":  round(c[4], 2),
+            "volume": int(c[5]),
+        })
+
+    return jsonify({"symbol": sym, "candles": result})
+
+
+# ---------------------------------------------------------------------------
+# Pattern geometry endpoint — returns trendline data for chart drawing
+# ---------------------------------------------------------------------------
+@app.route("/api/pattern/<symbol>")
+def api_pattern(symbol):
+    sym = symbol.upper()
+    candles = get_or_fetch_candles(sym)
+    if not candles:
+        return jsonify({"error": "No candle data"}), 404
+
+    live_price = _live_ltp_cache.get(sym, candles[-1][4])
+    patterns = extract_pattern_geometries(candles, timeframe="daily", live_price=live_price)
     return jsonify({"symbol": sym, "patterns": patterns})
 
 
 @app.route("/api/pattern/<symbol>/weekly")
 def api_pattern_weekly(symbol):
-    """
-    Re-runs all pattern detectors on cached weekly candles and returns geometric
-    drawing data for weekly chart overlays.
-    """
     sym = symbol.upper()
     candles = get_or_fetch_weekly_candles(sym)
     if not candles:
         return jsonify({"error": "No candle data"}), 404
 
-    window = candles[-120:]
-    dates = []
-    for c in window:
-        ts = c[0]
-        dates.append(ts[:10] if isinstance(ts, str) else str(ts)[:10])
-
-    n = len(window)
-    patterns = {}
-
-    def trendline_pts(slope, intercept, x_start, x_end, bar_offset=0):
-        pts = []
-        for xi in (x_start, x_end):
-            idx = bar_offset + xi
-            if 0 <= idx < len(dates):
-                pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
-        return pts if len(pts) == 2 else []
-
-    # ── TRIANGLE WEEKLY ──────────────────────────────────────────────────────
-    try:
-        tri = strategies.detect_triangle(candles, timeframe="weekly")
-        if tri:
-            LOOKBACK = tri.get("lookback", 40)
-            w = candles[-LOOKBACK:]
-            highs = [c[2] for c in w]
-            lows  = [c[3] for c in w]
-            sh, sl_ = strategies.find_swing_points(highs, lows, window=2)
-            rs, ri, _ = strategies.linreg(sh)
-            ss, si_, _ = strategies.linreg(sl_)
-            off = n - LOOKBACK
-            lx  = LOOKBACK - 1
-            res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off) if tri["type"] == "Ascending Triangle" else trendline_pts(rs, ri, 0, lx, off)
-            sup_line = trendline_pts(ss, si_, 0, lx, off)
-            patterns["triangle"] = {
-                "type": tri["type"],
-                "resistance_line": res_line,
-                "support_line":    sup_line,
-                "resistance_level": tri["resistance_now"],
-                "support_level":    tri["support_now"],
-            }
-    except Exception:
-        pass
-
-    # ── PENNANT WEEKLY ───────────────────────────────────────────────────────
-    try:
-        pennant = strategies.detect_pennant(candles)
-        if pennant:
-            closes = [c[4] for c in window]
-            pole_si, pole_ei, consol_si = 0, 0, 0
-            for i in range(max(0, n - 25), n - 8):
-                move = (closes[i + 8] - closes[i]) / closes[i] * 100
-                if move >= 6.0:
-                    pole_si   = i
-                    pole_ei   = i + 8
-                    consol_si = pole_ei
-                    break
-            consol_w = window[consol_si:]
-            c_highs = [c[2] for c in consol_w]
-            c_lows  = [c[3] for c in consol_w]
-            if len(consol_w) >= 2:
-                rs, ri, _ = strategies.linreg([(xi, v) for xi, v in enumerate(c_highs)])
-                ss, si_v, _ = strategies.linreg([(xi, v) for xi, v in enumerate(c_lows)])
-                cx = len(consol_w) - 1
-                patterns["pennant"] = {
-                    "type": pennant["type"],
-                    "pole": [
-                        {"time": dates[pole_si],     "value": round(window[pole_si][4],     2)},
-                        {"time": dates[pole_ei - 1], "value": round(window[pole_ei - 1][4], 2)},
-                    ],
-                    "resistance_line": trendline_pts(rs, ri, 0, cx, consol_si),
-                    "support_line":    trendline_pts(ss, si_v, 0, cx, consol_si),
-                    "resistance_level": pennant["resistance"],
-                    "support_level":    pennant["support"],
-                    "pole_move_pct":    pennant["pole_move_pct"],
-                }
-    except Exception:
-        pass
-
-    # ── FALLING CHANNEL WEEKLY ───────────────────────────────────────────────
-    try:
-        fc = strategies.detect_falling_channel_reversal(candles, timeframe="weekly")
-        if fc:
-            LOOKBACK = fc.get("lookback", 22)
-            rs = fc["res_slope"]
-            ri = fc["res_intercept"]
-            ss = fc["sup_slope"]
-            si_ = fc["sup_intercept"]
-            off = n - LOOKBACK
-            lx  = LOOKBACK - 1
-            res_line = trendline_pts(rs, ri, 0, lx, off)
-            sup_line = trendline_pts(ss, si_, 0, lx, off)
-            patterns["falling_channel"] = {
-                "type": fc["type"],
-                "resistance_line": res_line,
-                "support_line":    sup_line,
-                "resistance_level": fc["resistance_now"],
-                "support_level":    fc["support_now"],
-            }
-    except Exception:
-        pass
-
+    live_price = _live_ltp_cache.get(sym, candles[-1][4])
+    patterns = extract_pattern_geometries(candles, timeframe="weekly", live_price=live_price)
     return jsonify({"symbol": sym, "patterns": patterns})
 
 
