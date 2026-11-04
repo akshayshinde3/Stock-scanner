@@ -28,8 +28,6 @@ from flask import Flask, request, redirect, jsonify, render_template, session, u
 from dotenv import load_dotenv
 
 import strategies
-import descending_channel
-import backtest_descending_channel
 
 # Load environment variables from .env file
 load_dotenv()
@@ -176,52 +174,87 @@ EXCLUDE_SYMBOLS = {"DUMMYHEG", "BAGMANE", "ISEC"}
 
 def load_nifty500_symbols():
     path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
+    cached_file_syms = []
     if os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as f:
-                syms = [line.strip().upper() for line in f if line.strip() and not line.startswith("#") and line.strip().upper() not in EXCLUDE_SYMBOLS and not line.strip().upper().startswith("DUMMY")]
-                if len(syms) >= 100:
-                    return syms
+                cached_file_syms = [
+                    line.strip().upper()
+                    for line in f
+                    if line.strip()
+                    and not line.startswith("#")
+                    and line.strip().upper() not in EXCLUDE_SYMBOLS
+                    and not line.strip().upper().startswith("DUMMY")
+                ]
+                if len(cached_file_syms) >= 490:
+                    return cached_file_syms
         except Exception as e:
             app.logger.warning(f"Error reading nifty500.txt: {e}")
 
-    # Fix 8: Multiple NSE URLs with improved headers and timeout
+    # Multiple reliable URLs (official NiftyIndices, NSE Archives, GitHub mirrors)
     nse_urls = [
+        "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
         "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
+        "https://raw.githubusercontent.com/kprohith/nse-stock-analysis/master/ind_nifty500list.csv",
+        "https://raw.githubusercontent.com/zerobha/ind_nifty500list.csv/main/ind_nifty500list.csv",
         "https://nseindia.com/content/indices/ind_nifty500list.csv",
     ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.niftyindices.com/",
+        "DNT": "1",
+    }
     for nse_url in nse_urls:
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.nseindia.com/",
-                "DNT": "1",
-            }
-            r = requests.get(nse_url, headers=headers, timeout=15)
-            r.raise_for_status()
+            r = requests.get(nse_url, headers=headers, timeout=12)
+            if r.status_code != 200 or len(r.text) < 1000:
+                continue
             lines = r.text.splitlines()
+            if not lines:
+                continue
+
+            # Detect Symbol column index from header (default index 2)
+            header_parts = [c.strip().strip('"').strip("'").lower() for c in lines[0].split(",")]
+            sym_col_idx = 2
+            for idx, col_name in enumerate(header_parts):
+                if col_name == "symbol":
+                    sym_col_idx = idx
+                    break
+
             symbols = []
             for line in lines[1:]:
-                parts = line.split(",")
-                if len(parts) >= 3:
-                    s = parts[2].strip().upper()
-                    if s and s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY"):
+                parts = [p.strip().strip('"').strip("'") for p in line.split(",")]
+                if len(parts) > sym_col_idx:
+                    s = parts[sym_col_idx].strip().upper()
+                    if s and s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY") and s != "SYMBOL":
                         symbols.append(s)
-            if len(symbols) >= 100:
-                # Save to local cache file for next time
+
+            # Deduplicate while preserving order
+            seen = set()
+            dedup_symbols = []
+            for s in symbols:
+                if s not in seen:
+                    seen.add(s)
+                    dedup_symbols.append(s)
+
+            if len(dedup_symbols) >= 490:
                 try:
-                    cache_path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
-                    with open(cache_path, "w", encoding="utf-8") as f:
-                        f.write("# Auto-fetched from NSE\n")
-                        for s in symbols:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write("# Nifty 500 Constituent List\n")
+                        f.write(f"# Auto-fetched from {nse_url} ({len(dedup_symbols)} stocks)\n")
+                        for s in dedup_symbols:
                             f.write(s + "\n")
-                except Exception:
-                    pass
-                return symbols
+                except Exception as write_err:
+                    app.logger.warning(f"Could not update nifty500.txt: {write_err}")
+                return dedup_symbols
         except Exception as e:
             app.logger.warning(f"Could not fetch Nifty 500 from {nse_url} ({e})")
+
+    # If network fetch failed, fall back to cached nifty500.txt if available
+    if len(cached_file_syms) >= 100:
+        return cached_file_syms
 
     if os.path.exists(CANDLE_CACHE_FILE):
         try:
@@ -1028,75 +1061,19 @@ def api_signals_weekly():
 
 @app.route("/api/signals/descending_channel")
 def api_signals_descending_channel():
-    # Fix 9: Bullish-only signals, live LTP, improved filters
-    tf = request.args.get("timeframe", "daily").lower()
-    min_score = int(request.args.get("min_score", 70))
-    universe = STATE.get("universe") or []
-    
-    results = []
-    for sym in universe:
-        candles = _weekly_candle_cache.get(sym) if tf == "weekly" else _candle_cache.get(sym)
-        if not candles or len(candles) < 30:
-            continue
-        # Use live LTP if available, else last candle close
-        live_p = _live_ltp_cache.get(sym, candles[-1][4])
-        try:
-            res = descending_channel.scan_descending_channel(
-                symbol=sym,
-                candles=candles,
-                live_price=live_p,
-                timeframe=tf
-            )
-            # Only include BULLISH signals - never show REJECTED or short signals
-            if res and res["signal_type"] != "REJECTED" and res["setup_quality_score"] >= min_score:
-                # Additional bullish filter: current price must be ABOVE lower channel support
-                if live_p <= res.get("lower_trendline", 0) * 0.98:
-                    continue  # Stock collapsed below support — skip
-                res["is_midcap"] = sym in MIDCAP100_SYMBOLS
-                # Tag with live LTP
-                res["current_price"] = round(live_p, 2)
-                results.append(res)
-        except Exception:
-            continue
-            
-    results.sort(key=lambda x: -x["setup_quality_score"])
-    
-    confirmed = [r for r in results if r["signal_type"] == "CONFIRMED BUY"]
-    early = [r for r in results if r["signal_type"] == "EARLY BREAKOUT"]
-    watchlist = [r for r in results if r["signal_type"] == "WATCHLIST"]
-    
     return jsonify({
-        "all_signals": results,
-        "confirmed_buy": confirmed,
-        "early_breakout": early,
-        "watchlist": watchlist,
-        "total": len(results),
-        "total_confirmed": len(confirmed),
-        "total_early": len(early),
-        "total_watchlist": len(watchlist),
-        "last_scan": STATE.get("last_scan"),
-        "timeframe": tf
+        "all_signals": [],
+        "confirmed_buy": [],
+        "early_breakout": [],
+        "watchlist": [],
+        "total": 0,
+        "message": "Descending channel strategy removed."
     })
 
 
 @app.route("/api/backtest/descending_channel", methods=["GET", "POST"])
 def api_backtest_descending_channel():
-    req_data = request.get_json(silent=True) or {}
-    min_score = int(request.args.get("min_score") or req_data.get("min_score") or 80)
-    req_retest = (request.args.get("require_retest", "true").lower() == "true") or bool(req_data.get("require_retest", True))
-    
-    if not _candle_cache:
-        load_candle_cache_from_disk()
-        
-    try:
-        report = backtest_descending_channel.run_full_backtest(
-            candle_dict=_candle_cache,
-            min_score=min_score,
-            require_retest=req_retest
-        )
-        return jsonify({"success": True, "report": report})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, "report": {"message": "Descending channel removed."}})
 
 
 @app.route("/api/news/<symbol>")
@@ -1426,29 +1403,6 @@ def api_pattern(symbol):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
 
-    # ── DESCENDING CHANNEL ───────────────────────────────────────────────────
-    try:
-        dc = descending_channel.scan_descending_channel(sym, candles, timeframe="daily")
-        if dc:
-            patterns["channel"] = {
-                "type": "Descending Channel",
-                "resistance_line": dc["res_points"],
-                "support_line": dc["sup_points"],
-                "resistance_level": dc["upper_trendline"],
-                "support_level": dc["lower_trendline"],
-                "channel_height": dc["channel_height"],
-                "breakout_candle_date": dc.get("breakout_date"),
-                "status": dc.get("signal_type"),
-                "entry_price": dc["entry_price"],
-                "stop_loss": dc["stop_loss"],
-                "target1": dc["target1"],
-                "target2": dc["target2"],
-                "target3": dc["target3"],
-                "score": dc["setup_quality_score"],
-            }
-    except Exception:
-        pass
-
     # ── TRIANGLE ─────────────────────────────────────────────────────────────
     try:
         tri = strategies.detect_triangle(candles, timeframe="daily")
@@ -1539,29 +1493,6 @@ def api_pattern_weekly(symbol):
             if 0 <= idx < len(dates):
                 pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
         return pts if len(pts) == 2 else []
-
-    # ── DESCENDING CHANNEL WEEKLY ────────────────────────────────────────────
-    try:
-        dc = descending_channel.scan_descending_channel(sym, candles, timeframe="weekly")
-        if dc:
-            patterns["channel"] = {
-                "type": "Descending Channel (Weekly)",
-                "resistance_line": dc["res_points"],
-                "support_line": dc["sup_points"],
-                "resistance_level": dc["upper_trendline"],
-                "support_level": dc["lower_trendline"],
-                "channel_height": dc["channel_height"],
-                "breakout_candle_date": dc.get("breakout_date"),
-                "status": dc.get("signal_type"),
-                "entry_price": dc["entry_price"],
-                "stop_loss": dc["stop_loss"],
-                "target1": dc["target1"],
-                "target2": dc["target2"],
-                "target3": dc["target3"],
-                "score": dc["setup_quality_score"],
-            }
-    except Exception:
-        pass
 
     # ── TRIANGLE WEEKLY ──────────────────────────────────────────────────────
     try:

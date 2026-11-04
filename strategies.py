@@ -2,9 +2,8 @@
 strategies.py — Multi-Pattern Swing Trading Engine
 =================================================
 Includes:
-  1. Descending Channel Breakout Engine (price action, volume expansion, retest confirmation, double bottom)
-  2. Triangle Patterns (Ascending / Symmetrical)
-  3. Bullish Pennant Pattern
+  1. Triangle Patterns (Ascending / Symmetrical)
+  2. Bullish Pennant Pattern
 
 Strict rules:
   - NO RSI or ADX used anywhere.
@@ -14,7 +13,6 @@ Strict rules:
 
 import datetime as dt
 import statistics
-import descending_channel
 
 
 # ---------------------------------------------------------------------------
@@ -143,13 +141,12 @@ def detect_triangle_chartink_daily(candles, live_price=None):
         sup_level = min_low_10_1d
         lookback = 25
 
-    breakout_now = cur_price >= res_level or today_close >= res_level
-    recent_breakout = (len(closes) >= 3 and 
-                       (closes[-2] >= res_level or closes[-3] >= res_level) and 
-                       cur_price >= res_level * 0.97)
-    is_watch = (cur_price >= sup_level * 0.97 and cur_price <= res_level * 1.01)
+    # A confirmed breakout requires CURRENT price (or today close) to be AT or ABOVE resistance!
+    # If current price is below resistance (e.g. LTP 1225 vs Res 1279), it CANNOT be confirmed breakout.
+    breakout_now = (cur_price >= res_level) or (today_close >= res_level and cur_price >= res_level * 0.995)
+    is_watch = (cur_price >= sup_level * 0.95 and cur_price < res_level)
 
-    if breakout_now or recent_breakout:
+    if breakout_now:
         status = "confirmed"
     elif is_watch:
         status = "pre_breakout_watch"
@@ -225,13 +222,12 @@ def detect_triangle_chartink_weekly(candles, live_price=None):
         sup_level = min_low_5_1w
         lookback = 15
 
-    breakout_now = cur_price >= res_level or today_close >= res_level
-    recent_breakout = (len(closes) >= 3 and 
-                       (closes[-2] >= res_level or closes[-3] >= res_level) and 
-                       cur_price >= res_level * 0.97)
-    is_watch = (cur_price >= sup_level * 0.97 and cur_price <= res_level * 1.01)
+    # A confirmed breakout requires CURRENT price (or today close) to be AT or ABOVE resistance!
+    # If current price is below resistance (e.g. LTP 1225 vs Res 1279), it CANNOT be confirmed breakout.
+    breakout_now = (cur_price >= res_level) or (today_close >= res_level and cur_price >= res_level * 0.995)
+    is_watch = (cur_price >= sup_level * 0.95 and cur_price < res_level)
 
-    if breakout_now or recent_breakout:
+    if breakout_now:
         status = "confirmed"
     elif is_watch:
         status = "pre_breakout_watch"
@@ -347,6 +343,16 @@ def detect_triangle(candles, timeframe="daily", live_price=None):
         if res:
             if not best or (res["fit_quality"], res["touches"]) > (best["fit_quality"], best["touches"]):
                 best = res
+    if best:
+        cur_p = live_price if live_price is not None else candles[-1][4]
+        res_l = best["resistance_now"]
+        sup_l = best["support_now"]
+        if cur_p >= res_l:
+            best["status"] = "confirmed"
+        elif cur_p >= sup_l * 0.95 and cur_p < res_l:
+            best["status"] = "pre_breakout_watch"
+        else:
+            return None
     return best
 
 
@@ -455,14 +461,7 @@ def _pattern_levels(pattern_type, pattern, candles):
     today_close = candles[-1][4]
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (candles[-1][2] - candles[-1][3])
 
-    if pattern_type == "channel":
-        entry = pattern.get("entry_price", today_close)
-        sl = pattern.get("stop_loss", entry - 1.5 * atr)
-        t1 = pattern.get("target1", entry + 2 * (entry - sl))
-        t2 = pattern.get("target2", entry + 3 * (entry - sl))
-        return entry, sl, t1, t2
-
-    elif pattern_type == "triangle":
+    if pattern_type == "triangle":
         res = pattern["resistance_now"]
         buy_price = round(max(res * 1.002, today_close), 2) if today_close > res else round(res * 1.002, 2)
         stop_loss = round(pattern["support_now"], 2)
@@ -495,9 +494,8 @@ def _pattern_levels(pattern_type, pattern, candles):
 def build_alert(symbol, candles, live_price, timeframe="daily"):
     """
     Evaluates:
-      1. Descending Channel Breakout Strategy (price action, volume expansion, retest confirmation)
-      2. Triangle patterns (Ascending / Symmetrical)
-      3. Bullish Pennant
+      1. Triangle patterns (Ascending / Symmetrical)
+      2. Bullish Pennant
     """
     min_candles = 20 if timeframe == "weekly" else 30
     if len(candles) < min_candles:
@@ -509,37 +507,7 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
 
     candidates = []
 
-    # 1. Advanced Descending Channel Strategy Engine
-    try:
-        dc_res = descending_channel.scan_descending_channel(
-            symbol=symbol,
-            candles=candles,
-            live_price=live_price,
-            timeframe=timeframe
-        )
-        if dc_res and dc_res.get("signal_type") != "REJECTED":
-            dc_status = "confirmed" if dc_res["signal_type"] in ["CONFIRMED BUY", "EARLY BREAKOUT"] else "pre_breakout_watch"
-            candidates.append({
-                "type_key": "channel",
-                "name": "Descending Channel",
-                "status": dc_status,
-                "score": dc_res["setup_quality_score"],
-                "reasons": dc_res["reasons"][:3],
-                "pattern": dc_res,
-                "custom_levels": (
-                    dc_res["entry_price"],
-                    dc_res["stop_loss"],
-                    dc_res["target1"],
-                    dc_res["target2"]
-                ),
-                "breakout_candle_date": dc_res.get("breakout_date"),
-                "signal_type": dc_res["signal_type"],
-                "dc_details": dc_res,
-            })
-    except Exception:
-        pass
-
-    # 2. Triangle Candidate
+    # 1. Triangle Candidate
     triangle = detect_triangle(candles, timeframe=timeframe, live_price=live_price)
     if triangle:
         t_name = triangle["type"]
@@ -569,7 +537,7 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
             "pattern": triangle
         })
 
-    # 3. Pennant Candidate
+    # 2. Pennant Candidate
     pennant = detect_pennant(candles) if timeframe == "daily" else None
     if pennant:
         p_status = "confirmed" if pennant["status"] == "confirmed" else "pre_breakout_watch"
@@ -634,16 +602,21 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     closes_arr = [c[4] for c in candles]
     sma_50 = sma(closes_arr, 50)
     sma_200 = sma(closes_arr, 200)
-    # Require price above at least SMA50, or for channel breakouts allow 3% below
+    # Require price above at least SMA50
     if sma_50 is not None and live_price < sma_50 * 0.95:
         return None  # Stock is too far below SMA50 — not bullish
 
     confidence = min(round(score), 100)
 
     # Strict confidence filter
-    min_required_conf = 80 if best_pattern_type == "channel" else 60
+    min_required_conf = 60
     if status == "confirmed" and confidence < min_required_conf:
         return None
+
+    # Safety guard: anytime live_price < buy_price * 0.995, it CANNOT be confirmed breakout!
+    if status == "confirmed" and live_price < (buy_price * 0.995):
+        status = "pre_breakout_watch"
+        reasons = [r.replace("Breakout >", "Near Res") for r in reasons]
 
     expected_breakout_date = "Today / already triggered" if status == "confirmed" else \
         (dt.date.today() + dt.timedelta(days=1)).strftime("%d-%b-%Y")
@@ -663,7 +636,5 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         "expected_breakout_date": expected_breakout_date,
         "breakout_candle_date": best.get("breakout_candle_date"),
     }
-    if best.get("dc_details"):
-        res_dict["descending_channel"] = best["dc_details"]
 
     return res_dict
