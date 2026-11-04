@@ -505,13 +505,17 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     if len(swing_highs) < 2 or len(swing_lows) < 2:
         return None
 
+    # Swings must be spaced apart by at least 4 bars to prevent daily micro-wicks from counting as a channel
+    if abs(swing_highs[-1][0] - swing_highs[-2][0]) < 4 or abs(swing_lows[-1][0] - swing_lows[-2][0]) < 4:
+        return None
+
     # Regression on swing highs (Upper Resistance) and swing lows (Lower Support)
     res_slope, res_intercept, res_r2 = linreg(swing_highs)
     sup_slope, sup_intercept, sup_r2 = linreg(swing_lows)
 
     fit_quality = (res_r2 + sup_r2) / 2
-    # Quality filter: balanced at 0.32 (filters random noise, accepts real-world channels)
-    if fit_quality < 0.32:
+    # Quality filter: raised to 0.38 (rejects noisy random walks, accepts clean channels)
+    if fit_quality < 0.38:
         return None
 
     res_slope_norm = res_slope / avg_price
@@ -605,17 +609,17 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     vol_ratio = (cur_vol / v20) if (v20 and v20 > 0) else 1.0
     vol_spike = (v20 is not None and v20 > 0 and cur_vol >= 1.20 * v20)
 
-    # 7. BALANCED ALERTS:
-    # A) Pre-Breakout Watch: Stock is in the upper compression zone (within 5% of resistance)
-    is_watch = (cur_price >= res_now * 0.95 and cur_price < res_now)
+    # 7. HIGH-CONVICTION 80/20 FILTERS:
+    # A) Pre-Breakout Watch: Must be coiling within 3% of resistance AND have Bullish Divergence or rising volume
+    is_watch = (cur_price >= res_now * 0.97 and cur_price < res_now) and (bullish_div or vol_ratio >= 1.15)
 
-    # B) Confirmed Breakout: Price is at or above resistance line
-    breakout_now = (cur_price >= res_now) or (today_close >= res_now and cur_price >= res_now * 0.995)
+    # B) Confirmed Breakout: Price crossed above resistance with a green candle
+    breakout_now = ((cur_price >= res_now) or (today_close >= res_now and cur_price >= res_now * 0.998)) and is_green
 
-    # Reject if price is deep at the bottom (< 95% of res) or already over-extended (> 7% above res)
+    # Reject if price is not setting up or already over-extended (> 6% above res)
     if not breakout_now and not is_watch:
         return None
-    if breakout_now and cur_price > res_now * 1.07:
+    if breakout_now and cur_price > res_now * 1.06:
         return None
 
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (today_high - today_low)
@@ -916,9 +920,9 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
 
     confidence = min(round(score), 100)
 
-    # Strict confidence filter
-    min_required_conf = 60
-    if status == "confirmed" and confidence < min_required_conf:
+    # Strict confidence filter: 60 for confirmed, 55 for watch (rejects low-confidence noise)
+    min_required_conf = 60 if status == "confirmed" else 55
+    if confidence < min_required_conf:
         return None
 
     # Safety guard: anytime live_price < buy_price * 0.995, it CANNOT be confirmed breakout!
