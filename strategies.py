@@ -572,7 +572,10 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
         if exp > 0 and abs(val - exp) / exp < touch_tol:
             sup_touches += 1
 
+    # Falling Channel Touch Validation: Requires at least 3 touches on resistance OR at least 5 total touches across the channel
     if res_touches < 2 or sup_touches < 2:
+        return None
+    if res_touches < 3 and (res_touches + sup_touches) < 5:
         return None
 
     cur_price = live_price if live_price is not None else closes[-1]
@@ -610,16 +613,18 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     vol_spike = (v20 is not None and v20 > 0 and cur_vol >= 1.20 * v20)
 
     # 7. HIGH-CONVICTION 80/20 FILTERS:
-    # A) Pre-Breakout Watch: Must be coiling within 3% of resistance AND have Bullish Divergence or rising volume
-    is_watch = (cur_price >= res_now * 0.97 and cur_price < res_now) and (bullish_div or vol_ratio >= 1.15)
+    # A) Pre-Breakout Watch: Must be coiling within 2.5% of resistance AND have confirmed Bullish Divergence
+    is_watch = (cur_price >= res_now * 0.975 and cur_price < res_now) and bullish_div
 
-    # B) Confirmed Breakout: Price crossed above resistance with a green candle
-    breakout_now = ((cur_price >= res_now) or (today_close >= res_now and cur_price >= res_now * 0.998)) and is_green
+    # B) Confirmed Breakout: Requires BOTH price close above resistance AND institutional volume surge
+    has_breakout_vol = (vol_ratio >= 1.25) or (bullish_div and vol_ratio >= 1.10)
+    has_solid_body = is_green and (candle_range > 0) and ((candle_body / candle_range) >= 0.38)
+    breakout_now = (today_close >= res_now and cur_price >= res_now * 0.998) and has_breakout_vol and has_solid_body
 
-    # Reject if price is not setting up or already over-extended (> 6% above res)
+    # Reject if price is not setting up or already over-extended (> 5% above res)
     if not breakout_now and not is_watch:
         return None
-    if breakout_now and cur_price > res_now * 1.06:
+    if breakout_now and cur_price > res_now * 1.05:
         return None
 
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (today_high - today_low)
