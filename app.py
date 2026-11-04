@@ -1058,24 +1058,6 @@ def api_signals_weekly():
         "universe_size": len(STATE["universe"]),
     })
 
-
-@app.route("/api/signals/descending_channel")
-def api_signals_descending_channel():
-    return jsonify({
-        "all_signals": [],
-        "confirmed_buy": [],
-        "early_breakout": [],
-        "watchlist": [],
-        "total": 0,
-        "message": "Descending channel strategy removed."
-    })
-
-
-@app.route("/api/backtest/descending_channel", methods=["GET", "POST"])
-def api_backtest_descending_channel():
-    return jsonify({"success": True, "report": {"message": "Descending channel removed."}})
-
-
 @app.route("/api/news/<symbol>")
 def api_news(symbol):
     return jsonify({"news": get_news_flag(symbol)})
