@@ -4,6 +4,7 @@ strategies.py — Multi-Pattern Swing Trading Engine
 Includes:
   1. Triangle Patterns (Ascending / Symmetrical)
   2. Bullish Pennant Pattern
+  3. Falling Channel Pattern (Falling Channel Reversal - Bullish Upside Breakout)
 
 Strict rules:
   - NO RSI or ADX used anywhere.
@@ -455,6 +456,200 @@ def detect_pennant(candles):
 
 
 # ---------------------------------------------------------------------------
+# 3. FALLING CHANNEL PATTERN — Falling Channel Reversal (Bullish Upside Breakout)
+# ---------------------------------------------------------------------------
+def _detect_falling_channel_window(candles, lookback=35, live_price=None):
+    if len(candles) < lookback + 5:
+        return None
+    window = candles[-lookback:]
+    highs = [c[2] for c in window]
+    lows = [c[3] for c in window]
+    closes = [c[4] for c in window]
+    volumes = [c[5] for c in window]
+    avg_price = sum(closes) / len(closes)
+
+    swing_highs, swing_lows = find_swing_points(highs, lows, window=2)
+    if len(swing_highs) < 2 or len(swing_lows) < 2:
+        return None
+
+    # Regression on swing highs (Upper Resistance) and swing lows (Lower Support)
+    res_slope, res_intercept, res_r2 = linreg(swing_highs)
+    sup_slope, sup_intercept, sup_r2 = linreg(swing_lows)
+
+    fit_quality = (res_r2 + sup_r2) / 2
+    if fit_quality < 0.25:
+        return None
+
+    res_slope_norm = res_slope / avg_price
+    sup_slope_norm = sup_slope / avg_price
+
+    # 1. Both trendlines must be downward sloping (negative slopes)
+    if res_slope_norm >= -0.0001 or sup_slope_norm >= -0.0001:
+        return None
+
+    # 2. Both lines must be approximately parallel: slope diff normalized <= 0.005
+    if abs(res_slope_norm - sup_slope_norm) > 0.005:
+        return None
+
+    # 3. Overall lower highs and lower lows across the window
+    if swing_highs[-1][1] > swing_highs[0][1] * 1.02:
+        return None
+    if swing_lows[-1][1] > swing_lows[0][1] * 1.02:
+        return None
+
+    last_x = len(window) - 1
+    res_now = line_value(res_slope, res_intercept, last_x)
+    sup_now = line_value(sup_slope, sup_intercept, last_x)
+
+    # 4. Upper resistance > Lower support throughout
+    if sup_now >= res_now:
+        return None
+
+    res_start = line_value(res_slope, res_intercept, 0)
+    sup_start = line_value(sup_slope, sup_intercept, 0)
+    if sup_start >= res_start:
+        return None
+
+    # Channel height H
+    H = res_now - sup_now
+    height_pct = (H / sup_now) * 100
+    if height_pct < 3.0 or height_pct > 35.0:
+        return None
+
+    # Touches check
+    touch_tol = 0.035
+    res_touches = 0
+    for idx, val in swing_highs:
+        exp = line_value(res_slope, res_intercept, idx)
+        if exp > 0 and abs(val - exp) / exp < touch_tol:
+            res_touches += 1
+
+    sup_touches = 0
+    for idx, val in swing_lows:
+        exp = line_value(sup_slope, sup_intercept, idx)
+        if exp > 0 and abs(val - exp) / exp < touch_tol:
+            sup_touches += 1
+
+    if res_touches < 2 or sup_touches < 2:
+        return None
+
+    cur_price = live_price if live_price is not None else closes[-1]
+    today_close = closes[-1]
+
+    # Breakout condition
+    breakout_now = (cur_price >= res_now) or (today_close >= res_now and cur_price >= res_now * 0.995)
+    is_watch = (cur_price >= sup_now * 0.95 and cur_price < res_now)
+
+    if cur_price < sup_now * 0.95:
+        return None
+
+    # Reject if breakout already ran way too far (> 8% above resistance)
+    if breakout_now and cur_price > res_now * 1.08:
+        return None
+
+    # Volume check
+    all_vols = [c[5] for c in candles]
+    v20 = sma(all_vols, 20)
+    cur_vol = volumes[-1]
+    vol_spike = (v20 is not None and v20 > 0 and cur_vol >= 1.25 * v20)
+    vol_ratio = (cur_vol / v20) if (v20 and v20 > 0) else 1.0
+
+    atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (candles[-1][2] - candles[-1][3])
+
+    if breakout_now:
+        status = "confirmed"
+        buy_price = round(max(cur_price, res_now * 1.002), 2)
+    elif is_watch:
+        status = "pre_breakout_watch"
+        buy_price = round(res_now * 1.005, 2)
+    else:
+        return None
+
+    # SL just below upper resistance
+    sl_dist = max(res_now * 0.015, 0.25 * atr)
+    stop_loss = round(res_now - sl_dist, 2)
+    if stop_loss >= buy_price:
+        stop_loss = round(buy_price - 0.02 * buy_price, 2)
+
+    risk = buy_price - stop_loss
+    if risk <= 0:
+        return None
+
+    # Target = Breakout Point + Channel Height H
+    target1 = round(buy_price + H, 2)
+    target2 = round(buy_price + 1.5 * H, 2)
+    rr = round((target1 - buy_price) / risk, 2)
+
+    # Base score
+    score = 60 if status == "confirmed" else 40
+    reasons = []
+
+    if status == "confirmed":
+        reasons.append(f"Breakout > ₹{res_now:.2f}")
+        score += 8
+        if vol_spike:
+            reasons.append(f"Vol Surge {vol_ratio:.1f}x")
+            score += 12
+        else:
+            score += 4
+    else:
+        reasons.append(f"Near Upper Res ₹{res_now:.2f}")
+        reasons.append(f"Channel H ₹{H:.2f} ({height_pct:.1f}%)")
+
+    if fit_quality >= 0.55:
+        score += 6
+    if (res_touches + sup_touches) >= 5:
+        score += 5
+
+    score = min(score, 95)
+
+    return {
+        "type": "Falling Channel Reversal",
+        "status": status,
+        "resistance_now": round(res_now, 2),
+        "support_now": round(sup_now, 2),
+        "channel_height": round(H, 2),
+        "channel_height_pct": round(height_pct, 1),
+        "res_slope": res_slope,
+        "res_intercept": res_intercept,
+        "sup_slope": sup_slope,
+        "sup_intercept": sup_intercept,
+        "fit_quality": round(fit_quality, 2),
+        "touches": res_touches + sup_touches,
+        "lookback": lookback,
+        "buy_price": buy_price,
+        "stop_loss": stop_loss,
+        "target1": target1,
+        "target2": target2,
+        "rr": rr,
+        "score": score,
+        "reasons": reasons,
+        "vol_spike": vol_spike,
+        "vol_ratio": round(vol_ratio, 2),
+        "breakout_candle_date": candles[-1][0][:10] if status == "confirmed" else None,
+    }
+
+
+def detect_falling_channel_reversal(candles, timeframe="daily", live_price=None):
+    if len(candles) < 25:
+        return None
+    if timeframe == "weekly":
+        lookbacks = [16, 22, 28, 36]
+    else:
+        lookbacks = [25, 35, 45, 55]
+
+    best = None
+    for lb in lookbacks:
+        res = _detect_falling_channel_window(candles, lookback=lb, live_price=live_price)
+        if res:
+            res_rank = (1 if res["status"] == "confirmed" else 0, res["fit_quality"], res["touches"])
+            best_rank = (1 if best["status"] == "confirmed" else 0, best["fit_quality"], best["touches"]) if best else (-1, 0, 0)
+            if res_rank > best_rank:
+                best = res
+    return best
+
+
+# ---------------------------------------------------------------------------
 # Per-pattern alert builder helpers
 # ---------------------------------------------------------------------------
 def _pattern_levels(pattern_type, pattern, candles):
@@ -470,6 +665,15 @@ def _pattern_levels(pattern_type, pattern, candles):
         res = pattern["resistance"]
         buy_price = round(max(res * 1.002, today_close), 2) if today_close > res else round(res * 1.002, 2)
         stop_loss = round(pattern["support"], 2)
+
+    elif pattern_type == "falling_channel":
+        res = pattern["resistance_now"]
+        H = pattern.get("channel_height", res * 0.08)
+        buy_price = pattern.get("buy_price", round(max(res * 1.002, today_close), 2))
+        stop_loss = pattern.get("stop_loss", round(res * 0.985, 2))
+        target1 = pattern.get("target1", round(buy_price + H, 2))
+        target2 = pattern.get("target2", round(buy_price + 1.5 * H, 2))
+        return buy_price, stop_loss, target1, target2
 
     else:
         buy_price = round(today_close, 2)
@@ -562,6 +766,25 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
             "pattern": pennant
         })
 
+    # 3. Falling Channel Reversal Candidate (Bullish Upside Breakout)
+    fc = detect_falling_channel_reversal(candles, timeframe=timeframe, live_price=live_price)
+    if fc:
+        candidates.append({
+            "type_key": "falling_channel",
+            "name": "Falling Channel Reversal",
+            "status": fc["status"],
+            "score": fc["score"],
+            "reasons": fc["reasons"],
+            "pattern": fc,
+            "breakout_candle_date": fc.get("breakout_candle_date"),
+            "custom_levels": (
+                fc["buy_price"],
+                fc["stop_loss"],
+                fc["target1"],
+                fc["target2"]
+            )
+        })
+
     if not candidates:
         return None
 
@@ -602,9 +825,15 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     closes_arr = [c[4] for c in candles]
     sma_50 = sma(closes_arr, 50)
     sma_200 = sma(closes_arr, 200)
-    # Require price above at least SMA50
-    if sma_50 is not None and live_price < sma_50 * 0.95:
-        return None  # Stock is too far below SMA50 — not bullish
+    # Require price above at least SMA50 for continuation patterns (triangles, pennants)
+    # For Falling Channel Reversal, the breakout is a reversal of a downtrend, so price may be crossing SMA50.
+    # We only guard against deep penny-stock crashes (far below 200 SMA).
+    if best_pattern_type == "falling_channel":
+        if sma_200 is not None and live_price < sma_200 * 0.80:
+            return None
+    else:
+        if sma_50 is not None and live_price < sma_50 * 0.95:
+            return None  # Stock is too far below SMA50 — not bullish
 
     confidence = min(round(score), 100)
 

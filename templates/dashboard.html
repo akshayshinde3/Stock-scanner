@@ -383,6 +383,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 .click-sym:hover { color:#7aaeff !important; text-decoration:underline; text-shadow:0 0 8px rgba(77,142,245,0.4); }
 .badge-symmetrical { background:rgba(77,142,245,0.14); color:#7aaeff; border:1px solid rgba(77,142,245,0.28); }
 .badge-pennant     { background:rgba(38,212,192,0.12); color:#4edfcf; border:1px solid rgba(38,212,192,0.28); }
+.badge-falling-channel { background:rgba(255,133,51,0.14); color:#ff9f43; border:1px solid rgba(255,133,51,0.35); }
 .badge-combo       { background:rgba(157,125,255,0.12);color:#c0a8ff; border:1px solid rgba(157,125,255,0.28);}
 .badge-box         { background:rgba(38,212,192,0.14); color:#4edfcf; border:1px solid rgba(38,212,192,0.35); }
 .badge-midcap      { background:rgba(255,133,51,0.14); color:var(--orange); border:1px solid rgba(255,133,51,0.35); }
@@ -483,6 +484,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 
 .pf-symmetrical.active-pf,  .wpf-symmetrical.active-pf  { background:rgba(77,142,245,0.13); border-color:rgba(77,142,245,0.35); color:#7aaeff;       }
 .pf-pennant.active-pf,      .wpf-pennant.active-pf      { background:rgba(38,212,192,0.11); border-color:rgba(38,212,192,0.32); color:var(--teal);   }
+.pf-falling_channel.active-pf, .wpf-falling_channel.active-pf { background:rgba(255,133,51,0.14); border-color:rgba(255,133,51,0.35); color:#ff9f43; }
 .pf-combo.active-pf,        .wpf-combo.active-pf        { background:rgba(157,125,255,0.12);border-color:rgba(157,125,255,0.32);color:var(--purple); }
 .pf-midcap.active-pf,       .wpf-midcap.active-pf       { background:rgba(255,133,51,0.14); border-color:rgba(255,133,51,0.35); color:var(--orange); }
 
@@ -882,6 +884,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 
     <button class="pf-btn wpf-symmetrical" onclick="setWeeklyAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="wpfc-symmetrical">0</span></button>
     <button class="pf-btn wpf-pennant" onclick="setWeeklyAF('pennant')">🎏 Bullish Pennant <span class="pc" id="wpfc-pennant">0</span></button>
+    <button class="pf-btn wpf-falling_channel" onclick="setWeeklyAF('falling_channel')">📉 Falling Channel <span class="pc" id="wpfc-falling_channel">0</span></button>
 
   </div>
 
@@ -919,6 +922,7 @@ tr:hover td { background: rgba(77,142,245,0.055) !important; }
 
     <button class="pf-btn pf-symmetrical" onclick="setAF('symmetrical')">📐 Symmetrical Triangle <span class="pc" id="pfc-symmetrical">0</span></button>
     <button class="pf-btn pf-pennant" onclick="setAF('pennant')">🎏 Bullish Pennant <span class="pc" id="pfc-pennant">0</span></button>
+    <button class="pf-btn pf-falling_channel" onclick="setAF('falling_channel')">📉 Falling Channel <span class="pc" id="pfc-falling_channel">0</span></button>
 
   </div>
 
@@ -1144,6 +1148,7 @@ const PK = {
   symmetrical: ['symmetrical'], 
   triangle: ['triangle'], 
   pennant: ['pennant'], 
+  falling_channel: ['falling', 'channel'],
   combo: ['+'] 
 };
 
@@ -1151,6 +1156,7 @@ function pKey(s) {
   if (!s) return 'none';
   const sl = s.toLowerCase();
   if (sl.includes('box')) return 'box';
+  if (sl.includes('falling') || sl.includes('channel')) return 'falling_channel';
 
   if (sl.includes('ascending')) return 'ascending';
 
@@ -1166,6 +1172,7 @@ const BC = {
   symmetrical: 'badge-symmetrical', 
   triangle: 'badge-triangle', 
   pennant: 'badge-pennant', 
+  falling_channel: 'badge-falling-channel',
   combo: 'badge-combo', 
   box: 'badge-box',
   midcap: 'badge-midcap',
@@ -1202,7 +1209,7 @@ function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 function setupOptions(current) {
-  const opts = ['', 'Ascending Triangle', 'Symmetrical Triangle', 'Pennant Breakout', 'Manual'];
+  const opts = ['', 'Ascending Triangle', 'Symmetrical Triangle', 'Pennant Breakout', 'Falling Channel Reversal', 'Manual'];
   return opts.map(o => `<option value="${esc(o)}"${(current||'')===o?' selected':''}>${o||'Select setup'}</option>`).join('');
 }
 
@@ -1330,12 +1337,17 @@ async function fetchAndDrawPattern(sym, tf='daily') {
     const pats    = data.patterns;
     let patLabel  = '';
 
-    const ORDER = ['triangle', 'pennant'];
+    const ORDER = ['falling_channel', 'pennant', 'triangle'];
     for (const key of ORDER) {
       if (!pats[key]) continue;
       const p = pats[key];
 
-      if (key === 'triangle') {
+      if (key === 'falling_channel') {
+        addLine(p.resistance_line, W, 1, 0);
+        addLine(p.support_line,    W, 1, 0);
+        patLabel = p.type;
+      }
+      else if (key === 'triangle') {
         addLine(p.resistance_line, W, 1, 0);
         addLine(p.support_line,    W, 1, 0);
         patLabel = p.type;

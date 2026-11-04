@@ -1445,6 +1445,29 @@ def api_pattern(symbol):
     except Exception:
         pass
 
+    # ── FALLING CHANNEL ──────────────────────────────────────────────────────
+    try:
+        fc = strategies.detect_falling_channel_reversal(candles, timeframe="daily")
+        if fc:
+            LOOKBACK = fc.get("lookback", 35)
+            rs = fc["res_slope"]
+            ri = fc["res_intercept"]
+            ss = fc["sup_slope"]
+            si_ = fc["sup_intercept"]
+            off = n - LOOKBACK
+            lx  = LOOKBACK - 1
+            res_line = trendline_pts(rs, ri, 0, lx, off)
+            sup_line = trendline_pts(ss, si_, 0, lx, off)
+            patterns["falling_channel"] = {
+                "type": fc["type"],
+                "resistance_line": res_line,
+                "support_line":    sup_line,
+                "resistance_level": fc["resistance_now"],
+                "support_level":    fc["support_now"],
+            }
+    except Exception:
+        pass
+
     return jsonify({"symbol": sym, "patterns": patterns})
 
 
@@ -1533,6 +1556,29 @@ def api_pattern_weekly(symbol):
                     "support_level":    pennant["support"],
                     "pole_move_pct":    pennant["pole_move_pct"],
                 }
+    except Exception:
+        pass
+
+    # ── FALLING CHANNEL WEEKLY ───────────────────────────────────────────────
+    try:
+        fc = strategies.detect_falling_channel_reversal(candles, timeframe="weekly")
+        if fc:
+            LOOKBACK = fc.get("lookback", 22)
+            rs = fc["res_slope"]
+            ri = fc["res_intercept"]
+            ss = fc["sup_slope"]
+            si_ = fc["sup_intercept"]
+            off = n - LOOKBACK
+            lx  = LOOKBACK - 1
+            res_line = trendline_pts(rs, ri, 0, lx, off)
+            sup_line = trendline_pts(ss, si_, 0, lx, off)
+            patterns["falling_channel"] = {
+                "type": fc["type"],
+                "resistance_line": res_line,
+                "support_line":    sup_line,
+                "resistance_level": fc["resistance_now"],
+                "support_level":    fc["support_now"],
+            }
     except Exception:
         pass
 
