@@ -1,0 +1,163 @@
+//@version=5
+indicator("Institutional Falling Channel Sniper [Alert Engine]", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ==========================================
+// 1. INPUT SETTINGS
+// ==========================================
+grp_ch   = "1. Channel Geometry"
+leftLen  = input.int(7, "Pivot Lookback Left", minval=3, group=grp_ch)
+rightLen = input.int(5, "Pivot Lookback Right", minval=2, group=grp_ch)
+maxSlope = input.float(-0.01, "Max Falling Slope", step=0.01, group=grp_ch)
+minSlope = input.float(-1.50, "Min Falling Slope (Cascade Filter)", step=0.1, group=grp_ch)
+channelExt = input.int(30, "Channel Projection Bars", minval=5, maxval=100, group=grp_ch)
+
+grp_flt  = "2. 80/20 Confluence Filters"
+useRvol  = input.bool(true, "Filter 1: Relative Volume (RVOL)?", group=grp_flt)
+rvolThreshold = input.float(1.35, "Min RVOL Multiple", step=0.05, group=grp_flt)
+useRsiDiv = input.bool(true, "Filter 2: RSI Bullish Divergence?", group=grp_flt)
+rsiLen   = input.int(14, "RSI Length", group=grp_flt)
+useEmaFilter = input.bool(false, "Filter 3: Macro 200 EMA Regime?", group=grp_flt)
+emaLen   = input.int(200, "Regime EMA Length", group=grp_flt)
+
+grp_tp   = "3. Targets & Risk Management"
+rrRatio  = input.float(1.4, "TP1 Target Ratio (R:R)", step=0.1, group=grp_tp)
+slBuffer = input.float(1.0, "SL ATR Buffer Multiplier", step=0.1, group=grp_tp)
+
+// ==========================================
+// 2. PIVOT DETECTION & CHANNEL LINES
+// ==========================================
+ph = ta.pivothigh(high, leftLen, rightLen)
+pl = ta.pivotlow(low, leftLen, rightLen)
+
+var float ph1_p = na, var int ph1_b = na
+var float ph2_p = na, var int ph2_b = na
+var float pl1_p = na, var int pl1_b = na
+var float pl2_p = na, var int pl2_b = na
+
+if not na(ph)
+    ph2_p := ph1_p
+    ph2_b := ph1_b
+    ph1_p := high[rightLen]
+    ph1_b := bar_index[rightLen]
+
+if not na(pl)
+    pl2_p := pl1_p
+    pl2_b := pl1_b
+    pl1_p := low[rightLen]
+    pl1_b := bar_index[rightLen]
+
+// Determine channel validity
+var float upperSlope = na
+var float upperIntercept = na
+var float lowerSlope = na
+var float lowerIntercept = na
+bool validFalling = false
+
+if not na(ph1_p) and not na(ph2_p) and ph1_b != ph2_b
+    // Lower High condition (LH1 < LH2)
+    if ph1_p < ph2_p
+        upperSlope := (ph1_p - ph2_p) / (ph1_b - ph2_b)
+        upperIntercept := ph1_p - (upperSlope * ph1_b)
+        
+        // Lower Low condition (LL1 < LL2)
+        bool lowerLows = not na(pl1_p) and not na(pl2_p) and (pl1_p < pl2_p)
+        validFalling := lowerLows and (upperSlope <= maxSlope) and (upperSlope >= minSlope)
+
+// Projection values
+currUpper = validFalling ? (upperSlope * bar_index + upperIntercept) : na
+plot(currUpper, "Channel Resistance", color=color.new(color.red, 10), linewidth=2, style=plot.style_linebr)
+
+// ==========================================
+// 3. CONFLUENCE & DIVERGENCE ENGINE
+// ==========================================
+// Volume filter
+volMa = ta.sma(volume, 20)
+rvol = volume / (volMa == 0 ? 1 : volMa)
+volPass = not useRvol or (rvol >= rvolThreshold)
+
+// RSI Divergence
+rsiVal = ta.rsi(close, rsiLen)
+var float rsiPl1 = na, var float rsiPl2 = na
+if not na(pl)
+    rsiPl2 := rsiPl1
+    rsiPl1 := rsiVal[rightLen]
+
+bullDiv = not na(pl1_p) and not na(pl2_p) and (pl1_p < pl2_p) and not na(rsiPl1) and not na(rsiPl2) and (rsiPl1 > rsiPl2)
+divPass = not useRsiDiv or bullDiv
+
+// 200 EMA Filter
+emaVal = ta.ema(close, emaLen)
+emaPass = not useEmaFilter or (close > emaVal or close > ta.ema(close, 50))
+
+// Candle quality
+cBody = math.abs(close - open)
+cRange = high - low
+strongCandle = (cRange > 0) and ((cBody / cRange) >= 0.45) and (close > open)
+
+// ==========================================
+// 4. FILTERED BREAKOUT SIGNAL
+// ==========================================
+// Only fires on confirmed bar close above the line
+breakout = validFalling and 
+           (close[1] <= currUpper[1]) and 
+           (close > currUpper) and 
+           volPass and 
+           divPass and 
+           emaPass and 
+           strongCandle and 
+           barstate.isconfirmed
+
+// Visual Shapes & Target Boxes
+atr = ta.atr(14)
+var float entryPrice = na
+var float stopLevel = na
+var float tp1Level = na
+var box tradeBox = na
+
+if breakout
+    entryPrice := close
+    stopLevel  := math.min(low, not na(pl1_p) ? pl1_p : (low - atr * slBuffer))
+    float risk = entryPrice - stopLevel
+    tp1Level   := entryPrice + (risk * rrRatio)
+    
+    // Draw visual trade target box
+    tradeBox := box.new(left=bar_index, top=tp1Level, right=bar_index + 12, bottom=stopLevel, 
+                        border_color=color.green, bgcolor=color.new(color.teal, 88))
+
+plotshape(breakout, title="Sniper Breakout Entry", style=shape.triangleup, 
+          location=location.belowbar, color=color.green, size=size.normal, text="80% BUY")
+
+plot(breakout or not na(entryPrice) ? stopLevel : na, "Stop Loss Level", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(breakout or not na(entryPrice) ? tp1Level : na, "Target 1 Level", color=color.teal, style=plot.style_linebr, linewidth=1)
+
+// ==========================================
+// 5. ON-CHART HUD DASHBOARD
+// ==========================================
+var table hud = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 20), border_color=color.gray, border_width=1)
+if barstate.islast
+    table.cell(hud, 0, 0, "Falling Channel Sniper", bgcolor=color.navy, text_color=color.white, text_size=size.small)
+    table.cell(hud, 1, 0, "Status", bgcolor=color.navy, text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "Channel State", text_color=color.white, text_size=size.small)
+    table.cell(hud, 1, 1, validFalling ? "Active (Valid)" : "Searching...", 
+               bgcolor=validFalling ? color.new(color.green, 40) : color.new(color.orange, 40), 
+               text_color=color.white, text_size=size.small)
+               
+    table.cell(hud, 0, 2, "RSI Divergence", text_color=color.white, text_size=size.small)
+    table.cell(hud, 1, 2, bullDiv ? "Bullish (Active)" : "None", 
+               bgcolor=bullDiv ? color.new(color.green, 40) : color.new(color.gray, 40), 
+               text_color=color.white, text_size=size.small)
+               
+    table.cell(hud, 0, 3, "RVOL Multiple", text_color=color.white, text_size=size.small)
+    table.cell(hud, 1, 3, str.tostring(rvol, "#.##") + "x", 
+               bgcolor=(rvol >= rvolThreshold) ? color.new(color.green, 40) : color.new(color.gray, 40), 
+               text_color=color.white, text_size=size.small)
+
+    table.cell(hud, 0, 4, "Quality Mode", text_color=color.white, text_size=size.small)
+    table.cell(hud, 1, 4, "80/20 Rule Locked", bgcolor=color.new(color.teal, 30), text_color=color.white, text_size=size.small)
+
+// ==========================================
+// 6. SINGLE-FIRE ALERT SYSTEM
+// ==========================================
+alertcondition(breakout, title="Falling Channel High-Conviction Breakout", 
+               message="BUY ALERT: {{ticker}} Falling Channel breakout confirmed on close at {{close}}. Target: {{plot_1}}, Stop: {{plot_0}}.")

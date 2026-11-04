@@ -1,0 +1,133 @@
+//@version=5
+strategy("Refined Falling Channel Sniper [80/20 Rule]", overlay=true, 
+         initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, 
+         commission_type=strategy.commission.percent, commission_value=0.06)
+
+// ==========================================
+// 1. INPUTS & CONFIGURATION
+// ==========================================
+grp_ch   = "Channel & Pivot Settings"
+leftLen  = input.int(7, "Pivot Left Bars", minval=3, group=grp_ch)
+rightLen = input.int(5, "Pivot Right Bars (Confirmation)", minval=2, group=grp_ch)
+maxSlope = input.float(-0.02, "Max Falling Slope", step=0.01, group=grp_ch)
+minSlope = input.float(-1.50, "Min Falling Slope (Avoid Cascades)", step=0.1, group=grp_ch)
+
+grp_flt  = "High-Probability Filters"
+useRvol  = input.bool(true, "Require High Relative Volume (RVOL)?", group=grp_flt)
+rvolThreshold = input.float(1.4, "Minimum RVOL Multiple", step=0.1, group=grp_flt)
+useRsiDiv = input.bool(true, "Require RSI Bullish Divergence?", group=grp_flt)
+rsiLen   = input.int(14, "RSI Length", group=grp_flt)
+
+grp_tp   = "Risk / Reward (80% Win Rate Tuning)"
+rrRatio  = input.float(1.4, "Take Profit R:R Ratio (TP1)", step=0.1, group=grp_tp)
+slBuffer = input.float(1.0, "SL ATR Buffer Multiplier", step=0.1, group=grp_tp)
+
+// ==========================================
+// 2. SWING PIVOTS & CHANNEL DETECTION
+// ==========================================
+ph = ta.pivothigh(high, leftLen, rightLen)
+pl = ta.pivotlow(low, leftLen, rightLen)
+
+// Store the last 2 confirmed swing highs & lows
+var float ph1_price = na, var int ph1_bar = na
+var float ph2_price = na, var int ph2_bar = na
+var float pl1_price = na, var int pl1_bar = na
+var float pl2_price = na, var int pl2_bar = na
+
+if not na(ph)
+    ph2_price := ph1_price
+    ph2_bar   := ph1_bar
+    ph1_price := high[rightLen]
+    ph1_bar   := bar_index[rightLen]
+
+if not na(pl)
+    pl2_price := pl1_price
+    pl2_bar   := pl1_bar
+    pl1_price := low[rightLen]
+    pl1_bar   := bar_index[rightLen]
+
+// Calculate descending upper resistance slope
+var float upperSlope = na
+var float upperIntercept = na
+
+bool validFallingChannel = false
+if not na(ph1_price) and not na(ph2_price) and ph1_bar != ph2_bar
+    // Lower High condition: ph1 (recent) must be lower than ph2 (older)
+    if ph1_price < ph2_price
+        upperSlope := (ph1_price - ph2_price) / (ph1_bar - ph2_bar)
+        upperIntercept := ph1_price - (upperSlope * ph1_bar)
+        
+        // Lower Low condition: pl1 (recent) must be lower than pl2 (older)
+        bool lowerLows = not na(pl1_price) and not na(pl2_price) and (pl1_price < pl2_price)
+        validFallingChannel := lowerLows and (upperSlope <= maxSlope) and (upperSlope >= minSlope)
+
+// Current Upper Line Project
+currentUpperLine = validFallingChannel ? (upperSlope * bar_index + upperIntercept) : na
+plot(currentUpperLine, "Falling Channel Resistance", color=color.new(color.red, 20), linewidth=2, style=plot.style_linebr)
+
+// ==========================================
+// 3. CONFLUENCE FILTERS
+// ==========================================
+// A. Relative Volume Filter (RVOL)
+volMa = ta.sma(volume, 20)
+rvol = volume / volMa
+volOk = not useRvol or (rvol >= rvolThreshold)
+
+// B. RSI Bullish Divergence
+rsiVal = ta.rsi(close, rsiLen)
+var float rsiPl1 = na, var float rsiPl2 = na
+if not na(pl)
+    rsiPl2 := rsiPl1
+    rsiPl1 := rsiVal[rightLen]
+
+// Bullish Divergence: Price Lower Low, but RSI Higher Low
+bullishDiv = (pl1_price < pl2_price) and (rsiPl1 > rsiPl2)
+divOk = not useRsiDiv or bullishDiv
+
+// C. Candle Body Strength (Avoid weak pin-bars / rejections)
+candleBody = math.abs(close - open)
+candleRange = high - low
+strongBody = (candleRange > 0) and ((candleBody / candleRange) >= 0.50) and (close > open)
+
+// ==========================================
+// 4. PRECISE BREAKOUT SIGNAL
+// ==========================================
+// Only trigger on confirmed bar close strictly above the channel line
+breakoutCondition = validFallingChannel and 
+                    (close[1] <= currentUpperLine[1]) and 
+                    (close > currentUpperLine) and 
+                    volOk and 
+                    divOk and 
+                    strongBody and 
+                    barstate.isconfirmed
+
+plotshape(breakoutCondition, title="80/20 Falling Channel Buy", style=shape.triangleup, 
+          location=location.belowbar, color=color.green, size=size.normal, text="SNIPER BUY")
+
+// ==========================================
+// 5. TRADE EXECUTION & RISK MANAGEMENT
+// ==========================================
+atr = ta.atr(14)
+var float entryPrice = na
+var float stopLoss = na
+var float takeProfit = na
+
+if (breakoutCondition and strategy.position_size == 0)
+    entryPrice := close
+    // SL placed below the recent swing low inside the channel
+    stopLoss := math.min(low, not na(pl1_price) ? pl1_price : (low - atr * slBuffer))
+    float risk = entryPrice - stopLoss
+    takeProfit := entryPrice + (risk * rrRatio)
+    
+    strategy.entry("Long Channel BO", strategy.long)
+    strategy.exit("TP/SL Exit", "Long Channel BO", stop=stopLoss, limit=takeProfit)
+
+// Visualise Active TP and SL levels
+plot(strategy.position_size > 0 ? stopLoss : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size > 0 ? takeProfit : na, "Take Profit (80% Win Rate Target)", color=color.green, style=plot.style_linebr, linewidth=1)
+
+// ==========================================
+// 6. DEDICATED CLEAN ALERT (FIRES ONCE)
+// ==========================================
+alertcondition(breakoutCondition, title="Refined Falling Channel Breakout", 
+               message="Sniper Falling Channel Breakout on {{ticker}} at price {{close}}! Confluence: RVOL + RSI Divergence Confirmed.")
