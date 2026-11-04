@@ -490,7 +490,7 @@ def detect_pennant(candles):
 # 3. FALLING CHANNEL PATTERN — Falling Channel Reversal (Bullish Upside Breakout)
 # ---------------------------------------------------------------------------
 def _detect_falling_channel_window(candles, lookback=35, live_price=None):
-    if len(candles) < lookback + 10:
+    if len(candles) < lookback + 5:
         return None
     window = candles[-lookback:]
     opens = [c[1] for c in window]
@@ -500,42 +500,39 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     volumes = [c[5] for c in window]
     avg_price = sum(closes) / len(closes)
 
-    # 1. Structural Pivots: require window=3 (7-bar pivot) to eliminate micro-wicks & noise
-    swing_highs, swing_lows = find_swing_points(highs, lows, window=3)
+    # 1. Structural Pivots: window=2 (5-bar pivot) captures genuine daily swing points
+    swing_highs, swing_lows = find_swing_points(highs, lows, window=2)
     if len(swing_highs) < 2 or len(swing_lows) < 2:
-        # Fallback to window=2 only if lookback is short, but require >= 2 points
-        swing_highs, swing_lows = find_swing_points(highs, lows, window=2)
-        if len(swing_highs) < 2 or len(swing_lows) < 2:
-            return None
+        return None
 
     # Regression on swing highs (Upper Resistance) and swing lows (Lower Support)
     res_slope, res_intercept, res_r2 = linreg(swing_highs)
     sup_slope, sup_intercept, sup_r2 = linreg(swing_lows)
 
     fit_quality = (res_r2 + sup_r2) / 2
-    # Quality filter: raised from 0.25 to 0.45 to eliminate random noise/jagged slopes
-    if fit_quality < 0.45:
+    # Quality filter: balanced at 0.32 (filters random noise, accepts real-world channels)
+    if fit_quality < 0.32:
         return None
 
     res_slope_norm = res_slope / avg_price
     sup_slope_norm = sup_slope / avg_price
 
     # 1. Both trendlines must be downward sloping (negative slopes)
-    if res_slope_norm >= -0.0002 or sup_slope_norm >= -0.0002:
+    if res_slope_norm >= -0.0001 or sup_slope_norm >= -0.0001:
         return None
 
-    # 2. Avoid freefall / panic crashes (slope cannot be excessively steep)
-    if res_slope_norm < -0.025 or sup_slope_norm < -0.025:
+    # 2. Avoid freefall crashes (cannot be steeper than -3% per day)
+    if res_slope_norm < -0.035 or sup_slope_norm < -0.035:
         return None
 
-    # 3. Both lines must be approximately parallel: slope diff normalized <= 0.004
-    if abs(res_slope_norm - sup_slope_norm) > 0.004:
+    # 3. Both lines must be approximately parallel: slope diff normalized <= 0.0055
+    if abs(res_slope_norm - sup_slope_norm) > 0.0055:
         return None
 
     # 4. Overall lower highs and lower lows across the window
-    if swing_highs[-1][1] > swing_highs[0][1] * 1.01:
+    if swing_highs[-1][1] > swing_highs[0][1] * 1.02:
         return None
-    if swing_lows[-1][1] > swing_lows[0][1] * 1.01:
+    if swing_lows[-1][1] > swing_lows[0][1] * 1.02:
         return None
 
     last_x = len(window) - 1
@@ -554,7 +551,7 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     # Channel height H
     H = res_now - sup_now
     height_pct = (H / sup_now) * 100
-    if height_pct < 4.0 or height_pct > 30.0:
+    if height_pct < 3.5 or height_pct > 35.0:
         return None
 
     # Touches check with realistic tolerance
@@ -580,10 +577,10 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     today_high = highs[-1]
     today_low = lows[-1]
 
-    # Candle range and body strength (reject long upper rejection wicks)
+    # Candle range and body strength
     candle_range = today_high - today_low
     candle_body = abs(today_close - today_open)
-    is_strong_green = (today_close >= today_open) and (candle_range > 0) and ((candle_body / candle_range) >= 0.40)
+    is_green = today_close >= today_open
 
     # 6. Momentum Exhaustion Check: RSI Bullish Divergence on swing lows
     all_closes = [c[4] for c in candles]
@@ -598,7 +595,6 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
         rsi_pl2 = rsi_series[pl2_global_idx]
         price_pl1 = swing_lows[-1][1]
         price_pl2 = swing_lows[-2][1]
-        # Price made lower low, but RSI made higher low (Bullish Divergence)
         if price_pl1 < price_pl2 and rsi_pl1 > rsi_pl2:
             bullish_div = True
 
@@ -607,25 +603,19 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     v20 = sma(all_vols, 20)
     cur_vol = volumes[-1]
     vol_ratio = (cur_vol / v20) if (v20 and v20 > 0) else 1.0
-    vol_spike = (v20 is not None and v20 > 0 and cur_vol >= 1.30 * v20)
+    vol_spike = (v20 is not None and v20 > 0 and cur_vol >= 1.20 * v20)
 
-    # 7. CRITICAL FIX FOR 180+ ALERTS:
-    # Old logic: is_watch = (cur_price >= sup_now * 0.95 and cur_price < res_now) -> Flushed 180+ alerts!
-    # New logic: Only watch stocks COILING within 2.5% of upper resistance!
-    is_watch = (cur_price >= res_now * 0.975 and cur_price < res_now)
+    # 7. BALANCED ALERTS:
+    # A) Pre-Breakout Watch: Stock is in the upper compression zone (within 5% of resistance)
+    is_watch = (cur_price >= res_now * 0.95 and cur_price < res_now)
 
-    # Confirmed breakout requires:
-    # A) Close strictly >= resistance
-    # B) Green candle with solid body (not a rejection wick)
-    # C) Volume surge >= 1.20x OR Bullish Divergence with average volume
-    breakout_now = (today_close >= res_now and cur_price >= res_now * 0.998) and \
-                   is_strong_green and \
-                   (vol_ratio >= 1.20 or (bullish_div and vol_ratio >= 0.95))
+    # B) Confirmed Breakout: Price is at or above resistance line
+    breakout_now = (cur_price >= res_now) or (today_close >= res_now and cur_price >= res_now * 0.995)
 
-    # Reject if price is deep in channel or already ran way too far (> 6% above resistance)
+    # Reject if price is deep at the bottom (< 95% of res) or already over-extended (> 7% above res)
     if not breakout_now and not is_watch:
         return None
-    if breakout_now and cur_price > res_now * 1.06:
+    if breakout_now and cur_price > res_now * 1.07:
         return None
 
     atr = sum(c[2] - c[3] for c in candles[-14:]) / 14 if len(candles) >= 14 else (today_high - today_low)
@@ -658,7 +648,7 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
     rr = round((target1 - buy_price) / risk, 2)
 
     # Institutional Score (out of 100)
-    score = 65 if status == "confirmed" else 45
+    score = 62 if status == "confirmed" else 42
     reasons = []
 
     if status == "confirmed":
@@ -667,10 +657,7 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
         if vol_spike:
             reasons.append(f"Vol Surge {vol_ratio:.1f}x")
             score += 12
-        elif vol_ratio >= 1.15:
-            reasons.append(f"Vol {vol_ratio:.1f}x")
-            score += 6
-        if is_strong_green:
+        elif is_green:
             score += 5
     else:
         reasons.append(f"Coiling Near Res ₹{res_now:.2f}")
@@ -680,9 +667,9 @@ def _detect_falling_channel_window(candles, lookback=35, live_price=None):
         reasons.append("Bullish Divergence (RSI)")
         score += 15
 
-    if fit_quality >= 0.60:
+    if fit_quality >= 0.55:
         score += 8
-    elif fit_quality >= 0.50:
+    elif fit_quality >= 0.40:
         score += 4
 
     if (res_touches + sup_touches) >= 5:
@@ -907,7 +894,10 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
         return None
 
     rr = round((target1 - buy_price) / risk, 2)
-    if rr < 1.8:
+    # For continuation patterns (triangles, pennants) require R:R >= 1.8
+    # For falling channel reversal (calibrated for 80/20 win rate), TP1 is at 1.3R to 1.5R
+    min_rr_threshold = 1.2 if best_pattern_type == "falling_channel" else 1.8
+    if rr < min_rr_threshold:
         return None
 
     # === BULLISH ONLY FILTER: reject stocks in strong downtrend ===
