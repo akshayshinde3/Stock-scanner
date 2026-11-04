@@ -630,6 +630,14 @@ def build_alert(symbol, candles, live_price, timeframe="daily"):
     if rr < 1.8:
         return None
 
+    # === BULLISH ONLY FILTER: reject stocks in strong downtrend ===
+    closes_arr = [c[4] for c in candles]
+    sma_50 = sma(closes_arr, 50)
+    sma_200 = sma(closes_arr, 200)
+    # Require price above at least SMA50, or for channel breakouts allow 3% below
+    if sma_50 is not None and live_price < sma_50 * 0.95:
+        return None  # Stock is too far below SMA50 — not bullish
+
     confidence = min(round(score), 100)
 
     # Strict confidence filter

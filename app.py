@@ -185,22 +185,43 @@ def load_nifty500_symbols():
         except Exception as e:
             app.logger.warning(f"Error reading nifty500.txt: {e}")
 
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Accept": "text/csv"}
-        r = requests.get(NIFTY500_URL, headers=headers, timeout=3)
-        r.raise_for_status()
-        lines = r.text.splitlines()
-        symbols = []
-        for line in lines[1:]:
-            parts = line.split(",")
-            if len(parts) >= 3:
-                s = parts[2].strip().upper()
-                if s and s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY"):
-                    symbols.append(s)
-        if len(symbols) >= 100:
-            return symbols
-    except Exception as e:
-        app.logger.warning(f"Could not fetch live Nifty 500 list from NSE ({e}); checking cache fallback.")
+    # Fix 8: Multiple NSE URLs with improved headers and timeout
+    nse_urls = [
+        "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
+        "https://nseindia.com/content/indices/ind_nifty500list.csv",
+    ]
+    for nse_url in nse_urls:
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.nseindia.com/",
+                "DNT": "1",
+            }
+            r = requests.get(nse_url, headers=headers, timeout=15)
+            r.raise_for_status()
+            lines = r.text.splitlines()
+            symbols = []
+            for line in lines[1:]:
+                parts = line.split(",")
+                if len(parts) >= 3:
+                    s = parts[2].strip().upper()
+                    if s and s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY"):
+                        symbols.append(s)
+            if len(symbols) >= 100:
+                # Save to local cache file for next time
+                try:
+                    cache_path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        f.write("# Auto-fetched from NSE\n")
+                        for s in symbols:
+                            f.write(s + "\n")
+                except Exception:
+                    pass
+                return symbols
+        except Exception as e:
+            app.logger.warning(f"Could not fetch Nifty 500 from {nse_url} ({e})")
 
     if os.path.exists(CANDLE_CACHE_FILE):
         try:
@@ -564,6 +585,24 @@ def get_yfinance_quotes(symbols):
         return {}
 
 
+def _refresh_live_ltp(symbols):
+    """Fetch live LTP for all symbols using Yahoo Finance and cache them."""
+    global _live_ltp_cache
+    if not symbols:
+        return
+    # Fetch in batches of 100
+    batch_size = 100
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        try:
+            quotes = get_yfinance_quotes(batch)
+            for sym, q in quotes.items():
+                if q.get("ltp"):
+                    _live_ltp_cache[sym] = q["ltp"]
+        except Exception as e:
+            app.logger.warning(f"Live LTP refresh error: {e}")
+
+
 def merge_candles(existing_candles, new_candles):
     """Merge new candles into existing candles list, avoiding duplicates by date."""
     candle_dict = {c[0][:10]: c for c in existing_candles}
@@ -621,6 +660,7 @@ def get_news_flag(symbol):
 # ---------------------------------------------------------------------------
 _candle_cache = {}
 _weekly_candle_cache = {}
+_live_ltp_cache = {}
 _candle_cache_date   = None
 _weekly_cache_date   = None
 
@@ -815,13 +855,27 @@ def _evaluate_all_symbols():
     for sym in universe:
         candles = _candle_cache.get(sym)
         if candles:
-            live_price = candles[-1][4]
+            # Fix 5: Use live LTP cache if available
+            live_price = _live_ltp_cache.get(sym, candles[-1][4])
             res = evaluate_symbol(sym, candles, live_price)
             if res:
                 res["timestamp"] = ist_time_str
                 res["is_midcap"] = sym in MIDCAP100_SYMBOLS
                 if res["status"] == "confirmed":
                     if res.get("confidence", 0) >= 60:
+                        # Fix 7: Freshness check: only show confirmed signals from last 7 days
+                        bcd = res.get("breakout_candle_date")
+                        if bcd:
+                            try:
+                                bdate = dt.date.fromisoformat(str(bcd)[:10])
+                                age_days = (dt.date.today() - bdate).days
+                                if age_days > 7:
+                                    # Stale breakout — downgrade to watch
+                                    res["status"] = "pre_breakout_watch"
+                                    watch.append(res)
+                                    continue
+                            except Exception:
+                                pass
                         confirmed.append(res)
                 else:
                     watch.append(res)
@@ -906,6 +960,8 @@ def scan_loop():
 
             if market_open:
                 sync_latest_daily_candles()
+                # Fix 6: Refresh live LTP during market hours
+                _refresh_live_ltp(universe)
 
             confirmed, watch, w_confirmed, w_watch = _evaluate_all_symbols()
             STATE["scan_progress"] = None
@@ -972,16 +1028,18 @@ def api_signals_weekly():
 
 @app.route("/api/signals/descending_channel")
 def api_signals_descending_channel():
+    # Fix 9: Bullish-only signals, live LTP, improved filters
     tf = request.args.get("timeframe", "daily").lower()
-    min_score = int(request.args.get("min_score", 65))
+    min_score = int(request.args.get("min_score", 70))
     universe = STATE.get("universe") or []
     
     results = []
     for sym in universe:
         candles = _weekly_candle_cache.get(sym) if tf == "weekly" else _candle_cache.get(sym)
-        if not candles or len(candles) < 25:
+        if not candles or len(candles) < 30:
             continue
-        live_p = candles[-1][4]
+        # Use live LTP if available, else last candle close
+        live_p = _live_ltp_cache.get(sym, candles[-1][4])
         try:
             res = descending_channel.scan_descending_channel(
                 symbol=sym,
@@ -989,8 +1047,14 @@ def api_signals_descending_channel():
                 live_price=live_p,
                 timeframe=tf
             )
-            if res and res["setup_quality_score"] >= min_score:
+            # Only include BULLISH signals - never show REJECTED or short signals
+            if res and res["signal_type"] != "REJECTED" and res["setup_quality_score"] >= min_score:
+                # Additional bullish filter: current price must be ABOVE lower channel support
+                if live_p <= res.get("lower_trendline", 0) * 0.98:
+                    continue  # Stock collapsed below support — skip
                 res["is_midcap"] = sym in MIDCAP100_SYMBOLS
+                # Tag with live LTP
+                res["current_price"] = round(live_p, 2)
                 results.append(res)
         except Exception:
             continue
@@ -1000,15 +1064,16 @@ def api_signals_descending_channel():
     confirmed = [r for r in results if r["signal_type"] == "CONFIRMED BUY"]
     early = [r for r in results if r["signal_type"] == "EARLY BREAKOUT"]
     watchlist = [r for r in results if r["signal_type"] == "WATCHLIST"]
-    rejected = [r for r in results if r["signal_type"] == "REJECTED"]
     
     return jsonify({
         "all_signals": results,
         "confirmed_buy": confirmed,
         "early_breakout": early,
         "watchlist": watchlist,
-        "rejected": rejected,
         "total": len(results),
+        "total_confirmed": len(confirmed),
+        "total_early": len(early),
+        "total_watchlist": len(watchlist),
         "last_scan": STATE.get("last_scan"),
         "timeframe": tf
     })

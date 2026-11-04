@@ -67,7 +67,7 @@ DEFAULT_CONFIG = {
     "retest_tolerance_atr": 0.40,    # Distance from broken resistance for retest zone
     "sl_buffer_atr": 0.20,           # Stop loss buffer below retest low
     "min_risk_reward": 1.8,          # Minimum acceptable R:R ratio
-    "min_score_actionable": 80,      # Minimum score for actionable buy signals
+    "min_score_actionable": 85,      # Minimum score for actionable buy signals
 }
 
 
@@ -421,7 +421,7 @@ def detect_breakout(
     n_candles = len(candles)
 
     # Check recent candles for breakout event
-    look_window = min(12, n_candles - offset)
+    look_window = min(5, n_candles - offset)
     for b_offset in range(look_window, 0, -1):
         idx = n_candles - b_offset
         if idx < 0:
@@ -675,23 +675,32 @@ def validate_failed_breakout(
 ) -> bool:
     """
     Detects invalid/failed breakouts:
-      - Price closed back inside the channel within 1–3 candles.
-      - Lost the breakout support level by more than 1.5%.
+      - Price closed back inside the channel within 1-7 candles after breakout.
+      - Price lost the broken resistance level by more than 1.0%.
+      - Current price is more than 3% below the breakout price (momentum lost).
     """
     b_idx = breakout["breakout_idx"]
     n = len(candles)
     res_slope = channel["res_slope"]
     res_intercept = channel["res_intercept"]
     offset = channel["offset"]
+    breakout_price = breakout["breakout_price"]
 
-    # Check 1-3 candles after breakout
-    for i in range(b_idx + 1, min(b_idx + 4, n)):
+    # Check up to 7 candles after breakout for price falling back into channel
+    for i in range(b_idx + 1, min(b_idx + 8, n)):
         c = candles[i]
         c_close = float(c[4])
         x = i - offset
         res_x = line_val(res_slope, res_intercept, x)
-        if c_close < res_x * 0.985:
+        # If price closed more than 1% below resistance level = failed breakout
+        if c_close < res_x * 0.990:
             return True
+
+    # Current price check: if current price is 3%+ below breakout price, momentum lost
+    current_close = float(candles[-1][4])
+    if current_close < breakout_price * 0.970:
+        return True
+
     return False
 
 
@@ -725,6 +734,17 @@ def scan_descending_channel(
 
     cur_price = float(live_price) if live_price is not None else float(candles[-1][4])
     atr = calculate_atr(candles, period=14)
+
+    # === BULLISH TREND FILTER ===
+    # Require current price > 50-period SMA for bullish bias (buy signals only)
+    closes_all = [float(c[4]) for c in candles]
+    sma50_val = calculate_sma(closes_all, 50)
+    sma20_val = calculate_sma(closes_all, 20)
+    # For confirmed/early breakout signals, price must be above SMA50 OR recently recovered above SMA20
+    # (allow some tolerance: within 3% below SMA50 for channel breakouts since they recover)
+    sma50_ok = sma50_val is None or cur_price >= sma50_val * 0.97
+    if not sma50_ok:
+        return None  # Skip bearish stocks entirely for buy signals
 
     # Multi-window channel search
     lookbacks = [15, 25, 35] if timeframe == "weekly" else [30, 45, 25, 60, 90]
@@ -792,11 +812,11 @@ def scan_descending_channel(
         signal_type = "REJECTED"
         signal_color = "RED"
         status_label = "Failed Breakout" if is_failed_breakout else "Rejected (<65)"
-    elif retest_ok and bullish_rev and total_score >= config["min_score_actionable"] and rr_favorable and nifty_trend_ok:
+    elif breakout and not is_failed_breakout and retest_ok and bullish_rev and total_score >= config["min_score_actionable"] and rr_favorable and nifty_trend_ok:
         signal_type = "CONFIRMED BUY"
         signal_color = "GREEN"
         status_label = "Confirmed Buy (Post-Retest)"
-    elif breakout and total_score >= config["min_score_actionable"] and vol_conf:
+    elif breakout and not is_failed_breakout and total_score >= config["min_score_actionable"] and vol_conf:
         signal_type = "EARLY BREAKOUT"
         signal_color = "BLUE"
         status_label = "Early Breakout (Momentum)"
