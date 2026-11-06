@@ -107,6 +107,249 @@ def is_green_candle(open_price: float, close_price: float) -> bool:
     return close_price > open_price
 
 
+def analyze_above_44ma(symbol: str, company: str, candles: list, timeframe: str = "daily") -> dict:
+    """
+    Above 44 MA Strategy (Bullish Momentum & Breakout above 44 MA):
+    Identifies stocks trading above the 44-period Moving Average:
+      1. Close > MA44
+      2. Identifies the Breakout Candle (where price crossed/touched 44 MA and closed above)
+      3. Calculates Stop-Loss (below 44 MA or low of breakout candle) and 1:3 Profit Target
+    """
+    if not candles or len(candles) < 45:
+        return None
+
+    closes = [c[4] for c in candles]
+    highs = [c[2] for c in candles]
+    lows = [c[3] for c in candles]
+    opens = [c[1] for c in candles]
+    volumes = [c[5] for c in candles]
+
+    ma_series = calculate_ma44(closes)
+    current_ma = ma_series[-1]
+    if current_ma is None:
+        return None
+
+    cur_close = closes[-1]
+    cur_open = opens[-1]
+    cur_low = lows[-1]
+
+    # Must be strictly ABOVE 44 MA
+    if cur_close < current_ma:
+        return None
+
+    dist_pct = round(((cur_close - current_ma) / current_ma) * 100, 2)
+
+    # Detect the 44 MA breakout candle within recent bars
+    breakout_bar_idx = None
+    breakout_date = None
+    is_fresh_breakout = False
+    
+    for b in range(1, min(8, len(candles))):
+        idx = len(candles) - b
+        c_close = closes[idx]
+        ma_val = ma_series[idx]
+        if ma_val is None:
+            continue
+        prev_idx = idx - 1
+        if prev_idx >= 0 and ma_series[prev_idx] is not None:
+            if (closes[prev_idx] <= ma_series[prev_idx] or lows[idx] <= ma_val) and c_close > ma_val:
+                breakout_bar_idx = idx
+                breakout_date = candles[idx][0]
+                if b <= 2:
+                    is_fresh_breakout = True
+                break
+
+    if breakout_date is None:
+        breakout_date = candles[-1][0]
+        breakout_bar_idx = len(candles) - 1
+
+    if is_fresh_breakout:
+        status = "44 MA Fresh Breakout"
+    elif dist_pct <= 3.0:
+        status = "44 MA Near Support"
+    else:
+        status = "Above 44 MA Trending"
+
+    breakout_low = lows[breakout_bar_idx] if breakout_bar_idx is not None else cur_low
+    stop_loss = round(min(current_ma * 0.985, breakout_low * 0.99), 2)
+    risk = cur_close - stop_loss
+    if risk <= 0:
+        stop_loss = round(cur_close * 0.97, 2)
+        risk = cur_close - stop_loss
+
+    target = round(cur_close + 3.0 * risk, 2)
+
+    prev_close = closes[-2] if len(closes) >= 2 else cur_open
+    day_change_pct = round(((cur_close - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
+
+    return {
+        "symbol": symbol,
+        "company": company,
+        "pattern": "Above 44 MA",
+        "cmp": round(cur_close, 2),
+        "ma44": round(current_ma, 2),
+        "distance_pct": dist_pct,
+        "status": status,
+        "breakout_date": breakout_date,
+        "buy_price": round(cur_close, 2),
+        "stop_loss": stop_loss,
+        "target": target,
+        "risk_reward": "1:3",
+        "day_change_pct": day_change_pct,
+        "volume": int(volumes[-1]),
+        "timeframe": timeframe.capitalize(),
+        "sparkline": [round(c, 2) for c in closes[-12:]],
+        "abs_distance": dist_pct,
+    }
+
+
+def evaluate_44ma_breakout(
+    symbol: str,
+    company: str,
+    candles: list,
+    timeframe: str = "daily",
+    min_dist_pct: float = 1.0,
+    max_dist_pct: float = 7.0,
+) -> dict:
+    """
+    Evaluates stock for 44 MA Breakout status strictly between min 1% and max 7%:
+      1. '44 MA Confirm Breakout':
+         - Candle crossed/closed firmly ABOVE 44 MA (Close >= MA44)
+         - Strict distance band: +1.0% <= Distance % <= +7.0%
+         - Actionable buy signal with entry at CMP, stop loss below 44 MA / breakout low, 1:3 target
+      2. '44 MA Pre-Breakout':
+         - Price coiling under/at 44 MA (Close < MA44)
+         - Strict distance band: -7.0% <= Distance % <= -1.0% (1.0% <= abs(Distance %) <= 7.0%)
+         - Anticipatory setup preparing to break out above 44 MA, stop loss, 1:3 target
+    """
+    if not candles or len(candles) < 45:
+        return None
+
+    closes = [c[4] for c in candles]
+    highs = [c[2] for c in candles]
+    lows = [c[3] for c in candles]
+    opens = [c[1] for c in candles]
+    volumes = [c[5] for c in candles]
+
+    ma_series = calculate_ma44(closes)
+    current_ma = ma_series[-1]
+    if current_ma is None:
+        return None
+
+    cur_close = closes[-1]
+    cur_open = opens[-1]
+    cur_high = highs[-1]
+    cur_low = lows[-1]
+    cur_vol = volumes[-1]
+
+    dist_pct = round(((cur_close - current_ma) / current_ma) * 100, 2)
+    prev_close = closes[-2] if len(closes) >= 2 else cur_open
+    day_change_pct = round(((cur_close - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
+
+    # 1. CONFIRM BREAKOUT (Close >= MA44 and +1.0% <= dist_pct <= +7.0%)
+    if cur_close >= current_ma:
+        if not (min_dist_pct <= dist_pct <= max_dist_pct):
+            return None
+
+        breakout_date = None
+        breakout_idx = None
+        is_fresh = False
+        for b in range(1, min(8, len(candles))):
+            idx = len(candles) - b
+            c_close = closes[idx]
+            ma_val = ma_series[idx]
+            if ma_val is None:
+                continue
+            prev_idx = idx - 1
+            if prev_idx >= 0 and ma_series[prev_idx] is not None:
+                if (closes[prev_idx] <= ma_series[prev_idx] or lows[idx] <= ma_val) and c_close > ma_val:
+                    breakout_date = candles[idx][0]
+                    breakout_idx = idx
+                    if b <= 2:
+                        is_fresh = True
+                    break
+
+        if breakout_date is None:
+            breakout_date = candles[-1][0]
+            breakout_idx = len(candles) - 1
+
+        if is_fresh:
+            status = "44 MA Fresh Breakout (1-7%)"
+        elif dist_pct <= 3.0:
+            status = "44 MA Near Support (1-3%)"
+        else:
+            status = "Above 44 MA Trending (3-7%)"
+
+        breakout_low = lows[breakout_idx] if breakout_idx is not None else cur_low
+        stop_loss = round(min(current_ma * 0.985, breakout_low * 0.99), 2)
+        risk = cur_close - stop_loss
+        if risk <= 0:
+            stop_loss = round(cur_close * 0.97, 2)
+            risk = cur_close - stop_loss
+        target = round(cur_close + 3.0 * risk, 2)
+
+        return {
+            "type": "confirm_breakout",
+            "symbol": symbol,
+            "company": company,
+            "pattern": f"44 MA Confirm ({timeframe.capitalize()})",
+            "cmp": round(cur_close, 2),
+            "ma44": round(current_ma, 2),
+            "distance_pct": dist_pct,
+            "status": status,
+            "breakout_date": breakout_date,
+            "buy_price": round(cur_close, 2),
+            "stop_loss": stop_loss,
+            "target": target,
+            "risk_reward": "1:3",
+            "day_change_pct": day_change_pct,
+            "volume": int(cur_vol),
+            "timeframe": timeframe.capitalize(),
+            "sparkline": [round(c, 2) for c in closes[-12:]],
+            "abs_distance": abs(dist_pct),
+        }
+
+    # 2. PRE-BREAKOUT (Close < MA44 and -7.0% <= dist_pct <= -1.0%, i.e. 1% to 7% below 44 MA)
+    abs_dist = abs(dist_pct)
+    if cur_close < current_ma:
+        if not (min_dist_pct <= abs_dist <= max_dist_pct):
+            return None
+
+        touch = is_touch(cur_low, cur_high, current_ma)
+        status = "44 MA Touching (Pre-Breakout)" if touch else "44 MA Near Below (1-7%)"
+
+        anticipated_entry = round(current_ma * 1.002, 2)
+        stop_loss = round(min(cur_low * 0.99, current_ma * 0.975), 2)
+        risk = anticipated_entry - stop_loss
+        if risk <= 0:
+            stop_loss = round(anticipated_entry * 0.97, 2)
+            risk = anticipated_entry - stop_loss
+        target = round(anticipated_entry + 3.0 * risk, 2)
+
+        return {
+            "type": "pre_breakout",
+            "symbol": symbol,
+            "company": company,
+            "pattern": f"44 MA Pre-Breakout ({timeframe.capitalize()})",
+            "cmp": round(cur_close, 2),
+            "ma44": round(current_ma, 2),
+            "distance_pct": dist_pct,
+            "status": status,
+            "breakout_date": candles[-1][0],
+            "buy_price": anticipated_entry,
+            "stop_loss": stop_loss,
+            "target": target,
+            "risk_reward": "1:3",
+            "day_change_pct": day_change_pct,
+            "volume": int(cur_vol),
+            "timeframe": timeframe.capitalize(),
+            "sparkline": [round(c, 2) for c in closes[-12:]],
+            "abs_distance": abs(dist_pct),
+        }
+
+    return None
+
+
 def analyze_44ma_timeframe(candles: list, max_above_a: float = 2.0, max_below_b: float = 3.0) -> dict:
     """
     Analyzes a candle series for 44 MA Touch & Near conditions.

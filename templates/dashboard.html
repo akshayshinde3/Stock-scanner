@@ -3,43 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>44 MA Touch & Near Scanner — Indian Stocks Screener</title>
+  <title>Indian Stock Screener — 4 Core Strategies</title>
   
   <!-- Tailwind CSS via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brandDark: '#0b0f19',
-            cardDark: '#111827',
-            borderDark: '#1f2937',
-            accentBlue: '#3b82f6',
-            accentGreen: '#10b981',
-            accentOrange: '#f59e0b',
-            accentPurple: '#8b5cf6',
-            accentCyan: '#06b6d4',
-          },
-          fontFamily: {
-            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
-            sans: ['Inter', 'system-ui', 'sans-serif'],
-          }
-        }
-      }
-    }
-  </script>
 
   <!-- Google Fonts: Inter & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-
-  <!-- React 18, ReactDOM & Babel -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- Lightweight Charts (TradingView) -->
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
@@ -48,21 +20,25 @@
     body {
       background-color: #0b0f19;
       color: #e5e7eb;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
     }
     .custom-scrollbar::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
+      width: 5px;
+      height: 5px;
     }
     .custom-scrollbar::-webkit-scrollbar-track {
-      background: #111827;
+      background: #0f172a;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #374151;
+      background: #334155;
       border-radius: 3px;
     }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #4b5563;
+      background: #475569;
+    }
+    .sparkline-svg {
+      overflow: visible;
     }
     .sparkline-path {
       fill: none;
@@ -74,175 +50,397 @@
 </head>
 <body class="min-h-screen flex flex-col bg-[#0b0f19] text-gray-200 antialiased selection:bg-blue-600 selection:text-white">
 
-  <!-- Root React App Container -->
-  <div id="root" class="flex-1 flex flex-col"></div>
+  <!-- Header -->
+  <header class="border-b border-gray-800 bg-[#0f172a] px-4 sm:px-6 py-3 sticky top-0 z-30 shadow-md">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold font-mono text-lg shadow-inner">
+          NSE
+        </div>
+        <div>
+          <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+            Technical Breakout Scanner
+            <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">
+              EOD Live
+            </span>
+          </h1>
+          <p class="text-xs text-gray-400">
+            Ascending Triangle • Symmetrical Triangle • Daily 44 MA • Weekly 44 MA
+          </p>
+        </div>
+      </div>
 
-  <!-- React Application Logic -->
-  <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+      <!-- Controls: Universe & CSV & Scan -->
+      <div class="flex items-center flex-wrap gap-2.5">
+        <div class="flex items-center space-x-1.5 bg-gray-900 border border-gray-700/70 rounded-lg px-2.5 py-1.5 text-xs">
+          <span class="text-gray-400">Universe:</span>
+          <select id="indexSelector" class="bg-transparent text-white font-semibold focus:outline-none cursor-pointer">
+            <option value="nifty500" class="bg-gray-900">Nifty 500 (All)</option>
+            <option value="nifty100" class="bg-gray-900">Nifty 100 (Large)</option>
+            <option value="nifty50" class="bg-gray-900">Nifty 50 (Core)</option>
+          </select>
+        </div>
 
-    // Helper: format Indian rupee numbers
-    const fmt = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-    const fmtVol = (n) => {
-      if (!n) return "0";
-      if (n >= 10000000) return (n / 10000000).toFixed(2) + " Cr";
-      if (n >= 100000) return (n / 100000).toFixed(2) + " L";
-      if (n >= 1000) return (n / 1000).toFixed(1) + " K";
-      return n.toLocaleString("en-IN");
-    };
+        <button id="btnExportCsv" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 transition cursor-pointer">
+          ⬇ Export CSV
+        </button>
 
-    // Component: Mini Sparkline
-    const Sparkline = ({ points, isUp }) => {
-      if (!points || points.length < 2) return <span className="text-gray-600">—</span>;
-      const min = Math.min(...points);
-      const max = Math.max(...points);
-      const range = max - min || 1;
-      const width = 76;
-      const height = 22;
+        <button id="btnRefresh" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm transition cursor-pointer">
+          ⟳ Refresh
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Live Subheader Status Banner -->
+  <div class="bg-[#111827]/80 border-b border-gray-800 px-4 sm:px-6 py-2 text-xs text-gray-400">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>4 Primary Strategies with Pre-Breakout & Confirmed Breakout Children</span>
+        </span>
+        <span>•</span>
+        <span>Last Updated: <b id="lastUpdatedText" class="text-gray-200 font-mono">Live</b></span>
+      </div>
+      <div class="text-gray-400 hidden sm:block">
+        Zero Latency • Optimized for Render Free Tier (<span class="text-emerald-400">0.1 CPU, 512MB RAM</span>)
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Full-Width Layout -->
+  <main class="max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 flex-1 flex flex-col gap-4">
+    
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- 4 MAIN HEADING SECTIONS ONLY                                            -->
+    <!-- 1. Ascending Triangle | 2. Symmetrical Triangle | 3. Daily MA | 4. Weekly MA -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5" id="mainHeadingsContainer">
+      <!-- 1. Ascending Triangle -->
+      <button data-section="ascending" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-blue-950/60 border-blue-500/50 shadow-md">
+        <div class="flex items-center justify-between">
+          <span class="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
+            <span>📐 1. Ascending Triangle</span>
+          </span>
+          <span id="badge-main-asc" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-blue-900/60 text-blue-200 border border-blue-500/40">0</span>
+        </div>
+        <div class="text-[11px] text-gray-400 mt-1">Pre-Breakout & Confirmed</div>
+      </button>
+
+      <!-- 2. Symmetrical Triangle -->
+      <button data-section="symmetrical" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+        <div class="flex items-center justify-between">
+          <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
+            <span>📐 2. Symmetrical Triangle</span>
+          </span>
+          <span id="badge-main-symm" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
+        </div>
+        <div class="text-[11px] text-gray-400 mt-1">Pre-Breakout & Confirmed</div>
+      </button>
+
+      <!-- 3. Daily MA -->
+      <button data-section="daily_ma" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+        <div class="flex items-center justify-between">
+          <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
+            <span>📅 3. Daily MA</span>
+          </span>
+          <span id="badge-main-daily" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
+        </div>
+        <div class="text-[11px] text-gray-400 mt-1">44 Daily Pre & Confirmed</div>
+      </button>
+
+      <!-- 4. Weekly MA -->
+      <button data-section="weekly_ma" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+        <div class="flex items-center justify-between">
+          <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
+            <span>📆 4. Weekly MA</span>
+          </span>
+          <span id="badge-main-weekly" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
+        </div>
+        <div class="text-[11px] text-gray-400 mt-1">44 Weekly Pre & Confirmed</div>
+      </button>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- CHILD NAVIGATION BAR (Pre-Breakout vs Confirmed Breakout)               -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <div id="childNavigationBar" class="flex flex-wrap items-center justify-between gap-3 bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
+      <div class="flex flex-wrap items-center gap-2" id="childTabsContainer">
+        <!-- Injected dynamically: Pre-Breakout and Confirmed Breakout buttons -->
+      </div>
+
+      <!-- Live Search Box -->
+      <div class="relative w-full sm:w-64">
+        <input
+          id="searchBox"
+          type="text"
+          placeholder="Search symbol or company..."
+          class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+        />
+      </div>
+    </div>
+
+    <!-- Strategy Summary Cards Container -->
+    <div id="statsCardsContainer" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <!-- Injected via JavaScript -->
+    </div>
+
+    <!-- Strategy Info Banner -->
+    <div id="strategyBanner" class="flex items-center justify-between text-xs text-gray-400 bg-gray-900/60 p-2.5 rounded-lg border border-gray-800">
+      <span id="strategyDescription" class="font-medium text-gray-300">
+        Ascending Triangle — Confirmed Breakout
+      </span>
+      <span class="font-mono text-gray-400">
+        Showing <b id="matchCountText" class="text-white">0</b> stocks
+      </span>
+    </div>
+
+    <!-- Results Table Container -->
+    <div class="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead id="tableHead">
+          <!-- Injected dynamically -->
+        </thead>
+        <tbody id="tableBody" class="divide-y divide-gray-800/60 font-mono">
+          <!-- Injected dynamically -->
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+
+  <!-- Interactive Lightweight Chart Modal -->
+  <div id="chartModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
       
-      const pathData = points.map((p, i) => {
-        const x = (i / (points.length - 1)) * width;
-        const y = height - ((p - min) / range) * (height - 4) - 2;
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      }).join(' ');
+      <!-- Modal Header -->
+      <div class="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between bg-gray-950">
+        <div class="flex items-center flex-wrap gap-3">
+          <span id="modalSymbol" class="text-xl font-bold text-white font-mono">—</span>
+          <span id="modalCompany" class="text-sm text-gray-400 font-sans truncate max-w-[200px]">—</span>
+          <span id="modalCmp" class="text-sm font-bold text-emerald-400 font-mono">—</span>
+          <span id="modalMaBadge" class="text-xs px-2 py-0.5 rounded bg-red-950/50 text-red-300 border border-red-500/40 font-mono font-semibold">
+            44 MA: —
+          </span>
+          <span id="modalStatusBadge" class="text-xs px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-500/30 font-sans font-semibold">
+            —
+          </span>
+        </div>
 
-      const strokeColor = isUp ? "#10b981" : "#ef4444";
-      return (
-        <svg width={width} height={height} className="overflow-visible">
-          <path d={pathData} className="sparkline-path" stroke={strokeColor} />
-        </svg>
-      );
-    };
+        <div class="flex items-center gap-3">
+          <!-- Timeframe Switcher in Modal -->
+          <div class="flex rounded-lg bg-gray-800 p-0.5 border border-gray-700 text-xs font-medium">
+            <button id="btnModalTfDaily" class="px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition">Daily</button>
+            <button id="btnModalTfWeekly" class="px-3 py-1 rounded-md text-gray-400 hover:text-white transition">Weekly</button>
+          </div>
 
-    // Main App Component
-    function App() {
-      // Top State
-      // Tabs: 'both', 'daily', 'weekly', 'ascending', 'symmetrical', 'breakout_hub'
-      const [activeTab, setActiveTab] = useState("both");
-      const [indexSelector, setIndexSelector] = useState("nifty500");
-      const [loading, setLoading] = useState(false);
-      const [lastUpdated, setLastUpdated] = useState("");
-      const [searchQuery, setSearchQuery] = useState("");
+          <button id="btnCloseModal" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none cursor-pointer">
+            ✕
+          </button>
+        </div>
+      </div>
 
-      // 44 MA Scanner Results & Counts
-      const [scannerData, setScannerData] = useState({ both: [], daily: [], weekly: [] });
-      const [counts, setCounts] = useState({ both: 0, daily: 0, weekly: 0, total_qualifying: 0 });
+      <!-- Trade Plan Bar (Entry, Target, Stop Loss) -->
+      <div id="modalTradePlanBar" class="bg-[#101726] border-b border-gray-800 px-5 py-2 flex flex-wrap items-center justify-between text-xs font-mono">
+        <div class="flex items-center gap-4">
+          <span>Entry: <b id="planEntry" class="text-cyan-400">—</b></span>
+          <span>•</span>
+          <span>Target (1:3): <b id="planTarget" class="text-emerald-400">—</b></span>
+          <span>•</span>
+          <span>Stop Loss: <b id="planStopLoss" class="text-rose-400">—</b></span>
+          <span>•</span>
+          <span>R:R: <b class="text-yellow-400">1:3</b></span>
+        </div>
+        <div id="planNotes" class="text-gray-400 text-[11px]">
+          Pattern & Levels drawn on chart
+        </div>
+      </div>
 
-      // Triangles Results
-      const [trianglesData, setTrianglesData] = useState({
-        ascending: [],
-        symmetrical: [],
-        confirmed_breakouts: [],
-        pre_breakouts: [],
-      });
+      <!-- Lightweight Chart Render Box -->
+      <div class="p-4 bg-[#0b0f19]">
+        <div id="chartContainer" class="w-full h-[450px]"></div>
+      </div>
 
-      // Sidebar Filters (All User Adjustable)
-      const [maxAbove, setMaxAbove] = useState(2.0); // Slider: 0.5% - 5.0%, default 2%
-      const [maxBelow, setMaxBelow] = useState(3.0); // Slider: 0.5% - 5.0%, default 3%
-      const [statusTouch, setStatusTouch] = useState(true);
-      const [statusAbove, setStatusAbove] = useState(true);
-      const [statusNearBelow, setStatusNearBelow] = useState(true);
-      const [minPrice, setMinPrice] = useState(0);
-      const [minWeeklyVol, setMinWeeklyVol] = useState(100000);
-      const [risingOnly, setRisingOnly] = useState(false);
-      const [greenOnly, setGreenOnly] = useState(false);
+      <!-- Modal Footer Notes -->
+      <div class="px-5 py-2.5 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
+        <div class="flex items-center flex-wrap gap-4">
+          <span class="flex items-center gap-1.5">
+            <span class="w-3.5 h-1 bg-red-500 rounded inline-block"></span>
+            <span class="font-semibold text-gray-300">44 MA (Red Line)</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 bg-cyan-400 inline-block"></span>
+            <span>Pattern Trendlines (Cyan)</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 bg-cyan-400 inline-block border-b border-solid"></span>
+            <span>Entry Level</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed"></span>
+            <span>Target Level (1:3)</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed"></span>
+            <span>Stop Loss</span>
+          </span>
+        </div>
+        <div>
+          <a id="modalTvLink" href="#" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline flex items-center gap-1">
+            Open on TradingView ↗
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
 
-      // Table Sorting
-      const [sortField, setSortField] = useState("abs_distance");
-      const [sortAsc, setSortAsc] = useState(true);
+  <!-- Footer Disclaimer -->
+  <footer class="border-t border-gray-800 bg-[#0b0f19] py-3 px-5 text-center text-xs text-gray-500 mt-auto">
+    <p>For educational purposes only. Not investment advice.</p>
+    <p class="mt-0.5 text-[11px] text-gray-600">
+      Optimized for Render Free Tier • High Speed EOD Scanner Engine • Built for Indian Technical Traders
+    </p>
+  </footer>
 
-      // Modal Chart View & Fast Prefetch Cache (<5s loading)
-      const [selectedStock, setSelectedStock] = useState(null);
-      const [chartTf, setChartTf] = useState("daily");
-      const chartContainerRef = useRef(null);
-      const chartInstance = useRef(null);
-      const chartCacheRef = useRef(new Map());
+  <!-- ═════════════════════════════════════════════════════════════════════════ -->
+  <!-- Ultra-Fast Native JavaScript Application Logic (Zero Babel, Zero Lag)   -->
+  <!-- ═════════════════════════════════════════════════════════════════════════ -->
+  <script>
+    (function () {
+      // 4 Main Heading Sections: 'ascending', 'symmetrical', 'daily_ma', 'weekly_ma'
+      let activeSection = "ascending";
+      // Child Section: 'confirmed' or 'pre'
+      let activeChild = "confirmed";
 
-      // Hover prefetch for instantaneous chart opening
-      const prefetchChart = useCallback((sym, tf = "daily") => {
+      let currentIndex = "nifty500";
+      let modalTimeframe = "daily";
+      let currentStockForModal = null;
+      let chartInstance = null;
+      let chartCache = new Map();
+
+      // Data store partitioned by the 4 headings and their children
+      const dataStore = {
+        ascending: { confirmed: [], pre: [] },
+        symmetrical: { confirmed: [], pre: [] },
+        daily_ma: { confirmed: [], pre: [] },
+        weekly_ma: { confirmed: [], pre: [] }
+      };
+
+      let searchQuery = "";
+      let sortField = "distance_pct";
+      let sortAsc = true; // Lowest percentage first (1% first, 2% next, low to high)
+
+      // Formatting helpers
+      const fmt = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+      const fmtVol = (n) => {
+        if (!n) return "0";
+        if (n >= 10000000) return (n / 10000000).toFixed(2) + " Cr";
+        if (n >= 100000) return (n / 100000).toFixed(2) + " L";
+        if (n >= 1000) return (n / 1000).toFixed(1) + " K";
+        return n.toLocaleString("en-IN");
+      };
+
+      // Sparkline SVG generator
+      function generateSparklineSvg(points, isUp) {
+        if (!points || points.length < 2) return `<span class="text-gray-600">—</span>`;
+        const min = Math.min(...points);
+        const max = Math.max(...points);
+        const range = max - min || 1;
+        const width = 76;
+        const height = 20;
+        
+        let pathData = "";
+        for (let i = 0; i < points.length; i++) {
+          const x = (i / (points.length - 1)) * width;
+          const y = height - ((points[i] - min) / range) * (height - 4) - 2;
+          pathData += (i === 0 ? "M" : " L") + ` ${x.toFixed(1)} ${y.toFixed(1)}`;
+        }
+        const strokeColor = isUp ? "#10b981" : "#ef4444";
+        return `
+          <svg width="${width}" height="${height}" class="sparkline-svg inline-block">
+            <path d="${pathData}" class="sparkline-path" stroke="${strokeColor}" />
+          </svg>
+        `;
+      }
+
+      // Prefetch chart data on row hover
+      function prefetchChart(sym, tf = "daily") {
         if (!sym) return;
         const key = `${sym.toUpperCase()}_${tf}`;
-        if (chartCacheRef.current.has(key)) return;
+        if (chartCache.has(key)) return;
         fetch(`/api/chart/${sym}?tf=${tf}`)
           .then(res => res.json())
           .then(data => {
-            if (data && data.candles) {
-              chartCacheRef.current.set(key, data);
-            }
+            if (data && data.candles) chartCache.set(key, data);
           })
           .catch(() => {});
-      }, []);
+      }
 
-      // Fetch 44 MA Data
-      const fetch44MaData = async (forceRefresh = false) => {
-        setLoading(true);
+      // Load all 4 sections in parallel
+      async function loadAllData() {
+        const updateText = document.getElementById("lastUpdatedText");
+        updateText.textContent = "Scanning...";
+
         try {
-          const statuses = [];
-          if (statusTouch) statuses.push("touching");
-          if (statusAbove) statuses.push("above");
-          if (statusNearBelow) statuses.push("near below");
+          const [resTri, resDaily44, resWeekly44] = await Promise.all([
+            fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=daily`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=daily&min_pct=1.0&max_pct=7.0`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=weekly&min_pct=1.0&max_pct=7.0`).then(r => r.json()).catch(() => ({}))
+          ]);
 
-          const params = new URLSearchParams({
-            index: indexSelector,
-            max_above: maxAbove,
-            max_below: maxBelow,
-            min_price: minPrice,
-            min_weekly_vol: minWeeklyVol,
-            rising_only: risingOnly ? "1" : "0",
-            green_only: greenOnly ? "1" : "0",
-            statuses: statuses.join(","),
-            refresh: forceRefresh ? "1" : "0"
-          });
+          // 1. Ascending Triangle Split
+          const rawAsc = resTri.ascending || [];
+          dataStore.ascending.confirmed = resTri.ascending_confirmed || rawAsc.filter(x => x.status && (x.status.includes("Confirmed") || x.status.includes("Breakout") || x.status.includes("Retest")));
+          dataStore.ascending.pre = resTri.ascending_pre || rawAsc.filter(x => x.status && (x.status.includes("Watch") || x.status.includes("Pre")));
 
-          const res = await fetch(`/api/scanner/44ma?${params.toString()}`);
-          if (!res.ok) throw new Error("Failed to load 44 MA scanner data");
-          const data = await res.json();
-          setScannerData(data.results || { both: [], daily: [], weekly: [] });
-          setCounts(data.counts || { both: 0, daily: 0, weekly: 0 });
-          setLastUpdated(data.last_updated || new Date().toLocaleTimeString());
+          // 2. Symmetrical Triangle Split
+          const rawSymm = resTri.symmetrical || [];
+          dataStore.symmetrical.confirmed = resTri.symmetrical_confirmed || rawSymm.filter(x => x.status && (x.status.includes("Confirmed") || x.status.includes("Breakout")));
+          dataStore.symmetrical.pre = resTri.symmetrical_pre || rawSymm.filter(x => x.status && (x.status.includes("Watch") || x.status.includes("Pre")));
+
+          // 3. Daily MA Split
+          dataStore.daily_ma.confirmed = resDaily44.confirmed_breakouts || [];
+          dataStore.daily_ma.pre = resDaily44.pre_breakouts || [];
+
+          // 4. Weekly MA Split
+          dataStore.weekly_ma.confirmed = resWeekly44.confirmed_breakouts || [];
+          dataStore.weekly_ma.pre = resWeekly44.pre_breakouts || [];
+
+          // Update Main Heading Badges
+          document.getElementById("badge-main-asc").textContent = dataStore.ascending.confirmed.length + dataStore.ascending.pre.length;
+          document.getElementById("badge-main-symm").textContent = dataStore.symmetrical.confirmed.length + dataStore.symmetrical.pre.length;
+          document.getElementById("badge-main-daily").textContent = dataStore.daily_ma.confirmed.length + dataStore.daily_ma.pre.length;
+          document.getElementById("badge-main-weekly").textContent = dataStore.weekly_ma.confirmed.length + dataStore.weekly_ma.pre.length;
+
+          updateText.textContent = resTri.last_updated || new Date().toLocaleTimeString();
+
+          renderView();
         } catch (err) {
-          console.error("44 MA Scanner fetch error:", err);
-        } finally {
-          setLoading(false);
+          console.error("Error loading scanner data:", err);
+          updateText.textContent = "Error";
         }
-      };
+      }
 
-      // Fetch Triangles Data
-      const fetchTrianglesData = async () => {
-        try {
-          const res = await fetch(`/api/scanner/triangles?index=${indexSelector}&timeframe=daily`);
-          if (!res.ok) throw new Error("Failed to load triangle data");
-          const data = await res.json();
-          setTrianglesData({
-            ascending: data.ascending || [],
-            symmetrical: data.symmetrical || [],
-            confirmed_breakouts: data.confirmed_breakouts || [],
-            pre_breakouts: data.pre_breakouts || [],
-          });
-        } catch (err) {
-          console.error("Triangles fetch error:", err);
-        }
-      };
-
-      // Load data on filter change
-      useEffect(() => {
-        fetch44MaData();
-        fetchTrianglesData();
-      }, [indexSelector, maxAbove, maxBelow, statusTouch, statusAbove, statusNearBelow, minPrice, minWeeklyVol, risingOnly, greenOnly]);
-
-      // Filter and Sort helper
-      const sortItems = (items) => {
-        let filtered = [...items];
+      // Filter and sort items
+      function getProcessedList(list) {
+        let items = [...list];
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
-          filtered = filtered.filter(it => 
+          items = items.filter(it => 
             it.symbol.toLowerCase().includes(q) || 
             (it.company && it.company.toLowerCase().includes(q))
           );
         }
-        return filtered.sort((a, b) => {
+
+        items.sort((a, b) => {
           let valA = a[sortField];
           let valB = b[sortField];
+          // For distance sorting, use absolute magnitude so 1% shows first, then 2%, up to 7%
+          if (sortField === "distance_pct" || sortField === "abs_distance") {
+            valA = (a.distance_pct != null) ? Math.abs(a.distance_pct) : 0;
+            valB = (b.distance_pct != null) ? Math.abs(b.distance_pct) : 0;
+          }
           if (valA == null) valA = 0;
           if (valB == null) valB = 0;
           if (typeof valA === "string") {
@@ -250,44 +448,448 @@
           }
           return sortAsc ? valA - valB : valB - valA;
         });
-      };
 
-      const handleSort = (field) => {
+        return items;
+      }
+
+      // Render the Child Bar dynamically based on activeSection
+      function renderChildBar() {
+        const container = document.getElementById("childTabsContainer");
+        const sec = dataStore[activeSection];
+        const preCount = sec ? sec.pre.length : 0;
+        const confCount = sec ? sec.confirmed.length : 0;
+
+        let preLabel = "⏳ Pre-Breakout";
+        let confLabel = "🚀 Confirmed Breakout";
+        if (activeSection === "daily_ma") {
+          preLabel = "⏳ 44 Daily Pre-Breakout";
+          confLabel = "🚀 44 Daily Confirmed Breakout";
+        } else if (activeSection === "weekly_ma") {
+          preLabel = "⏳ 44 Weekly Pre-Breakout";
+          confLabel = "🚀 44 Weekly Confirmed Breakout";
+        }
+
+        const isConfActive = (activeChild === "confirmed");
+        const isPreActive = (activeChild === "pre");
+
+        container.innerHTML = `
+          <button id="btnChildConfirmed" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isConfActive ? 'bg-emerald-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
+            <span>${confLabel}</span>
+            <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isConfActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${confCount}</span>
+          </button>
+
+          <button id="btnChildPre" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isPreActive ? 'bg-amber-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
+            <span>${preLabel}</span>
+            <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isPreActive ? 'bg-amber-950 text-amber-300 border border-amber-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${preCount}</span>
+          </button>
+        `;
+
+        document.getElementById("btnChildConfirmed").addEventListener("click", () => {
+          activeChild = "confirmed";
+          renderView();
+        });
+
+        document.getElementById("btnChildPre").addEventListener("click", () => {
+          activeChild = "pre";
+          renderView();
+        });
+      }
+
+      // Sync active state of the 4 Main Heading Buttons
+      function syncMainHeadingStyles() {
+        document.querySelectorAll(".main-heading-btn").forEach(btn => {
+          const sec = btn.dataset.section;
+          if (sec === activeSection) {
+            btn.className = "main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-blue-950/60 border-blue-500/60 shadow-lg ring-1 ring-blue-500/30";
+            btn.querySelector("span.text-xs, span.text-sm").className = "text-xs sm:text-sm font-bold text-white flex items-center gap-1.5";
+          } else {
+            btn.className = "main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700";
+            btn.querySelector("span.text-xs, span.text-sm").className = "text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5";
+          }
+        });
+      }
+
+      // Main Render Function
+      function renderView() {
+        syncMainHeadingStyles();
+        renderChildBar();
+
+        const statsContainer = document.getElementById("statsCardsContainer");
+        const bannerDesc = document.getElementById("strategyDescription");
+        const countText = document.getElementById("matchCountText");
+
+        const rawList = (dataStore[activeSection] && dataStore[activeSection][activeChild]) || [];
+        const list = getProcessedList(rawList);
+        countText.textContent = list.length;
+
+        // ═════════════════════════════════════════════════════════════════════
+        // 1 & 2: ASCENDING OR SYMMETRICAL TRIANGLE SECTIONS
+        // ═════════════════════════════════════════════════════════════════════
+        if (activeSection === "ascending" || activeSection === "symmetrical") {
+          const patName = activeSection === "ascending" ? "Ascending Triangle" : "Symmetrical Triangle";
+          const isConf = (activeChild === "confirmed");
+
+          if (isConf) {
+            statsContainer.innerHTML = `
+              <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+                <div>
+                  <div class="text-[11px] text-emerald-400 font-medium">${patName} Confirmed</div>
+                  <div class="text-2xl font-bold font-mono text-emerald-300">${rawList.length}</div>
+                  <div class="text-[10px] text-gray-400">Triggered above resistance</div>
+                </div>
+                <span class="text-3xl text-emerald-400">🚀</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-blue-400 font-medium">Direct Breakout Entry</div>
+                  <div class="text-xl font-bold font-mono text-white">${rawList.filter(x => x.status && x.status.includes('Breakout')).length}</div>
+                  <div class="text-[10px] text-gray-400">Entry on expansion close</div>
+                </div>
+                <span class="text-2xl text-blue-400">⚡</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-purple-400 font-medium">Pullback / Retest Entry</div>
+                  <div class="text-xl font-bold font-mono text-white">${rawList.filter(x => x.status && x.status.includes('Retest')).length}</div>
+                  <div class="text-[10px] text-gray-400">Retesting broken level</div>
+                </div>
+                <span class="text-2xl text-purple-400">🔄</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-yellow-400 font-medium">Risk : Reward</div>
+                  <div class="text-xl font-bold font-mono text-yellow-400">1 : 3 Strict</div>
+                  <div class="text-[10px] text-gray-400">Target = Breakout + Height</div>
+                </div>
+                <span class="text-2xl text-yellow-400">🎯</span>
+              </div>
+            `;
+            bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${patName} — Confirmed Breakout:</span> Stocks that have closed firmly above resistance with volume expansion. Active direct / pullback entries with 1:3 profit target.`;
+          } else {
+            statsContainer.innerHTML = `
+              <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+                <div>
+                  <div class="text-[11px] text-amber-400 font-medium">${patName} Pre-Breakout</div>
+                  <div class="text-2xl font-bold font-mono text-amber-300">${rawList.length}</div>
+                  <div class="text-[10px] text-gray-400">Coiling tightly near apex</div>
+                </div>
+                <span class="text-3xl text-amber-400">⏳</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-blue-400 font-medium">Multiple Touches</div>
+                  <div class="text-xl font-bold font-mono text-white">2 - 4 Touches</div>
+                  <div class="text-[10px] text-gray-400">Tested boundary levels</div>
+                </div>
+                <span class="text-2xl text-blue-400">📍</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-emerald-400 font-medium">Proximity to Trigger</div>
+                  <div class="text-xl font-bold font-mono text-emerald-300">&lt; 2.5%</div>
+                  <div class="text-[10px] text-gray-400">Within striking distance</div>
+                </div>
+                <span class="text-2xl text-emerald-400">🎯</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-purple-400 font-medium">Anticipated Setup</div>
+                  <div class="text-xl font-bold font-mono text-white">Watchlist Alert</div>
+                  <div class="text-[10px] text-gray-400">Enter on breakout close</div>
+                </div>
+                <span class="text-2xl text-purple-400">🔔</span>
+              </div>
+            `;
+            bannerDesc.innerHTML = `<span class="text-amber-400 font-bold">${patName} — Pre-Breakout Watchlist:</span> Stocks consolidating inside the triangle pattern near the apex. Set alerts for breakout confirmation.`;
+          }
+
+          renderTriangleTable(list, isConf);
+          return;
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // 3 & 4: DAILY MA & WEEKLY MA SECTIONS
+        // ═════════════════════════════════════════════════════════════════════
+        if (activeSection === "daily_ma" || activeSection === "weekly_ma") {
+          const tfTitle = activeSection === "daily_ma" ? "Daily 44 MA" : "Weekly 44 MA";
+          const isConf = (activeChild === "confirmed");
+
+          if (isConf) {
+            const freshCount = rawList.filter(s => s.status && s.status.includes("Fresh")).length;
+            const nearCount = rawList.filter(s => s.status && s.status.includes("Near")).length;
+
+            statsContainer.innerHTML = `
+              <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+                <div>
+                  <div class="text-[11px] text-emerald-400 font-medium">${tfTitle} Confirmed</div>
+                  <div class="text-2xl font-bold font-mono text-emerald-300">${rawList.length}</div>
+                  <div class="text-[10px] text-gray-400">Close &ge; 44 MA (+1% to +7%)</div>
+                </div>
+                <span class="text-3xl text-emerald-400">🚀</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-emerald-400 font-medium">Distance Range</div>
+                  <div class="text-xl font-bold font-mono text-emerald-300">+1% to +7%</div>
+                  <div class="text-[10px] text-gray-400">Clearance without overextension</div>
+                </div>
+                <span class="text-2xl text-emerald-400">📏</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-blue-400 font-medium">Fresh Cross (${tfTitle})</div>
+                  <div class="text-xl font-bold font-mono text-white">${freshCount}</div>
+                  <div class="text-[10px] text-gray-400">Crossed 44 MA in last 1-2 bars</div>
+                </div>
+                <span class="text-2xl text-blue-400">⚡</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-yellow-400 font-medium">Risk : Reward</div>
+                  <div class="text-xl font-bold font-mono text-yellow-400">1 : 3 Strict</div>
+                  <div class="text-[10px] text-gray-400">Target = Entry + 3 × Risk</div>
+                </div>
+                <span class="text-2xl text-yellow-400">🏆</span>
+              </div>
+            `;
+            bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${tfTitle} — Confirmed Breakout:</span> Showing stocks strictly between <b class="text-emerald-300 font-mono">+1.0% and +7.0%</b> above 44 MA with green continuation candles. Stop Loss below 44 MA / breakout low, 1:3 profit target.`;
+          } else {
+            const touchCount = rawList.filter(s => s.status && s.status.includes("Touching")).length;
+
+            statsContainer.innerHTML = `
+              <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+                <div>
+                  <div class="text-[11px] text-amber-400 font-medium">${tfTitle} Pre-Breakout</div>
+                  <div class="text-2xl font-bold font-mono text-amber-300">${rawList.length}</div>
+                  <div class="text-[10px] text-gray-400">Close &lt; 44 MA (-1% to -7%)</div>
+                </div>
+                <span class="text-3xl text-amber-400">⏳</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-amber-400 font-medium">Distance Range</div>
+                  <div class="text-xl font-bold font-mono text-amber-300">-1% to -7%</div>
+                  <div class="text-[10px] text-gray-400">Same 1% to 7% distance band</div>
+                </div>
+                <span class="text-2xl text-amber-400">📏</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-blue-400 font-medium">44 MA Touching</div>
+                  <div class="text-xl font-bold font-mono text-white">${touchCount}</div>
+                  <div class="text-[10px] text-gray-400">Low ≤ 44 MA ≤ High</div>
+                </div>
+                <span class="text-2xl text-blue-400">📍</span>
+              </div>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div class="text-[11px] text-emerald-400 font-medium">Anticipated Trigger</div>
+                  <div class="text-xl font-bold font-mono text-emerald-300">44 MA + 0.2%</div>
+                  <div class="text-[10px] text-gray-400">Buy immediately on cross</div>
+                </div>
+                <span class="text-2xl text-emerald-400">🎯</span>
+              </div>
+            `;
+            bannerDesc.innerHTML = `<span class="text-amber-400 font-bold">${tfTitle} — Pre-Breakout Watchlist:</span> Showing stocks strictly between <b class="text-amber-300 font-mono">-1.0% and -7.0%</b> below 44 MA. Set alerts for an imminent breakout push above 44 MA.`;
+          }
+
+          render44MaTable(list, isConf);
+          return;
+        }
+      }
+
+      // Render Triangle Table (Ascending / Symmetrical)
+      function renderTriangleTable(list, isConf) {
+        const thead = document.getElementById("tableHead");
+        const tbody = document.getElementById("tableBody");
+
+        thead.innerHTML = `
+          <tr class="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
+            <th class="py-3 px-4 cursor-pointer hover:text-white" onclick="changeSort('symbol')">Symbol</th>
+            <th class="py-3 px-3">Company</th>
+            <th class="py-3 px-3 text-center">Pattern</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('cmp')">CMP (₹)</th>
+            <th class="py-3 px-3 text-right text-red-400 font-semibold">Resistance</th>
+            <th class="py-3 px-3 text-right text-emerald-400 font-semibold">Support</th>
+            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">${isConf ? 'Buy Entry' : 'Potential Entry'}</th>
+            <th class="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
+            <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
+            <th class="py-3 px-3 text-center">Status</th>
+            <th class="py-3 px-3 text-center">Touches</th>
+            <th class="py-3 px-3 text-center">Trend (12B)</th>
+            <th class="py-3 px-4 text-center">Chart Action</th>
+          </tr>
+        `;
+
+        if (list.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-gray-500 font-sans">No matching stocks found.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = list.map(item => {
+          const isUp = (item.cmp >= (item.resistance_level || 0));
+          const statusStyle = isConf 
+            ? "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 shadow-sm" 
+            : "bg-amber-900/40 text-amber-300 border-amber-500/40";
+
+          return `
+            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', 'daily')" onmouseenter="prefetchChart('${item.symbol}', 'daily')">
+              <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
+              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[140px]">${item.company}</td>
+              <td class="py-3 px-3 text-center font-sans">
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${item.pattern === 'Ascending Triangle' ? 'bg-blue-950/60 text-blue-300 border-blue-500/40' : 'bg-purple-950/60 text-purple-300 border-purple-500/40'}">
+                  ${item.pattern}
+                </span>
+              </td>
+              <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
+              <td class="py-3 px-3 text-right text-red-400 font-semibold font-mono">₹${fmt(item.resistance_level)}</td>
+              <td class="py-3 px-3 text-right text-emerald-400 font-mono">₹${fmt(item.support_level)}</td>
+              <td class="py-3 px-3 text-right text-cyan-400 font-mono font-semibold">₹${fmt(item.buy_price)}</td>
+              <td class="py-3 px-3 text-right text-rose-400 font-mono">₹${fmt(item.stop_loss)}</td>
+              <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
+              <td class="py-3 px-3 text-center font-sans">
+                <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusStyle}">
+                  ${item.status}
+                </span>
+              </td>
+              <td class="py-3 px-3 text-center text-gray-300">${item.touches || 2} touches</td>
+              <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
+              <td class="py-3 px-4 text-center font-sans">
+                <button class="px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1 mx-auto ${isConf ? 'bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border-emerald-500/40' : 'bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border-amber-500/40'}">
+                  <span>${isConf ? 'Draw Breakout 🚀' : 'Draw Pattern 📐'}</span>
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      // Render 44 MA Table (Daily MA / Weekly MA)
+      function render44MaTable(list, isConf) {
+        const thead = document.getElementById("tableHead");
+        const tbody = document.getElementById("tableBody");
+        const tf = (activeSection === "weekly_ma") ? "weekly" : "daily";
+
+        thead.innerHTML = `
+          <tr class="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
+            <th class="py-3 px-4 cursor-pointer hover:text-white" onclick="changeSort('symbol')">Symbol</th>
+            <th class="py-3 px-3">Company</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('cmp')">CMP (₹)</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('ma44')">44 MA (₹)</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('distance_pct')">Distance %</th>
+            <th class="py-3 px-3 text-center">Status / Signal</th>
+            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">${isConf ? 'Buy Entry' : 'Anticipated Entry'}</th>
+            <th class="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
+            <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
+            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('day_change_pct')">Day Chg %</th>
+            <th class="py-3 px-3 text-center">Trend (12B)</th>
+            <th class="py-3 px-4 text-center">Chart Action</th>
+          </tr>
+        `;
+
+        if (list.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="12" class="py-12 text-center text-gray-500 font-sans">No matching stocks found.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = list.map(item => {
+          const isUp = (item.day_change_pct || 0) >= 0;
+          const isTouching = item.status && item.status.includes("Touching");
+          const isFresh = item.status && item.status.includes("Fresh");
+
+          let badgeClass = "bg-gray-800 text-gray-300 border-gray-700";
+          if (isFresh) badgeClass = "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 font-bold";
+          else if (isTouching) badgeClass = "bg-blue-900/50 text-blue-300 border-blue-500/40";
+          else if (item.status && item.status.includes("Near")) badgeClass = "bg-amber-900/40 text-amber-300 border-amber-500/40";
+
+          return `
+            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${tf}')" onmouseenter="prefetchChart('${item.symbol}', '${tf}')">
+              <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
+              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[140px]">${item.company}</td>
+              <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
+              <td class="py-3 px-3 text-right text-red-400 font-semibold font-mono">₹${fmt(item.ma44)}</td>
+              <td class="py-3 px-3 text-right font-bold ${item.distance_pct >= 0 ? 'text-emerald-400' : 'text-amber-400'}">${item.distance_pct > 0 ? '+' : ''}${Number(item.distance_pct).toFixed(2)}%</td>
+              <td class="py-3 px-3 text-center font-sans">
+                <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-semibold border ${badgeClass}">
+                  ${isFresh ? '🚀 ' : (isTouching ? '📍 ' : '')}${item.status}
+                </span>
+              </td>
+              <td class="py-3 px-3 text-right text-cyan-400 font-semibold font-mono">₹${fmt(item.buy_price)}</td>
+              <td class="py-3 px-3 text-right text-rose-400 font-mono">₹${fmt(item.stop_loss)}</td>
+              <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
+              <td class="py-3 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}">${isUp ? '+' : ''}${item.day_change_pct}%</td>
+              <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
+              <td class="py-3 px-4 text-center font-sans">
+                <button class="px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1 mx-auto ${isConf ? 'bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border-emerald-500/40' : 'bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border-amber-500/40'}">
+                  <span>${isConf ? 'Draw Breakout 🚀' : 'Draw 44 MA 📐'}</span>
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      // Sorting handler
+      window.changeSort = function (field) {
         if (sortField === field) {
-          setSortAsc(!sortAsc);
+          sortAsc = !sortAsc;
         } else {
-          setSortField(field);
-          setSortAsc(true);
+          sortField = field;
+          sortAsc = true; // Default ascending (lowest percentage first: 1% first, then 2%, etc.)
         }
+        renderView();
       };
 
-      // Status badge styling
-      const getStatusBadge = (status) => {
-        if (status === "Touching") {
-          return "bg-blue-900/40 text-blue-300 border-blue-500/40";
-        } else if (status && status.includes("Above")) {
-          return "bg-emerald-900/40 text-emerald-300 border-emerald-500/40";
-        } else if (status === "Near Below") {
-          return "bg-amber-900/40 text-amber-300 border-amber-500/40";
-        } else if (status && status.includes("Confirmed")) {
-          return "bg-emerald-900/50 text-emerald-300 border-emerald-500/50 shadow-sm";
-        } else if (status && status.includes("Watch")) {
-          return "bg-amber-900/40 text-amber-300 border-amber-500/40";
+      // Open interactive TradingView Lightweight Chart in Modal
+      window.openChartModal = async function (symbol, tf = null) {
+        currentStockForModal = symbol;
+        if (tf) modalTimeframe = tf;
+        else if (activeSection === "weekly_ma") modalTimeframe = "weekly";
+        else modalTimeframe = "daily";
+
+        // Update modal timeframe buttons
+        if (modalTimeframe === "weekly") {
+          document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
+          document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
+        } else {
+          document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
+          document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
         }
-        return "bg-gray-800 text-gray-300 border-gray-700";
+
+        const modal = document.getElementById("chartModal");
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+
+        document.getElementById("modalSymbol").textContent = symbol;
+        document.getElementById("modalTvLink").href = `https://in.tradingview.com/chart/?symbol=NSE:${symbol}`;
+
+        renderChart(symbol, modalTimeframe);
       };
 
-      // Render TradingView Lightweight Chart in Modal with Pattern & Breakout Marker
-      useEffect(() => {
-        if (!selectedStock || !chartContainerRef.current) return;
+      // Close modal
+      function closeModal() {
+        const modal = document.getElementById("chartModal");
+        modal.classList.add("hidden");
+        modal.classList.remove("flex");
+        if (chartInstance) {
+          chartInstance.remove();
+          chartInstance = null;
+        }
+      }
 
-        let isMounted = true;
-        const container = chartContainerRef.current;
+      // Render chart canvas
+      async function renderChart(symbol, tf) {
+        const container = document.getElementById("chartContainer");
         container.innerHTML = "";
+
+        if (chartInstance) {
+          chartInstance.remove();
+          chartInstance = null;
+        }
 
         const chart = LightweightCharts.createChart(container, {
           width: container.clientWidth,
-          height: 480,
+          height: 450,
           layout: {
             background: { color: "#0b0f19" },
             textColor: "#9ca3af",
@@ -304,7 +906,7 @@
             borderColor: "#374151",
           },
         });
-        chartInstance.current = chart;
+        chartInstance = chart;
 
         const candleSeries = chart.addCandlestickSeries({
           upColor: "#10b981",
@@ -314,1121 +916,152 @@
           wickDownColor: "#ef4444",
         });
 
+        // 44 MA Line (Red Line)
         const ma44Series = chart.addLineSeries({
-          color: "#3b82f6",
+          color: "#ef4444",
           lineWidth: 2,
-          title: "44 MA",
+          title: "44 MA (Red)",
         });
 
-        // Upper & Lower Pattern Lines Series
+        // Pattern Trendlines (Cyan)
         const upperTrendSeries = chart.addLineSeries({
-          color: "#38bdf8", // bright cyan matching chart diagrams
+          color: "#38bdf8",
           lineWidth: 2,
-          title: "Upper Resistance",
+          title: "Resistance",
         });
-
         const lowerTrendSeries = chart.addLineSeries({
           color: "#38bdf8",
           lineWidth: 2,
-          title: "Lower Support",
+          title: "Support",
         });
 
-        const applyChartPayload = (data) => {
-          if (!isMounted || !data || !data.candles) return;
-
-          candleSeries.setData(data.candles);
-          if (data.ma44_line && data.ma44_line.length > 0) {
-            ma44Series.setData(data.ma44_line);
+        // Fetch chart data (<100ms with cache)
+        const key = `${symbol.toUpperCase()}_${tf}`;
+        let data = chartCache.get(key);
+        if (!data) {
+          try {
+            const res = await fetch(`/api/chart/${symbol}?tf=${tf}`);
+            data = await res.json();
+            chartCache.set(key, data);
+          } catch (e) {
+            console.error("Failed to load chart data:", e);
+            return;
           }
-
-          // Check if pattern is present (either ascending or symmetrical)
-          const pat = data.ascending_pattern || data.symmetrical_pattern || selectedStock;
-          
-          if (pat && pat.upper_line_points && pat.upper_line_points.length > 0) {
-            upperTrendSeries.setData(pat.upper_line_points);
-          }
-          if (pat && pat.lower_line_points && pat.lower_line_points.length > 0) {
-            lowerTrendSeries.setData(pat.lower_line_points);
-          }
-
-          // Price Lines: Entry, Target, Stop Loss (Educational R:R)
-          if (pat && pat.buy_price) {
-            candleSeries.createPriceLine({
-              price: pat.buy_price,
-              color: "#06b6d4",
-              lineWidth: 2,
-              lineStyle: LightweightCharts.LineStyle.Solid,
-              axisLabelVisible: true,
-              title: `ENTRY: ₹${pat.buy_price}`,
-            });
-          }
-          if (pat && pat.target) {
-            candleSeries.createPriceLine({
-              price: pat.target,
-              color: "#10b981",
-              lineWidth: 2,
-              lineStyle: LightweightCharts.LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: `TARGET (1:3): ₹${pat.target}`,
-            });
-          }
-          if (pat && pat.stop_loss) {
-            candleSeries.createPriceLine({
-              price: pat.stop_loss,
-              color: "#ef4444",
-              lineWidth: 2,
-              lineStyle: LightweightCharts.LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: `STOP LOSS: ₹${pat.stop_loss}`,
-            });
-          }
-
-          // BREAKOUT CANDLE MARKER on chart!
-          const markers = [];
-          if (pat && pat.breakout_date) {
-            markers.push({
-              time: pat.breakout_date,
-              position: "aboveBar",
-              color: "#10b981",
-              shape: "arrowDown",
-              text: `BREAKOUT CANDLE 🚀 (${pat.status || 'Confirmed'})`,
-              size: 2,
-            });
-          } else if (data.status_44ma && data.candles.length > 0) {
-            // 44 MA touch or zone marker on latest bar
-            const lastBar = data.candles[data.candles.length - 1];
-            markers.push({
-              time: lastBar.time,
-              position: data.status_44ma === "Near Below" ? "belowBar" : "aboveBar",
-              color: data.status_44ma === "Touching" ? "#3b82f6" : (data.status_44ma.includes("Above") ? "#10b981" : "#f59e0b"),
-              shape: data.status_44ma === "Near Below" ? "arrowUp" : "arrowDown",
-              text: `44 MA: ${data.status_44ma}`,
-              size: 2,
-            });
-          }
-
-          if (markers.length > 0) {
-            candleSeries.setMarkers(markers);
-          }
-
-          chart.timeScale().fitContent();
-        };
-
-        const cacheKey = `${selectedStock.symbol.toUpperCase()}_${chartTf}`;
-        if (chartCacheRef.current.has(cacheKey)) {
-          // Instant load from RAM cache (<0.01s)
-          applyChartPayload(chartCacheRef.current.get(cacheKey));
-        } else {
-          // Fetch from API (<1s)
-          fetch(`/api/chart/${selectedStock.symbol}?tf=${chartTf}`)
-            .then(res => res.json())
-            .then(data => {
-              chartCacheRef.current.set(cacheKey, data);
-              applyChartPayload(data);
-            })
-            .catch(err => console.error("Chart load err:", err));
         }
 
-        const handleResize = () => {
-          if (chartInstance.current && container) {
-            chartInstance.current.applyOptions({ width: container.clientWidth });
-          }
-        };
-        window.addEventListener("resize", handleResize);
+        if (!data || !data.candles || data.candles.length === 0) return;
 
-        return () => {
-          isMounted = false;
-          window.removeEventListener("resize", handleResize);
-          if (chartInstance.current) {
-            chartInstance.current.remove();
-            chartInstance.current = null;
-          }
-        };
-      }, [selectedStock, chartTf]);
+        candleSeries.setData(data.candles);
+        if (data.ma44_line && data.ma44_line.length > 0) {
+          ma44Series.setData(data.ma44_line);
+        }
 
-      // Sub-lists for Triangles: Separate Confirmed vs Pre-Breakout
-      const ascConfirmed = useMemo(() => sortItems(trianglesData.ascending.filter(x => x.status && x.status.includes("Confirmed"))), [trianglesData.ascending, searchQuery, sortField, sortAsc]);
-      const ascPreBreakout = useMemo(() => sortItems(trianglesData.ascending.filter(x => x.status && x.status.includes("Watch"))), [trianglesData.ascending, searchQuery, sortField, sortAsc]);
+        // Header info
+        document.getElementById("modalCompany").textContent = data.company || "";
+        document.getElementById("modalCmp").textContent = `₹${fmt(data.cmp)}`;
+        document.getElementById("modalMaBadge").textContent = `44 MA: ₹${fmt(data.current_ma44)} (${data.distance_pct > 0 ? '+' : ''}${data.distance_pct}%)`;
 
-      const symmConfirmed = useMemo(() => sortItems(trianglesData.symmetrical.filter(x => x.status && x.status.includes("Confirmed"))), [trianglesData.symmetrical, searchQuery, sortField, sortAsc]);
-      const symmPreBreakout = useMemo(() => sortItems(trianglesData.symmetrical.filter(x => x.status && x.status.includes("Watch"))), [trianglesData.symmetrical, searchQuery, sortField, sortAsc]);
+        const evalBreakout = data.eval_44_breakout;
+        const pat = (activeSection === "ascending" ? data.ascending_pattern : (activeSection === "symmetrical" ? data.symmetrical_pattern : evalBreakout)) || evalBreakout || data.above_44ma || data.ascending_pattern || data.symmetrical_pattern;
+        const statusText = pat ? `${pat.pattern || '44 MA'} • ${pat.status}` : (data.status_44ma || "Active");
+        document.getElementById("modalStatusBadge").textContent = statusText;
 
-      const allConfirmed = useMemo(() => sortItems(trianglesData.confirmed_breakouts), [trianglesData.confirmed_breakouts, searchQuery, sortField, sortAsc]);
-      const allPreBreakouts = useMemo(() => sortItems(trianglesData.pre_breakouts), [trianglesData.pre_breakouts, searchQuery, sortField, sortAsc]);
+        // Trade plan
+        if (pat && pat.buy_price) {
+          document.getElementById("planEntry").textContent = `₹${fmt(pat.buy_price)}`;
+          document.getElementById("planTarget").textContent = `₹${fmt(pat.target)}`;
+          document.getElementById("planStopLoss").textContent = `₹${fmt(pat.stop_loss)}`;
 
-      // Sub-lists for 44 MA
-      const bothList = useMemo(() => sortItems(scannerData.both), [scannerData.both, searchQuery, sortField, sortAsc]);
-      const dailyList = useMemo(() => sortItems(scannerData.daily), [scannerData.daily, searchQuery, sortField, sortAsc]);
-      const weeklyList = useMemo(() => sortItems(scannerData.weekly), [scannerData.weekly, searchQuery, sortField, sortAsc]);
+          candleSeries.createPriceLine({ price: pat.buy_price, color: "#06b6d4", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: `ENTRY: ₹${pat.buy_price}` });
+          candleSeries.createPriceLine({ price: pat.target, color: "#10b981", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `TARGET: ₹${pat.target}` });
+          candleSeries.createPriceLine({ price: pat.stop_loss, color: "#ef4444", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `STOP LOSS: ₹${pat.stop_loss}` });
+        }
 
-      // Category counts for Daily alerts
-      const dailyTouchingCount = useMemo(() => scannerData.daily.filter(x => x.status === "Touching").length, [scannerData.daily]);
-      const dailyAboveCount = useMemo(() => scannerData.daily.filter(x => x.status && x.status.includes("Above")).length, [scannerData.daily]);
-      const dailyNearBelowCount = useMemo(() => scannerData.daily.filter(x => x.status === "Near Below").length, [scannerData.daily]);
+        // Trendline data
+        if (pat && pat.upper_line_points && pat.upper_line_points.length > 0) upperTrendSeries.setData(pat.upper_line_points);
+        if (pat && pat.lower_line_points && pat.lower_line_points.length > 0) lowerTrendSeries.setData(pat.lower_line_points);
 
-      // Category counts for Weekly alerts
-      const weeklyTouchingCount = useMemo(() => scannerData.weekly.filter(x => x.status === "Touching").length, [scannerData.weekly]);
-      const weeklyAboveCount = useMemo(() => scannerData.weekly.filter(x => x.status && x.status.includes("Above")).length, [scannerData.weekly]);
-      const weeklyNearBelowCount = useMemo(() => scannerData.weekly.filter(x => x.status === "Near Below").length, [scannerData.weekly]);
+        // Breakout Marker on candle
+        const markers = [];
+        if (pat && pat.breakout_date) {
+          const isPre = (activeChild === "pre") || (pat.type === "pre_breakout") || (pat.pattern && pat.pattern.includes("Pre-Breakout"));
+          markers.push({
+            time: pat.breakout_date,
+            position: isPre ? "belowBar" : "aboveBar",
+            color: isPre ? "#f59e0b" : "#10b981",
+            shape: isPre ? "arrowUp" : "arrowDown",
+            text: isPre ? "COILING / PRE-BREAKOUT ⏳" : "BREAKOUT CONFIRMED 🚀",
+            size: 2,
+          });
+        }
+        if (markers.length > 0) {
+          candleSeries.setMarkers(markers);
+        }
 
-      return (
-        <div className="flex flex-col min-h-screen">
-          {/* Header */}
-          <header className="border-b border-gray-800 bg-[#0f172a] px-5 py-3 sticky top-0 z-30 shadow-md">
-            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold font-mono text-xl shadow-inner">
-                  44
-                </div>
-                <div>
-                  <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-                    44 MA Touch & Near Scanner
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-normal">
-                      NSE Indian Markets
-                    </span>
-                  </h1>
-                  <p className="text-xs text-gray-400">
-                    44 MA Touch & Near • Ascending & Symmetrical Triangles • 1:3 R:R Breakouts
-                  </p>
-                </div>
-              </div>
+        chart.timeScale().fitContent();
+      }
 
-              {/* Header Right Controls */}
-              <div className="flex items-center flex-wrap gap-3">
-                {/* Index Selector Dropdown */}
-                <div className="flex items-center space-x-1.5 bg-gray-900 border border-gray-700/60 rounded-lg px-2.5 py-1 text-xs">
-                  <span className="text-gray-400 font-medium">Universe:</span>
-                  <select 
-                    value={indexSelector} 
-                    onChange={(e) => setIndexSelector(e.target.value)}
-                    className="bg-transparent text-white font-semibold focus:outline-none cursor-pointer"
-                  >
-                    <option value="nifty500" className="bg-gray-900">Nifty 500 (Full)</option>
-                    <option value="nifty100" className="bg-gray-900">Nifty 100 (Large)</option>
-                    <option value="nifty50" className="bg-gray-900">Nifty 50 (Core)</option>
-                  </select>
-                </div>
+      // Event Listeners for the 4 Main Headings
+      document.getElementById("mainHeadingsContainer").addEventListener("click", (e) => {
+        const btn = e.target.closest(".main-heading-btn");
+        if (!btn) return;
+        const sec = btn.dataset.section;
+        if (!sec || sec === activeSection) return;
 
-                {/* CSV Export Button */}
-                <a 
-                  href={`/api/export/csv?tab=${activeTab}&index=${indexSelector}&max_above=${maxAbove}&max_below=${maxBelow}`}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 transition"
-                  title="Export results to CSV"
-                >
-                  <span>⬇ Export CSV</span>
-                </a>
+        activeSection = sec;
+        renderView();
+      });
 
-                {/* Refresh Button */}
-                <button 
-                  onClick={() => { fetch44MaData(true); fetchTrianglesData(); }} 
-                  disabled={loading}
-                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm transition disabled:opacity-50"
-                >
-                  <span>{loading ? "Scanning..." : "⟳ Scan Live"}</span>
-                </button>
-              </div>
-            </div>
-          </header>
+      document.getElementById("searchBox").addEventListener("input", (e) => {
+        searchQuery = e.target.value;
+        renderView();
+      });
 
-          {/* Subheader Status Banner */}
-          <div className="bg-[#111827]/70 border-b border-gray-800/80 px-5 py-2 text-xs text-gray-400">
-            <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>EOD Cached & Refreshed after 4:00 PM IST</span>
-                </span>
-                <span>•</span>
-                <span>Last Updated: <b className="text-gray-300 font-mono">{lastUpdated || "Live"}</b></span>
-              </div>
-              <div className="text-gray-400 hidden sm:block">
-                Touch: Low ≤ 44MA ≤ High • Above Zone: 0 to +{maxAbove}% • Near Below: 0 to -{maxBelow}%
-              </div>
-            </div>
-          </div>
+      document.getElementById("indexSelector").addEventListener("change", (e) => {
+        currentIndex = e.target.value;
+        loadAllData();
+      });
 
-          {/* Main Layout: Sidebar Filters + Results Content */}
-          <div className="max-w-7xl mx-auto w-full px-4 py-5 flex-1 flex flex-col lg:flex-row gap-6">
-            
-            {/* SIDEBAR FILTERS (All User Adjustable) */}
-            <aside className="w-full lg:w-72 flex-shrink-0 bg-gray-900/90 border border-gray-800 rounded-xl p-4 flex flex-col gap-5 shadow-lg h-fit">
-              <div className="flex items-center justify-between border-b border-gray-800 pb-2.5">
-                <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  <span>⚙</span> Screener Filters
-                </h2>
-                <button 
-                  onClick={() => {
-                    setMaxAbove(2.0);
-                    setMaxBelow(3.0);
-                    setStatusTouch(true);
-                    setStatusAbove(true);
-                    setStatusNearBelow(true);
-                    setMinPrice(0);
-                    setMinWeeklyVol(100000);
-                    setRisingOnly(false);
-                    setGreenOnly(false);
-                  }}
-                  className="text-[11px] text-blue-400 hover:underline"
-                >
-                  Reset Defaults
-                </button>
-              </div>
+      document.getElementById("btnRefresh").addEventListener("click", () => {
+        loadAllData();
+      });
 
-              {/* Slider 1: Max Above MA44 (0.5% - 5%) */}
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-gray-300 font-medium">Max Above MA44 (+A)</span>
-                  <span className="font-mono text-emerald-400 font-bold">+{maxAbove.toFixed(1)}%</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="0.5" 
-                  max="5.0" 
-                  step="0.1" 
-                  value={maxAbove}
-                  onChange={(e) => setMaxAbove(parseFloat(e.target.value))}
-                  className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-gray-700 rounded-lg"
-                />
-                <span className="text-[10px] text-gray-500">Excludes stocks &gt; {maxAbove}% above MA44</span>
-              </div>
+      document.getElementById("btnExportCsv").addEventListener("click", () => {
+        let exportTab = `${activeSection}_${activeChild}`;
+        if (activeSection === "daily_ma") exportTab = `daily_${activeChild}`;
+        if (activeSection === "weekly_ma") exportTab = `weekly_${activeChild}`;
+        window.location.href = `/api/export/csv?tab=${exportTab}&index=${currentIndex}`;
+      });
 
-              {/* Slider 2: Max Below MA44 (0.5% - 5%) */}
-              <div>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-gray-300 font-medium">Max Below MA44 (-B)</span>
-                  <span className="font-mono text-amber-400 font-bold">-{maxBelow.toFixed(1)}%</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="0.5" 
-                  max="5.0" 
-                  step="0.1" 
-                  value={maxBelow}
-                  onChange={(e) => setMaxBelow(parseFloat(e.target.value))}
-                  className="w-full accent-amber-500 cursor-pointer h-1.5 bg-gray-700 rounded-lg"
-                />
-                <span className="text-[10px] text-gray-500">Qualifies down to -{maxBelow}% below MA44</span>
-              </div>
+      document.getElementById("btnCloseModal").addEventListener("click", closeModal);
+      document.getElementById("chartModal").addEventListener("click", (e) => {
+        if (e.target.id === "chartModal") closeModal();
+      });
 
-              {/* Status Checkboxes */}
-              <div className="border-t border-gray-800 pt-3">
-                <span className="text-xs font-semibold text-gray-300 block mb-2">Status Qualifications:</span>
-                <div className="flex flex-col gap-2 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input 
-                      type="checkbox" 
-                      checked={statusTouch} 
-                      onChange={(e) => setStatusTouch(e.target.checked)}
-                      className="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-0"
-                    />
-                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-blue-900/40 text-blue-300 border border-blue-500/30">
-                      Touching
-                    </span>
-                    <span className="text-gray-400 text-[11px]">(Low ≤ MA ≤ High)</span>
-                  </label>
+      document.getElementById("btnModalTfDaily").addEventListener("click", () => {
+        modalTimeframe = "daily";
+        document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
+        document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
+        if (currentStockForModal) renderChart(currentStockForModal, "daily");
+      });
 
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input 
-                      type="checkbox" 
-                      checked={statusAbove} 
-                      onChange={(e) => setStatusAbove(e.target.checked)}
-                      className="rounded bg-gray-800 border-gray-700 text-emerald-500 focus:ring-0"
-                    />
-                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-900/40 text-emerald-300 border border-emerald-500/30">
-                      Above (0-{maxAbove}%)
-                    </span>
-                  </label>
+      document.getElementById("btnModalTfWeekly").addEventListener("click", () => {
+        modalTimeframe = "weekly";
+        document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
+        document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
+        if (currentStockForModal) renderChart(currentStockForModal, "weekly");
+      });
 
-                  <label className="flex items-center gap-2 cursor-pointer hover:text-white">
-                    <input 
-                      type="checkbox" 
-                      checked={statusNearBelow} 
-                      onChange={(e) => setStatusNearBelow(e.target.checked)}
-                      className="rounded bg-gray-800 border-gray-700 text-amber-500 focus:ring-0"
-                    />
-                    <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-900/40 text-amber-300 border border-amber-500/30">
-                      Near Below (-{maxBelow}%)
-                    </span>
-                  </label>
-                </div>
-              </div>
+      window.addEventListener("resize", () => {
+        if (chartInstance) {
+          const container = document.getElementById("chartContainer");
+          chartInstance.applyOptions({ width: container.clientWidth });
+        }
+      });
 
-              {/* Minimum Weekly Volume */}
-              <div className="border-t border-gray-800 pt-3">
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-gray-300 font-medium">Min Weekly Volume</span>
-                  <span className="font-mono text-gray-200">{fmtVol(minWeeklyVol)}</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="1000000" 
-                  step="50000" 
-                  value={minWeeklyVol}
-                  onChange={(e) => setMinWeeklyVol(parseInt(e.target.value))}
-                  className="w-full accent-blue-500 cursor-pointer h-1.5 bg-gray-700 rounded-lg"
-                />
-              </div>
-
-              {/* Toggles: MA44 Rising & Green Candle */}
-              <div className="border-t border-gray-800 pt-3 flex flex-col gap-2.5">
-                <label className="flex items-center justify-between text-xs cursor-pointer">
-                  <span className="text-gray-300">MA44 Rising Only</span>
-                  <input 
-                    type="checkbox" 
-                    checked={risingOnly} 
-                    onChange={(e) => setRisingOnly(e.target.checked)}
-                    className="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-0"
-                  />
-                </label>
-                <span className="text-[10px] text-gray-500">Today's MA44 &gt; MA44 5 bars ago</span>
-
-                <label className="flex items-center justify-between text-xs cursor-pointer pt-1">
-                  <span className="text-gray-300">Green Candle Only</span>
-                  <input 
-                    type="checkbox" 
-                    checked={greenOnly} 
-                    onChange={(e) => setGreenOnly(e.target.checked)}
-                    className="rounded bg-gray-800 border-gray-700 text-emerald-500 focus:ring-0"
-                  />
-                </label>
-                <span className="text-[10px] text-gray-500">Last Close &gt; Last Open</span>
-              </div>
-            </aside>
-
-            {/* MAIN CONTENT AREA */}
-            <main className="flex-1 flex flex-col gap-4">
-              
-              {/* TABS (Both shown first as highest priority) */}
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => setActiveTab("both")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "both"
-                        ? "bg-blue-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>⭐ 44 MA Both (Confluence)</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-blue-900/80 text-[11px] font-mono">
-                      {counts.both}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab("daily")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "daily"
-                        ? "bg-blue-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>📅 Daily 44 MA</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-gray-700 text-[11px] font-mono">
-                      {counts.daily}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab("weekly")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "weekly"
-                        ? "bg-blue-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>📆 Weekly 44 MA</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-gray-700 text-[11px] font-mono">
-                      {counts.weekly}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab("ascending")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "ascending"
-                        ? "bg-emerald-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>📐 Ascending Triangle (1:3 R:R)</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-emerald-900/60 text-emerald-300 text-[11px] font-mono">
-                      {trianglesData.ascending.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab("symmetrical")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "symmetrical"
-                        ? "bg-purple-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>📐 Symmetrical Triangle (Coil)</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-purple-900/60 text-purple-300 text-[11px] font-mono">
-                      {trianglesData.symmetrical.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab("breakout_hub")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "breakout_hub"
-                        ? "bg-cyan-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>⚡ Breakouts vs Watchlist Hub</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-cyan-900/60 text-cyan-300 text-[11px] font-mono">
-                      {trianglesData.confirmed_breakouts.length + trianglesData.pre_breakouts.length}
-                    </span>
-                  </button>
-                </div>
-
-                {/* Search Box */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Search stock symbol..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-48 sm:w-56"
-                  />
-                  {searchQuery && (
-                    <button 
-                      onClick={() => setSearchQuery("")}
-                      className="absolute right-2 top-1.5 text-gray-500 hover:text-gray-300 text-xs"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* ─────────────────────────────────────────────────────────── */}
-              {/* 1. SEPARATE 44 MA DAILY ALERT SECTION */}
-              {/* ─────────────────────────────────────────────────────────── */}
-              {activeTab === "daily" && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-blue-400 font-medium">Daily Touching Alerts</div>
-                      <div className="text-xl font-bold font-mono text-blue-300">{dailyTouchingCount}</div>
-                      <div className="text-[10px] text-gray-400">Low ≤ MA44 ≤ High</div>
-                    </div>
-                    <span className="text-2xl text-blue-400">🎯</span>
-                  </div>
-                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-emerald-400 font-medium">Daily Above Alerts (0-{maxAbove}%)</div>
-                      <div className="text-xl font-bold font-mono text-emerald-300">{dailyAboveCount}</div>
-                      <div className="text-[10px] text-gray-400">Close ≥ MA44 & ≤ +{maxAbove}%</div>
-                    </div>
-                    <span className="text-2xl text-emerald-400">✅</span>
-                  </div>
-                  <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-amber-400 font-medium">Daily Near Below Alerts (-{maxBelow}%)</div>
-                      <div className="text-xl font-bold font-mono text-amber-300">{dailyNearBelowCount}</div>
-                      <div className="text-[10px] text-gray-400">Close &lt; MA44 & ≥ -{maxBelow}%</div>
-                    </div>
-                    <span className="text-2xl text-amber-400">⏳</span>
-                  </div>
-                </div>
-              )}
-
-              {/* ─────────────────────────────────────────────────────────── */}
-              {/* 2. SEPARATE 44 MA WEEKLY ALERT SECTION */}
-              {/* ─────────────────────────────────────────────────────────── */}
-              {activeTab === "weekly" && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-blue-400 font-medium">Weekly Touching Alerts</div>
-                      <div className="text-xl font-bold font-mono text-blue-300">{weeklyTouchingCount}</div>
-                      <div className="text-[10px] text-gray-400">Macro support touch</div>
-                    </div>
-                    <span className="text-2xl text-blue-400">🎯</span>
-                  </div>
-                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-emerald-400 font-medium">Weekly Above Alerts (0-{maxAbove}%)</div>
-                      <div className="text-xl font-bold font-mono text-emerald-300">{weeklyAboveCount}</div>
-                      <div className="text-[10px] text-gray-400">Strong higher-timeframe trend</div>
-                    </div>
-                    <span className="text-2xl text-emerald-400">✅</span>
-                  </div>
-                  <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div>
-                      <div className="text-[11px] text-amber-400 font-medium">Weekly Near Below Alerts (-{maxBelow}%)</div>
-                      <div className="text-xl font-bold font-mono text-amber-300">{weeklyNearBelowCount}</div>
-                      <div className="text-[10px] text-gray-400">Weekly mean-reversion watch</div>
-                    </div>
-                    <span className="text-2xl text-amber-400">⏳</span>
-                  </div>
-                </div>
-              )}
-
-              {/* ─────────────────────────────────────────────────────────── */}
-              {/* 3. ASCENDING TRIANGLE SEPARATE SECTIONS */}
-              {/* ─────────────────────────────────────────────────────────── */}
-              {activeTab === "ascending" && (
-                <div className="flex flex-col gap-6">
-                  {/* Section A: Confirmed Breakouts */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between bg-emerald-950/30 border border-emerald-500/30 px-4 py-2.5 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <h3 className="text-sm font-bold text-emerald-300">
-                          🚀 Confirmed Breakouts (Direct & Retest Entry)
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 font-mono">
-                          {ascConfirmed.length} Active
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-400">Minimum 1:3 Risk:Reward Target • Breakout candle marked</span>
-                    </div>
-
-                    <TriangleTable 
-                      items={ascConfirmed} 
-                      onSelect={(stock) => setSelectedStock(stock)} 
-                      onHover={(sym) => prefetchChart(sym, "daily")}
-                      handleSort={handleSort}
-                      sortField={sortField}
-                      sortAsc={sortAsc}
-                      getStatusBadge={getStatusBadge}
-                      emptyText="No confirmed ascending triangle breakouts at this moment."
-                    />
-                  </div>
-
-                  {/* Section B: Pre-Breakout Watchlist */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between bg-amber-950/30 border border-amber-500/30 px-4 py-2.5 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                        <h3 className="text-sm font-bold text-amber-300">
-                          ⏳ Pre-Breakout Watchlist (Coiling Near Resistance)
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 font-mono">
-                          {ascPreBreakout.length} Coiling
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-400">Coiling inside triangle • Approaching apex breakout</span>
-                    </div>
-
-                    <TriangleTable 
-                      items={ascPreBreakout} 
-                      onSelect={(stock) => setSelectedStock(stock)} 
-                      onHover={(sym) => prefetchChart(sym, "daily")}
-                      handleSort={handleSort}
-                      sortField={sortField}
-                      sortAsc={sortAsc}
-                      getStatusBadge={getStatusBadge}
-                      emptyText="No pre-breakout setups currently coiling near resistance."
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ─────────────────────────────────────────────────────────── */}
-              {/* 4. SYMMETRICAL TRIANGLE SEPARATE SECTIONS */}
-              {/* ─────────────────────────────────────────────────────────── */}
-              {activeTab === "symmetrical" && (
-                <div className="flex flex-col gap-6">
-                  {/* Section A: Confirmed Breakouts */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between bg-purple-950/30 border border-purple-500/30 px-4 py-2.5 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse"></span>
-                        <h3 className="text-sm font-bold text-purple-300">
-                          🚀 Confirmed Symmetrical Breakouts (Coil Expansion)
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 font-mono">
-                          {symmConfirmed.length} Active
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-400">Upper descending line broken with volume • Target = base height</span>
-                    </div>
-
-                    <TriangleTable 
-                      items={symmConfirmed} 
-                      onSelect={(stock) => setSelectedStock(stock)} 
-                      onHover={(sym) => prefetchChart(sym, "daily")}
-                      handleSort={handleSort}
-                      sortField={sortField}
-                      sortAsc={sortAsc}
-                      getStatusBadge={getStatusBadge}
-                      emptyText="No confirmed symmetrical triangle breakouts at this moment."
-                    />
-                  </div>
-
-                  {/* Section B: Pre-Breakout Watchlist */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between bg-amber-950/30 border border-amber-500/30 px-4 py-2.5 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                        <h3 className="text-sm font-bold text-amber-300">
-                          ⏳ Pre-Breakout Watchlist (Tight Coil Consolidation)
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 font-mono">
-                          {symmPreBreakout.length} Coiling
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-400">Volume contraction phase • Near apex</span>
-                    </div>
-
-                    <TriangleTable 
-                      items={symmPreBreakout} 
-                      onSelect={(stock) => setSelectedStock(stock)} 
-                      onHover={(sym) => prefetchChart(sym, "daily")}
-                      handleSort={handleSort}
-                      sortField={sortField}
-                      sortAsc={sortAsc}
-                      getStatusBadge={getStatusBadge}
-                      emptyText="No symmetrical coils currently in pre-breakout watch."
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ─────────────────────────────────────────────────────────── */}
-              {/* 5. BREAKOUTS VS WATCHLIST HUB (Unified Section) */}
-              {/* ─────────────────────────────────────────────────────────── */}
-              {activeTab === "breakout_hub" && (
-                <div className="flex flex-col gap-6">
-                  {/* Confirmed Breakouts Table */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-500/30 px-4 py-2.5 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <h3 className="text-sm font-bold text-emerald-300">
-                          🚀 All Confirmed Breakouts (Ascending + Symmetrical)
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/80 text-emerald-200 font-mono">
-                          {allConfirmed.length} Triggered
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-400">Ready for Execution with 1:3 R:R</span>
-                    </div>
-
-                    <TriangleTable 
-                      items={allConfirmed} 
-                      onSelect={(stock) => setSelectedStock(stock)} 
-                      onHover={(sym) => prefetchChart(sym, "daily")}
-                      handleSort={handleSort}
-                      sortField={sortField}
-                      sortAsc={sortAsc}
-                      getStatusBadge={getStatusBadge}
-                      emptyText="No confirmed breakouts across any patterns right now."
-                    />
-                  </div>
-
-                  {/* Pre-Breakout Watchlist Table */}
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between bg-amber-950/40 border border-amber-500/30 px-4 py-2.5 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                        <h3 className="text-sm font-bold text-amber-300">
-                          ⏳ All Pre-Breakout Watchlist (Ascending + Symmetrical)
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/80 text-amber-200 font-mono">
-                          {allPreBreakouts.length} Coiling
-                        </span>
-                      </div>
-                      <span className="text-xs text-gray-400">Anticipatory setups coiling towards resistance</span>
-                    </div>
-
-                    <TriangleTable 
-                      items={allPreBreakouts} 
-                      onSelect={(stock) => setSelectedStock(stock)} 
-                      onHover={(sym) => prefetchChart(sym, "daily")}
-                      handleSort={handleSort}
-                      sortField={sortField}
-                      sortAsc={sortAsc}
-                      getStatusBadge={getStatusBadge}
-                      emptyText="No pre-breakout watchlist setups at this time."
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* ─────────────────────────────────────────────────────────── */}
-              {/* 6. 44 MA TABLES (Both, Daily, Weekly) */}
-              {/* ─────────────────────────────────────────────────────────── */}
-              {(activeTab === "both" || activeTab === "daily" || activeTab === "weekly") && (
-                <div>
-                  <div className="flex items-center justify-between text-xs text-gray-400 bg-gray-900/40 p-2.5 rounded-lg border border-gray-800/80 mb-3">
-                    <span className="font-medium text-gray-300">
-                      {activeTab === "both" && "Stocks qualifying on BOTH Daily & Weekly timeframes simultaneously (Highest Confluence)"}
-                      {activeTab === "daily" && "Daily timeframe 44 MA setups (Touching or inside distance buffer)"}
-                      {activeTab === "weekly" && "Weekly timeframe 44 MA setups (Macro swing support)"}
-                    </span>
-                    <span className="font-mono text-gray-400">
-                      Showing <b>{(activeTab === "both" ? bothList : (activeTab === "daily" ? dailyList : weeklyList)).length}</b> matches
-                    </span>
-                  </div>
-
-                  <MaTable 
-                    items={activeTab === "both" ? bothList : (activeTab === "daily" ? dailyList : weeklyList)}
-                    loading={loading}
-                    onSelect={(stock) => setSelectedStock(stock)}
-                    onHover={(sym) => prefetchChart(sym, activeTab === "weekly" ? "weekly" : "daily")}
-                    handleSort={handleSort}
-                    sortField={sortField}
-                    sortAsc={sortAsc}
-                    getStatusBadge={getStatusBadge}
-                  />
-                </div>
-              )}
-
-            </main>
-          </div>
-
-          {/* ─────────────────────────────────────────────────────────── */}
-          {/* INTERACTIVE TRADINGVIEW CHART MODAL */}
-          {/* ─────────────────────────────────────────────────────────── */}
-          {selectedStock && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in duration-150">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
-                
-                {/* Modal Header */}
-                <div className="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between bg-gray-950">
-                  <div className="flex items-center flex-wrap gap-3">
-                    <span className="text-xl font-bold text-white font-mono">{selectedStock.symbol}</span>
-                    <span className="text-sm text-gray-400 font-sans truncate max-w-[200px]">{selectedStock.company}</span>
-                    <span className="text-sm font-bold text-emerald-400 font-mono">₹{fmt(selectedStock.cmp)}</span>
-                    
-                    {selectedStock.ma44 && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-500/30 font-mono">
-                        44 MA: ₹{fmt(selectedStock.ma44)} ({selectedStock.distance_pct > 0 ? '+' : ''}{selectedStock.distance_pct}%)
-                      </span>
-                    )}
-
-                    {selectedStock.pattern && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-500/30 font-sans font-semibold">
-                        {selectedStock.pattern} • {selectedStock.status}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    {/* Timeframe Switcher in Modal */}
-                    <div className="flex rounded-lg bg-gray-800 p-0.5 border border-gray-700 text-xs font-medium">
-                      <button 
-                        onClick={() => setChartTf("daily")}
-                        className={`px-3 py-1 rounded-md transition ${chartTf === "daily" ? "bg-blue-600 text-white font-bold" : "text-gray-400 hover:text-white"}`}
-                      >
-                        Daily
-                      </button>
-                      <button 
-                        onClick={() => setChartTf("weekly")}
-                        className={`px-3 py-1 rounded-md transition ${chartTf === "weekly" ? "bg-blue-600 text-white font-bold" : "text-gray-400 hover:text-white"}`}
-                      >
-                        Weekly
-                      </button>
-                    </div>
-
-                    <button 
-                      onClick={() => setSelectedStock(null)}
-                      className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-
-                {/* Pattern Metrics Bar (if pattern selected) */}
-                {selectedStock.target && (
-                  <div className="bg-[#101726] border-b border-gray-800 px-5 py-2 flex flex-wrap items-center justify-between text-xs font-mono">
-                    <div className="flex items-center gap-4">
-                      <span>Entry: <b className="text-cyan-400">₹{fmt(selectedStock.buy_price)}</b></span>
-                      <span>•</span>
-                      <span>Target (1:3): <b className="text-emerald-400">₹{fmt(selectedStock.target)}</b></span>
-                      <span>•</span>
-                      <span>Stop Loss: <b className="text-rose-400">₹{fmt(selectedStock.stop_loss)}</b></span>
-                      <span>•</span>
-                      <span>R:R: <b className="text-yellow-400">{selectedStock.risk_reward || "1:3"}</b></span>
-                    </div>
-                    <div className="text-gray-400">
-                      Resistance: ₹{fmt(selectedStock.resistance_level)} • Touches: {selectedStock.touches}
-                    </div>
-                  </div>
-                )}
-
-                {/* Lightweight Chart Render Box */}
-                <div className="p-4 bg-[#0b0f19]">
-                  <div ref={chartContainerRef} className="w-full h-[460px]"></div>
-                </div>
-
-                {/* Modal Footer Notes */}
-                <div className="px-5 py-2.5 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
-                  <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                      <span>44 MA (Blue)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-cyan-400 inline-block"></span>
-                      <span>Pattern Lines (Cyan)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed"></span>
-                      <span>Target 1:3 (Green)</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed"></span>
-                      <span>Stop Loss (Red)</span>
-                    </span>
-                  </div>
-                  <div>
-                    <a 
-                      href={`https://in.tradingview.com/chart/?symbol=NSE:${selectedStock.symbol}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-blue-400 hover:underline flex items-center gap-1"
-                    >
-                      Open on TradingView ↗
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Footer Disclaimer */}
-          <footer className="border-t border-gray-800 bg-[#0b0f19] py-4 px-5 text-center text-xs text-gray-500 mt-auto">
-            <p>For educational purposes only. Not investment advice.</p>
-            <p className="mt-1 text-[11px] text-gray-600">
-              44 MA Touch & Near Scanner Engine • Ascending & Symmetrical Triangles • Built for Indian Technical Traders
-            </p>
-          </footer>
-        </div>
-      );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Sub-Component: 44 MA Table
-    // ─────────────────────────────────────────────────────────────────────────
-    function MaTable({ items, loading, onSelect, onHover, handleSort, sortField, sortAsc, getStatusBadge }) {
-      return (
-        <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
-                <th className="py-3 px-4 cursor-pointer hover:text-white" onClick={() => handleSort("symbol")}>
-                  Symbol {sortField === "symbol" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3">Company</th>
-                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("cmp")}>
-                  CMP (₹) {sortField === "cmp" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("ma44")}>
-                  44 MA {sortField === "ma44" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("abs_distance")}>
-                  Distance % {sortField === "abs_distance" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3 text-center">Status</th>
-                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("day_change_pct")}>
-                  Day Chg % {sortField === "day_change_pct" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3 text-right">Volume</th>
-                <th className="py-3 px-3 text-center">Timeframe</th>
-                <th className="py-3 px-3 text-center">Trend (12B)</th>
-                <th className="py-3 px-4 text-center">Chart</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800/60 font-mono">
-              {loading ? (
-                <tr>
-                  <td colSpan="11" className="py-12 text-center text-gray-500 font-sans">
-                    <div className="inline-block animate-spin mr-2">⟳</div>
-                    Scanning Nifty universe...
-                  </td>
-                </tr>
-              ) : items.length === 0 ? (
-                <tr>
-                  <td colSpan="11" className="py-12 text-center text-gray-500 font-sans">
-                    No stocks found matching active filters. Adjust your sliders or status checkboxes.
-                  </td>
-                </tr>
-              ) : (
-                items.map((item) => {
-                  const isUp = (item.day_change_pct || 0) >= 0;
-                  const dist = item.distance_pct != null ? item.distance_pct : 0;
-                  const statusStyle = getStatusBadge(item.status);
-
-                  return (
-                    <tr 
-                      key={item.symbol} 
-                      className="hover:bg-gray-800/50 transition cursor-pointer"
-                      onClick={() => onSelect(item)}
-                      onMouseEnter={() => onHover(item.symbol)}
-                    >
-                      <td className="py-3 px-4 font-bold text-white hover:text-blue-400">
-                        {item.symbol}
-                      </td>
-                      <td className="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[150px]" title={item.company}>
-                        {item.company}
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-gray-100">
-                        ₹{fmt(item.cmp)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-blue-400 font-semibold">
-                        ₹{fmt(item.ma44)}
-                      </td>
-                      <td className={`py-3 px-3 text-right font-bold ${dist >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {dist > 0 ? `+${dist.toFixed(2)}%` : `${dist.toFixed(2)}%`}
-                      </td>
-                      <td className="py-3 px-3 text-center font-sans">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusStyle}`}>
-                          {item.status}
-                        </span>
-                      </td>
-                      <td className={`py-3 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {isUp ? `+${item.day_change_pct.toFixed(2)}%` : `${item.day_change_pct.toFixed(2)}%`}
-                      </td>
-                      <td className="py-3 px-3 text-right text-gray-400">
-                        {fmtVol(item.volume)}
-                      </td>
-                      <td className="py-3 px-3 text-center font-sans">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
-                          item.timeframe === "Both" 
-                            ? "bg-purple-900/40 text-purple-300 border border-purple-500/30" 
-                            : "bg-gray-800 text-gray-400 border border-gray-700"
-                        }`}>
-                          {item.timeframe}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <Sparkline points={item.sparkline} isUp={isUp} />
-                      </td>
-                      <td className="py-3 px-4 text-center font-sans">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelect(item);
-                          }}
-                          className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-xs font-semibold border border-blue-500/30 transition"
-                        >
-                          View 44 MA
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Sub-Component: Triangle Table (Confirmed & Pre-Breakout)
-    // ─────────────────────────────────────────────────────────────────────────
-    function TriangleTable({ items, onSelect, onHover, handleSort, sortField, sortAsc, getStatusBadge, emptyText }) {
-      return (
-        <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
-                <th className="py-3 px-4 cursor-pointer hover:text-white" onClick={() => handleSort("symbol")}>
-                  Symbol {sortField === "symbol" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3">Company</th>
-                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("cmp")}>
-                  CMP (₹) {sortField === "cmp" && (sortAsc ? "▲" : "▼")}
-                </th>
-                <th className="py-3 px-3 text-right">Resistance</th>
-                <th className="py-3 px-3 text-right">Support</th>
-                <th className="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
-                <th className="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
-                <th className="py-3 px-3 text-center">Status / Entry</th>
-                <th className="py-3 px-3 text-center">Touches</th>
-                <th className="py-3 px-3 text-center">Trend (12B)</th>
-                <th className="py-3 px-4 text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800/60 font-mono">
-              {items.length === 0 ? (
-                <tr>
-                  <td colSpan="11" className="py-8 text-center text-gray-500 font-sans">
-                    {emptyText || "No matching patterns."}
-                  </td>
-                </tr>
-              ) : (
-                items.map((item) => {
-                  const isUp = (item.cmp >= (item.resistance_level || 0));
-                  const statusStyle = getStatusBadge(item.status);
-
-                  return (
-                    <tr 
-                      key={item.symbol} 
-                      className="hover:bg-gray-800/50 transition cursor-pointer"
-                      onClick={() => onSelect(item)}
-                      onMouseEnter={() => onHover(item.symbol)}
-                    >
-                      <td className="py-3 px-4 font-bold text-white hover:text-blue-400">
-                        {item.symbol}
-                      </td>
-                      <td className="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[140px]" title={item.company}>
-                        {item.company}
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-gray-100">
-                        ₹{fmt(item.cmp)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-red-400 font-semibold">
-                        ₹{fmt(item.resistance_level)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-emerald-400">
-                        ₹{fmt(item.support_level)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-emerald-300 font-bold">
-                        ₹{fmt(item.target)}
-                      </td>
-                      <td className="py-3 px-3 text-right text-rose-400">
-                        ₹{fmt(item.stop_loss)}
-                      </td>
-                      <td className="py-3 px-3 text-center font-sans">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusStyle}`}>
-                          {item.status}
-                        </span>
-                        {item.entry_type && (
-                          <div className="text-[10px] text-gray-400 mt-0.5">{item.entry_type}</div>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 text-center text-gray-300">
-                        {item.touches} touches
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <Sparkline points={item.sparkline} isUp={isUp} />
-                      </td>
-                      <td className="py-3 px-4 text-center font-sans">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelect(item);
-                          }}
-                          className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition flex items-center gap-1 mx-auto"
-                        >
-                          <span>Draw Pattern</span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      );
-    }
-
-    // Mount to DOM
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+      // Initial Boot
+      loadAllData();
+    })();
   </script>
 </body>
 </html>

@@ -227,6 +227,60 @@ async def scan_44ma(
         "results": {"both": both, "daily": daily, "weekly": weekly}
     }
 
+@app.get("/api/scanner/44ma_breakouts")
+async def scan_44ma_breakouts(index: str = "nifty500", timeframe: str = "daily"):
+    universe = UNIVERSE_50 if index == "nifty50" else (UNIVERSE_100 if index == "nifty100" else UNIVERSE_500)
+    confirmed, pre_breakout = [], []
+    for sym in universe:
+        d_c, w_c = fetch_candles(sym)
+        c = w_c if timeframe == "weekly" else d_c
+        if not c or len(c) < 45:
+            continue
+        comp = get_company(sym)
+        eval_res = strategies.evaluate_44ma_breakout(sym, comp, c, timeframe=timeframe)
+        if not eval_res:
+            continue
+        if eval_res["type"] == "confirm_breakout":
+            confirmed.append(eval_res)
+        elif eval_res["type"] == "pre_breakout":
+            pre_breakout.append(eval_res)
+
+    # Sort lowest percentage first (1% at top, 2% below, progressing up to 7%)
+    confirmed.sort(key=lambda s: s["distance_pct"])
+    pre_breakout.sort(key=lambda s: abs(s["distance_pct"]))
+
+    return {
+        "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
+        "timeframe": timeframe.capitalize(),
+        "total_scanned": len(universe),
+        "counts": {"confirmed": len(confirmed), "pre_breakout": len(pre_breakout)},
+        "confirmed_breakouts": confirmed,
+        "pre_breakouts": pre_breakout
+    }
+
+@app.get("/api/scanner/above44")
+async def scan_above44(index: str = "nifty500", timeframe: str = "daily"):
+    universe = UNIVERSE_50 if index == "nifty50" else (UNIVERSE_100 if index == "nifty100" else UNIVERSE_500)
+    results = []
+    for sym in universe:
+        d_c, w_c = fetch_candles(sym)
+        c = w_c if timeframe == "weekly" else d_c
+        if not c or len(c) < 45:
+            continue
+        comp = get_company(sym)
+        res = strategies.analyze_above_44ma(sym, comp, c, timeframe=timeframe)
+        if res:
+            results.append(res)
+
+    results.sort(key=lambda s: (0 if "Breakout" in s["status"] else (1 if "Near" in s["status"] else 2), s["distance_pct"]))
+    return {
+        "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
+        "timeframe": timeframe.capitalize(),
+        "total_scanned": len(universe),
+        "count": len(results),
+        "results": results
+    }
+
 @app.get("/api/scanner/triangles")
 async def scan_triangles(index: str = "nifty500", timeframe: str = "daily"):
     universe = UNIVERSE_50 if index == "nifty50" else (UNIVERSE_100 if index == "nifty100" else UNIVERSE_500)

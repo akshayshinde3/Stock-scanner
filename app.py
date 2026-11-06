@@ -490,6 +490,131 @@ def api_scanner_44ma():
     })
 
 
+# In-memory scanner results cache for instant response (< 5ms) on Render free tier
+_SCAN_44MA_CACHE: Dict[str, dict] = {}
+_SCAN_ABOVE44_CACHE: Dict[str, dict] = {}
+_SCAN_TRIANGLES_CACHE: Dict[str, dict] = {}
+_SCAN_44BREAKOUTS_CACHE: Dict[str, dict] = {}
+_LAST_SCAN_TIME: Dict[str, float] = {}
+
+
+@app.route("/api/scanner/44ma_breakouts")
+def api_scanner_44ma_breakouts():
+    """
+    Evaluates 44 MA Breakouts split into:
+      - confirmed_breakouts: Close >= MA44 and +1.0% <= Distance % <= +7.0%
+      - pre_breakouts: Close < MA44 and -7.0% <= Distance % <= -1.0% (1% to 7% below 44 MA)
+    """
+    index_param = request.args.get("index", "nifty500").lower()
+    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    tf = request.args.get("timeframe", "daily").lower()
+    try:
+        min_pct = float(request.args.get("min_pct", 1.0))
+        max_pct = float(request.args.get("max_pct", 7.0))
+    except ValueError:
+        min_pct, max_pct = 1.0, 7.0
+
+    cache_key = f"{index_param}_{tf}_{min_pct}_{max_pct}"
+
+    now_time = time.time()
+    if cache_key in _SCAN_44BREAKOUTS_CACHE and (now_time - _LAST_SCAN_TIME.get(f"breakouts_{cache_key}", 0) < 180):
+        return jsonify(_SCAN_44BREAKOUTS_CACHE[cache_key])
+
+    confirmed = []
+    pre_breakout = []
+
+    for sym in universe:
+        d_candles, w_candles = get_cached_candles(sym)
+        candles = w_candles if tf == "weekly" else d_candles
+        if not candles or len(candles) < 45:
+            continue
+
+        comp_name = get_company_name(sym)
+        eval_res = strategies.evaluate_44ma_breakout(
+            sym, comp_name, candles, timeframe=tf, min_dist_pct=min_pct, max_dist_pct=max_pct
+        )
+        if not eval_res:
+            continue
+
+        if eval_res["type"] == "confirm_breakout":
+            confirmed.append(eval_res)
+        elif eval_res["type"] == "pre_breakout":
+            pre_breakout.append(eval_res)
+
+    # Sort lowest percentage first (1% at top, 2% below, progressing up to 7%)
+    confirmed.sort(key=lambda s: s["distance_pct"])
+    pre_breakout.sort(key=lambda s: abs(s["distance_pct"]))
+
+    now_ist = get_current_ist_time()
+    payload = {
+        "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
+        "timeframe": tf.capitalize(),
+        "min_pct": min_pct,
+        "max_pct": max_pct,
+        "total_scanned": len(universe),
+        "counts": {
+            "confirmed": len(confirmed),
+            "pre_breakout": len(pre_breakout)
+        },
+        "confirmed_breakouts": confirmed,
+        "pre_breakouts": pre_breakout
+    }
+
+    _SCAN_44BREAKOUTS_CACHE[cache_key] = payload
+    _LAST_SCAN_TIME[f"breakouts_{cache_key}"] = now_time
+    return jsonify(payload)
+
+
+@app.route("/api/scanner/above44")
+def api_scanner_above44():
+    """
+    Above 44 MA Strategy Scanner (Bullish Momentum & Breakout above 44 MA).
+    Returns all stocks actively trading above the 44-period Moving Average:
+      - 44 MA Fresh Breakout (crossed above within last 1-3 bars)
+      - 44 MA Near Support (trading 0% - 3% above 44 MA)
+      - Above 44 MA Trending (strong bullish momentum above 44 MA)
+    """
+    index_param = request.args.get("index", "nifty500").lower()
+    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    tf = request.args.get("timeframe", "daily").lower()
+    cache_key = f"{index_param}_{tf}"
+
+    # Return instantly if cached within last 3 minutes
+    now_time = time.time()
+    if cache_key in _SCAN_ABOVE44_CACHE and (now_time - _LAST_SCAN_TIME.get(f"above44_{cache_key}", 0) < 180):
+        return jsonify(_SCAN_ABOVE44_CACHE[cache_key])
+
+    results = []
+    for sym in universe:
+        d_candles, w_candles = get_cached_candles(sym)
+        candles = w_candles if tf == "weekly" else d_candles
+        if not candles or len(candles) < 45:
+            continue
+
+        comp_name = get_company_name(sym)
+        res = strategies.analyze_above_44ma(sym, comp_name, candles, timeframe=tf)
+        if res:
+            results.append(res)
+
+    # Sort: Fresh Breakouts first, then closest to 44 MA support
+    results.sort(key=lambda s: (0 if "Breakout" in s["status"] else (1 if "Near" in s["status"] else 2), s["distance_pct"]))
+
+    now_ist = get_current_ist_time()
+    payload = {
+        "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
+        "timeframe": tf.capitalize(),
+        "total_scanned": len(universe),
+        "count": len(results),
+        "fresh_breakouts_count": sum(1 for s in results if "Breakout" in s["status"]),
+        "results": results,
+    }
+
+    _SCAN_ABOVE44_CACHE[cache_key] = payload
+    _LAST_SCAN_TIME[f"above44_{cache_key}"] = now_time
+
+    return jsonify(payload)
+
+
 @app.route("/api/scanner/triangles")
 def api_scanner_triangles():
     """
@@ -541,17 +666,30 @@ def api_scanner_triangles():
     confirmed_breakouts.sort(key=lambda x: x["abs_distance"])
     pre_breakouts.sort(key=lambda x: x["abs_distance"])
 
+    asc_confirmed = [x for x in ascending_triangles if "Confirmed" in x.get("status", "")]
+    asc_pre = [x for x in ascending_triangles if "Watch" in x.get("status", "") or "Pre" in x.get("status", "")]
+    symm_confirmed = [x for x in symmetrical_triangles if "Confirmed" in x.get("status", "")]
+    symm_pre = [x for x in symmetrical_triangles if "Watch" in x.get("status", "") or "Pre" in x.get("status", "")]
+
     now_ist = get_current_ist_time()
     return jsonify({
         "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
         "timeframe": tf.capitalize(),
         "ascending": ascending_triangles,
         "symmetrical": symmetrical_triangles,
+        "ascending_confirmed": asc_confirmed,
+        "ascending_pre": asc_pre,
+        "symmetrical_confirmed": symm_confirmed,
+        "symmetrical_pre": symm_pre,
         "confirmed_breakouts": confirmed_breakouts,
         "pre_breakouts": pre_breakouts,
         "counts": {
             "ascending": len(ascending_triangles),
             "symmetrical": len(symmetrical_triangles),
+            "ascending_confirmed": len(asc_confirmed),
+            "ascending_pre": len(asc_pre),
+            "symmetrical_confirmed": len(symm_confirmed),
+            "symmetrical_pre": len(symm_pre),
             "confirmed_breakouts": len(confirmed_breakouts),
             "pre_breakouts": len(pre_breakouts),
             "total_patterns": len(ascending_triangles) + len(symmetrical_triangles),
@@ -611,8 +749,10 @@ def api_chart(symbol):
     above_z = strategies.is_above_zone(cmp_price, current_ma, dist_pct, 2.0)
     status_44ma = strategies.get_status(touch, above_z, near_bel, 2.0)
 
-    # Patterns
+    # Patterns & 44 MA Breakouts
     comp_name = get_company_name(sym)
+    eval_44_breakout = strategies.evaluate_44ma_breakout(sym, comp_name, candles, timeframe=tf)
+    above44 = strategies.analyze_above_44ma(sym, comp_name, candles, timeframe=tf)
     asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
     symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
 
@@ -626,6 +766,8 @@ def api_chart(symbol):
         "cmp": cmp_price,
         "status_44ma": status_44ma,
         "distance_pct": dist_pct,
+        "eval_44_breakout": eval_44_breakout,
+        "above_44ma": above44,
         "ascending_pattern": asc,
         "symmetrical_pattern": symm,
     })
@@ -633,11 +775,87 @@ def api_chart(symbol):
 
 @app.route("/api/export/csv")
 def api_export_csv():
-    """Generates and downloads CSV of current 44 MA qualifying stocks."""
+    """Generates and downloads CSV of current 44 MA, Above 44, or Breakout qualifying stocks."""
     tab = request.args.get("tab", "both").lower()
     index_param = request.args.get("index", "nifty500").lower()
     universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
 
+    # 1. 44 MA Daily & Weekly Breakouts CSV Export
+    if tab in ["daily_confirmed", "daily_pre", "weekly_confirmed", "weekly_pre", "44_confirm_breakout", "44_pre_breakout"]:
+        rows = []
+        is_weekly = "weekly" in tab
+        target_type = "confirm_breakout" if ("confirm" in tab) else "pre_breakout"
+        tf_str = "weekly" if is_weekly else "daily"
+
+        for sym in universe:
+            d_candles, w_candles = get_cached_candles(sym)
+            c = w_candles if is_weekly else d_candles
+            if not c or len(c) < 45:
+                continue
+            comp = get_company_name(sym)
+            res = strategies.evaluate_44ma_breakout(sym, comp, c, tf_str)
+            if res and res["type"] == target_type:
+                rows.append(res)
+
+        rows.sort(key=lambda s: s["abs_distance"])
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Symbol", "Company", "Type", "Timeframe", "CMP", "44 MA", "Distance %", "Entry Price", "Stop Loss", "Target (1:3)", "Status", "Day Change %"])
+        for r in rows:
+            writer.writerow([r["symbol"], r["company"], r["pattern"], r.get("timeframe", tf_str.capitalize()), r["cmp"], r["ma44"], f"{r['distance_pct']}%", r["buy_price"], r["stop_loss"], r["target"], r["status"], f"{r['day_change_pct']}%"])
+        output.seek(0)
+        filename = f"44MA_{tab}_{index_param}_{dt.date.today().strftime('%Y%m%d')}.csv"
+        return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment;filename={filename}"})
+
+    # 2. Triangles (Ascending & Symmetrical: Pre vs Confirmed) Export
+    if any(k in tab for k in ["ascending", "symmetrical", "triangle"]):
+        tri_rows = []
+        is_asc = "ascending" in tab
+        is_symm = "symmetrical" in tab
+        want_confirmed = "confirm" in tab
+        want_pre = "pre" in tab
+
+        for sym in universe:
+            d_candles, _ = get_cached_candles(sym)
+            if not d_candles or len(d_candles) < 30:
+                continue
+            comp = get_company_name(sym)
+
+            if is_asc or (not is_symm):
+                asc = strategies.detect_ascending_triangle(sym, comp, d_candles, "daily")
+                if asc:
+                    if want_confirmed and "Confirmed" in asc.get("status", ""):
+                        tri_rows.append(asc)
+                    elif want_pre and ("Watch" in asc.get("status", "") or "Pre" in asc.get("status", "")):
+                        tri_rows.append(asc)
+                    elif not want_confirmed and not want_pre:
+                        tri_rows.append(asc)
+
+            if is_symm or (not is_asc):
+                symm = strategies.detect_symmetrical_triangle(sym, comp, d_candles, "daily")
+                if symm:
+                    if want_confirmed and "Confirmed" in symm.get("status", ""):
+                        tri_rows.append(symm)
+                    elif want_pre and ("Watch" in symm.get("status", "") or "Pre" in symm.get("status", "")):
+                        tri_rows.append(symm)
+                    elif not want_confirmed and not want_pre:
+                        tri_rows.append(symm)
+
+        tri_rows.sort(key=lambda s: s["abs_distance"])
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["Symbol", "Company", "Pattern", "CMP", "Resistance", "Support", "Entry", "Target (1:3)", "Stop Loss", "Status", "Touches"])
+        for r in tri_rows:
+            writer.writerow([
+                r["symbol"], r["company"], r["pattern"], r["cmp"],
+                r.get("resistance_level", 0), r.get("support_level", 0),
+                r["buy_price"], r["target"], r["stop_loss"], r["status"], r.get("touches", 2)
+            ])
+        output.seek(0)
+        filename = f"Triangles_{tab}_{index_param}_{dt.date.today().strftime('%Y%m%d')}.csv"
+        return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment;filename={filename}"})
+
+    # 2. 44 MA CSV Export
     try:
         max_above = float(request.args.get("max_above", 2.0))
         max_below = float(request.args.get("max_below", 3.0))
