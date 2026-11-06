@@ -1,1681 +1,662 @@
 """
-Swing Trading Scanner — Upstox Edition
-----------------------------------------
-Runs locally on your PC. Logs into your Upstox account (OAuth),
-polls your watchlist during market hours, evaluates swing-trading
-pattern strategies (Triangle, Pennant), and shows live
-BUY signals on a dashboard at http://localhost:5000.
-Free push notifications via ntfy.sh.
+app.py — 44 MA Touch & Near Scanner Web Application
+===================================================
+A responsive stock screener website for Indian traders (NSE / Nifty 500).
 
-⚠️ Educational tool only. Not investment advice. No strategy here
-guarantees any win rate — always paper-trade before risking capital.
+Features:
+  - Universe: Nifty 500, Nifty 100, Nifty 50
+  - Daily & Weekly OHLCV from Yahoo Finance (.NS tickers) with caching (refreshed daily after 4:00 PM IST)
+  - 44 MA Touch & Near Scanner with adjustable parameters:
+      * Max above MA44 (0.5% - 5%, default 2%)
+      * Max below MA44 (0.5% - 5%, default 3%)
+      * Status checkboxes: Touching, Above (0-A%), Near Below
+      * Min Price, Min Weekly Volume (default 100,000)
+      * MA44 Rising Only (today's MA44 > MA44 5 bars ago)
+      * Green Candle Only (Close > Open)
+  - Symmetrical Triangle & Ascending Triangle Breakout Engines (with 1:3 R:R and breakout / retest entries)
+  - TradingView Chart integration with 44 MA overlay
+  - CSV Export & Searchable, Sortable React + Tailwind UI
 """
 
 import os
 import io
-import json
+import csv
 import time
-import uuid
-import gzip
+import json
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime as dt
-
-import requests
+from typing import Dict, List, Optional
 import pandas as pd
 import yfinance as yf
-from flask import Flask, request, redirect, jsonify, render_template, session, url_for, send_file
-from dotenv import load_dotenv
+from flask import Flask, jsonify, request, render_template, send_file, Response
 
 import strategies
 
-# Load environment variables from .env file
-load_dotenv()
+# ═══════════════════════════════════════════════════════════════════════════
+# Flask Application Setup
+# ═══════════════════════════════════════════════════════════════════════════
+app = Flask(__name__, template_folder="templates")
+app.config["JSON_SORT_KEYS"] = False
 
-# ---------------------------------------------------------------------------
-# CONFIG & TIMEZONE
-# ---------------------------------------------------------------------------
-NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY", "")
-SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "")
+DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+NIFTY500_FILE = os.path.join(DATA_DIR, "nifty500.txt")
 
-POLL_INTERVAL_SECONDS = 180         # how often to re-scan
-MARKET_OPEN = dt.time(9, 15)
-MARKET_CLOSE = dt.time(15, 30)
-
-# Exact Indian Standard Time (IST = UTC+5:30)
-IST_TZ = dt.timezone(dt.timedelta(hours=5, minutes=30))
-
-def get_ist_now():
-    """Return current datetime in Indian Standard Time (IST, UTC+5:30)."""
-    return dt.datetime.now(dt.timezone.utc).astimezone(IST_TZ)
-
-# Liquidity filter: skip stocks whose 20-day average daily turnover (price * volume)
-# is below this, in INR crore.
-MIN_AVG_DAILY_TURNOVER_CR = 1.0
-
-NIFTY500_URL = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
-
-# Nifty Midcap 100 constituent universe
-MIDCAP100_SYMBOLS = {
-    "FEDERALBNK", "IDFCFIRSTB", "BANDHANBNK", "AUBANK", "AUROPHARMA", "LUPIN", 
-    "BIOCON", "GLENMARK", "TORNTPHARM", "ALKEM", "IPCALAB", "VOLTAS", "WHIRLPOOL", 
-    "CROMPTON", "POLYCAB", "KEI", "DIXON", "ASTRAL", "SUPREMEIND", "ASHOKLEY", 
-    "BHARATFORG", "BALKRISIND", "MRF", "APOLLOTYRE", "EXIDEIND", "ESCORTS", 
-    "PERSISTENT", "COFORGE", "MPHASIS", "LTTS", "TATAELXSI", "KPITTECH", 
-    "CYIENT", "SONACOMS", "SUNDRMFAST", "SCHAEFFLER", "SKFINDIA", "AIAENG", 
-    "CUMMINSIND", "THERMAX", "OBEROIRLTY", "PHOENIXLTD", "PRESTIGE", "BRIGADE", 
-    "GODREJPROP", "CONCOR", "GMRAIRPORT", "ABCAPITAL", "MFSL", "L&TFH", "CHOLAFIN", 
-    "POONAWALLA", "SHRIRAMFIN", "MUTHOOTFIN", "MANAPPURAM", "CANFINHOME", "LICHSGFIN", 
-    "HUDCO", "PETRONET", "GUJGASLTD", "IGL", "MGL", "OIL", "CASTROLIND", 
-    "DEEPAKNTR", "TATACHEM", "PIIND", "UPL", "COROMANDEL", "CHAMBLFERT", "GNFC", 
-    "ATUL", "SRF", "NAVINFLUOR", "FLUOROCHEM", "SAIL", "JINDALSTEL", "NATIONALUM", 
-    "NMDC", "APLAPOLLO", "RATNAMANI", "PAGEIND", "BATAINDIA", "RELAXO", "DEVYANI", 
-    "JUBLFOOD", "KALYANKJIL", "RADICO", "ZYDUSLIFE", "ABFRL", "TRENT", "JUBLPHARMA", 
-    "MAXHEALTH", "FORTIS", "SYNGENE", "GLAXO", "PFIZER", "SANOFI", "AJANTPHARM", 
-    "JBCHEPHARM", "METROPOLIS", "LALPATHLAB", "SUZLON", "BHEL", "COCHINSHIP", 
-    "MAZDOCK", "BDL", "BEL", "HAL", "IDEA", "YESBANK", "NHPC", "SJVN", "IREDA", 
-    "TATACOMM", "INDIAMART", "JUBLINGREA", "PVRINOX", "ZEEL", "SUNTV", "DELHIVERY"
+# Major NSE Company Names Dictionary
+COMPANY_NAMES = {
+    "RELIANCE": "Reliance Industries Ltd.",
+    "TCS": "Tata Consultancy Services Ltd.",
+    "HDFCBANK": "HDFC Bank Ltd.",
+    "ICICIBANK": "ICICI Bank Ltd.",
+    "BHARTIARTL": "Bharti Airtel Ltd.",
+    "SBIN": "State Bank of India",
+    "INFY": "Infosys Ltd.",
+    "ITC": "ITC Ltd.",
+    "HINDUNILVR": "Hindustan Unilever Ltd.",
+    "LT": "Larsen & Toubro Ltd.",
+    "BAJFINANCE": "Bajaj Finance Ltd.",
+    "HCLTECH": "HCL Technologies Ltd.",
+    "MARUTI": "Maruti Suzuki India Ltd.",
+    "SUNPHARMA": "Sun Pharmaceutical Ind. Ltd.",
+    "ADANIENT": "Adani Enterprises Ltd.",
+    "TATAMOTORS": "Tata Motors Ltd.",
+    "KOTAKBANK": "Kotak Mahindra Bank Ltd.",
+    "TITAN": "Titan Company Ltd.",
+    "ONGC": "Oil & Natural Gas Corp Ltd.",
+    "NTPC": "NTPC Ltd.",
+    "AXISBANK": "Axis Bank Ltd.",
+    "ADANIGREEN": "Adani Green Energy Ltd.",
+    "POWERGRID": "Power Grid Corporation of India",
+    "COALINDIA": "Coal India Ltd.",
+    "TATASTEEL": "Tata Steel Ltd.",
+    "BAJAJFINSV": "Bajaj Finserv Ltd.",
+    "M&M": "Mahindra & Mahindra Ltd.",
+    "ADANIPORTS": "Adani Ports & SEZ Ltd.",
+    "ASIANPAINT": "Asian Paints Ltd.",
+    "WIPRO": "Wipro Ltd.",
+    "ULTRACEMCO": "UltraTech Cement Ltd.",
+    "IOC": "Indian Oil Corporation Ltd.",
+    "NESTLEIND": "Nestle India Ltd.",
+    "GRASIM": "Grasim Industries Ltd.",
+    "JSWSTEEL": "JSW Steel Ltd.",
+    "BEL": "Bharat Electronics Ltd.",
+    "VEDL": "Vedanta Ltd.",
+    "ZOMATO": "Zomato Ltd.",
+    "VBL": "Varun Beverages Ltd.",
+    "TRENT": "Trent Ltd.",
+    "HAL": "Hindustan Aeronautics Ltd.",
+    "DLF": "DLF Ltd.",
+    "SIEMENS": "Siemens Ltd.",
+    "PFC": "Power Finance Corporation Ltd.",
+    "RECLTD": "REC Ltd.",
+    "INDUSINDBK": "IndusInd Bank Ltd.",
+    "TATACONSUM": "Tata Consumer Products Ltd.",
+    "DRREDDY": "Dr. Reddy's Laboratories Ltd.",
+    "DIVISLAB": "Divi's Laboratories Ltd.",
+    "CIPLA": "Cipla Ltd.",
+    "SBILIFE": "SBI Life Insurance Co Ltd.",
+    "EICHERMOT": "Eicher Motors Ltd.",
+    "BRITANNIA": "Britannia Industries Ltd.",
+    "APOLLOHOSP": "Apollo Hospitals Enterprise Ltd.",
+    "HINDALCO": "Hindalco Industries Ltd.",
+    "PIDILITIND": "Pidilite Industries Ltd.",
+    "HDFCLIFE": "HDFC Life Insurance Co Ltd.",
+    "BAJAJ-AUTO": "Bajaj Auto Ltd.",
+    "LTIM": "LTIMindtree Ltd.",
+    "TECHM": "Tech Mahindra Ltd.",
+    "PERSISTENT": "Persistent Systems Ltd.",
+    "COFORGE": "Coforge Ltd.",
+    "POLYCAB": "Polycab India Ltd.",
+    "DIXON": "Dixon Technologies Ltd.",
+    "CHOLAFIN": "Cholamandalam Inv & Fin Co",
+    "TORNTPHARM": "Torrent Pharmaceuticals Ltd.",
+    "MAXHEALTH": "Max Healthcare Institute Ltd.",
+    "INDIANB": "Indian Bank",
+    "INDHOTEL": "The Indian Hotels Co Ltd.",
+    "SHREECEM": "Shree Cement Ltd.",
+    "BALKRISIND": "Balkrishna Industries Ltd.",
+    "GLAND": "Gland Pharma Ltd.",
+    "HONASA": "Honasa Consumer Ltd.",
+    "SANSERA": "Sansera Engineering Ltd.",
+    "ASTRAZEN": "AstraZeneca Pharma India",
+    "GICRE": "General Insurance Corp of India",
 }
 
-# ---------------------------------------------------------------------------
-# ntfy.sh Push Notifications (100% free, no signup)
-# ---------------------------------------------------------------------------
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
-NTFY_ENABLED = os.environ.get("NTFY_ENABLED", "false").lower() == "true"
-NTFY_SERVER = "https://ntfy.sh"
-
-_notified_alerts = set()
-
-
-def send_ntfy_notification(title, message, priority="default", tags=None):
-    """Send a push notification via ntfy.sh (free, no API key needed)."""
-    if not NTFY_TOPIC or not NTFY_ENABLED:
-        return False
-    try:
-        headers = {
-            "Title": title,
-            "Priority": priority,
-        }
-        if tags:
-            headers["Tags"] = ",".join(tags)
-        resp = requests.post(
-            f"{NTFY_SERVER}/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
-            headers=headers,
-            timeout=10,
-        )
-        return resp.status_code == 200
-    except Exception as e:
-        app.logger.warning(f"ntfy notification failed: {e}")
-        return False
+# ═══════════════════════════════════════════════════════════════════════════
+# Universe Loading & Symbol Cache
+# ═══════════════════════════════════════════════════════════════════════════
+def load_universe_symbols() -> List[str]:
+    """Loads Nifty 500 symbols from disk."""
+    if not os.path.exists(NIFTY500_FILE):
+        return list(COMPANY_NAMES.keys())
+    symbols = []
+    with open(NIFTY500_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                symbols.append(line.upper())
+    return symbols
 
 
-def notify_new_alerts(confirmed_alerts, watch_alerts):
-    """Send phone notifications for new confirmed breakout signals."""
-    global _notified_alerts
-    if not NTFY_TOPIC or not NTFY_ENABLED:
-        return
+UNIVERSE_NIFTY500 = load_universe_symbols()
+UNIVERSE_NIFTY100 = UNIVERSE_NIFTY500[:100] if len(UNIVERSE_NIFTY500) >= 100 else UNIVERSE_NIFTY500
+UNIVERSE_NIFTY50  = UNIVERSE_NIFTY500[:50]  if len(UNIVERSE_NIFTY500) >= 50  else UNIVERSE_NIFTY500
 
-    for alert in confirmed_alerts:
-        alert_key = f"{alert['symbol']}_{alert['strategy_used']}_{dt.date.today()}"
-        if alert_key in _notified_alerts:
-            continue
-
-        title = f"🚀 BREAKOUT: {alert['symbol']}"
-        message = (
-            f"Strategy: {alert['strategy_used']}\n"
-            f"LTP: ₹{alert['ltp']}\n"
-            f"Buy: ₹{alert['buy_price']} | SL: ₹{alert['stop_loss']}\n"
-            f"Target 1: ₹{alert['target1']} | Target 2: ₹{alert['target2']}\n"
-            f"R:R: {alert['risk_reward']} | Confidence: {alert['confidence']}%\n"
-            f"Reason: {alert['reasons'][0] if alert['reasons'] else 'N/A'}"
-        )
-        if send_ntfy_notification(title, message, priority="high", tags=["chart_with_upwards_trend", "money_bag"]):
-            _notified_alerts.add(alert_key)
-
-    for alert in watch_alerts:
-        if alert.get("confidence", 0) < 50:
-            continue
-        alert_key = f"watch_{alert['symbol']}_{alert['strategy_used']}_{dt.date.today()}"
-        if alert_key in _notified_alerts:
-            continue
-
-        title = f"👀 WATCH: {alert['symbol']}"
-        message = (
-            f"Strategy: {alert['strategy_used']}\n"
-            f"LTP: ₹{alert['ltp']}\n"
-            f"Buy Trigger: ₹{alert['buy_price']} | SL: ₹{alert['stop_loss']}\n"
-            f"Confidence: {alert['confidence']}%\n"
-            f"Reason: {alert['reasons'][0] if alert['reasons'] else 'N/A'}"
-        )
-        if send_ntfy_notification(title, message, priority="default", tags=["eyes"]):
-            _notified_alerts.add(alert_key)
+def get_company_name(symbol: str) -> str:
+    """Returns human-readable company name for symbol."""
+    sym = symbol.upper()
+    if sym in COMPANY_NAMES:
+        return COMPANY_NAMES[sym]
+    return f"{sym} Ltd."
 
 
-app = Flask(__name__)
-app.secret_key = os.urandom(24)
-
-# In-memory state
-STATE = {
-    "universe": [],           # Nifty 500 symbols being scanned
-    "confirmed_alerts": [],   # breakouts that already triggered
-    "watch_alerts": [],       # pre-breakout candidates (not yet triggered)
-    "weekly_confirmed_alerts": [], # weekly breakouts
-    "weekly_watch_alerts": [],     # weekly pre-breakout candidates
-    "last_scan": None,
-    "scan_progress": None,
-    "scanning": False,
-    "error": None,
-}
-
-# Exclude known dummy / test / delisted ticker symbols
-EXCLUDE_SYMBOLS = {"DUMMYHEG", "BAGMANE", "ISEC"}
+# ═══════════════════════════════════════════════════════════════════════════
+# Candle Cache & Data Fetching (Daily & Weekly via Yahoo Finance .NS)
+# ═══════════════════════════════════════════════════════════════════════════
+_daily_cache: Dict[str, list] = {}
+_weekly_cache: Dict[str, list] = {}
+_last_cache_update_time: Optional[dt.datetime] = None
+_cache_lock = threading.Lock()
 
 
-def load_nifty500_symbols():
-    path = os.path.join(os.path.dirname(__file__), "nifty500.txt")
-    cached_file_syms = []
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as f:
-                cached_file_syms = [
-                    line.strip().upper()
-                    for line in f
-                    if line.strip()
-                    and not line.startswith("#")
-                    and line.strip().upper() not in EXCLUDE_SYMBOLS
-                    and not line.strip().upper().startswith("DUMMY")
-                ]
-                if len(cached_file_syms) >= 490:
-                    return cached_file_syms
-        except Exception as e:
-            app.logger.warning(f"Error reading nifty500.txt: {e}")
-
-    # Multiple reliable URLs (official NiftyIndices, NSE Archives, GitHub mirrors)
-    nse_urls = [
-        "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
-        "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
-        "https://raw.githubusercontent.com/kprohith/nse-stock-analysis/master/ind_nifty500list.csv",
-        "https://raw.githubusercontent.com/zerobha/ind_nifty500list.csv/main/ind_nifty500list.csv",
-        "https://nseindia.com/content/indices/ind_nifty500list.csv",
-    ]
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.niftyindices.com/",
-        "DNT": "1",
-    }
-    for nse_url in nse_urls:
-        try:
-            r = requests.get(nse_url, headers=headers, timeout=12)
-            if r.status_code != 200 or len(r.text) < 1000:
-                continue
-            lines = r.text.splitlines()
-            if not lines:
-                continue
-
-            # Detect Symbol column index from header (default index 2)
-            header_parts = [c.strip().strip('"').strip("'").lower() for c in lines[0].split(",")]
-            sym_col_idx = 2
-            for idx, col_name in enumerate(header_parts):
-                if col_name == "symbol":
-                    sym_col_idx = idx
-                    break
-
-            symbols = []
-            for line in lines[1:]:
-                parts = [p.strip().strip('"').strip("'") for p in line.split(",")]
-                if len(parts) > sym_col_idx:
-                    s = parts[sym_col_idx].strip().upper()
-                    if s and s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY") and s != "SYMBOL":
-                        symbols.append(s)
-
-            # Deduplicate while preserving order
-            seen = set()
-            dedup_symbols = []
-            for s in symbols:
-                if s not in seen:
-                    seen.add(s)
-                    dedup_symbols.append(s)
-
-            if len(dedup_symbols) >= 490:
-                try:
-                    with open(path, "w", encoding="utf-8") as f:
-                        f.write("# Nifty 500 Constituent List\n")
-                        f.write(f"# Auto-fetched from {nse_url} ({len(dedup_symbols)} stocks)\n")
-                        for s in dedup_symbols:
-                            f.write(s + "\n")
-                except Exception as write_err:
-                    app.logger.warning(f"Could not update nifty500.txt: {write_err}")
-                return dedup_symbols
-        except Exception as e:
-            app.logger.warning(f"Could not fetch Nifty 500 from {nse_url} ({e})")
-
-    # If network fetch failed, fall back to cached nifty500.txt if available
-    if len(cached_file_syms) >= 100:
-        return cached_file_syms
-
-    if os.path.exists(CANDLE_CACHE_FILE):
-        try:
-            with gzip.open(CANDLE_CACHE_FILE, "rt", encoding="utf-8") as f:
-                cdata = json.load(f)
-                d_syms = [s for s in cdata.get("daily", {}).keys() if s not in EXCLUDE_SYMBOLS and not s.startswith("DUMMY")]
-                if len(d_syms) >= 100:
-                    return d_syms
-        except Exception:
-            pass
-
-    return []
+def get_current_ist_time() -> dt.datetime:
+    """Returns current Indian Standard Time (UTC+5:30)."""
+    utc = dt.datetime.now(dt.timezone.utc)
+    ist = utc + dt.timedelta(hours=5, minutes=30)
+    return ist
 
 
-@app.before_request
-def require_login():
-    allowed_routes = ["login", "static"]
-    if request.endpoint and request.endpoint not in allowed_routes:
-        if SITE_PASSWORD and not session.get("authenticated"):
-            if request.path.startswith("/api/"):
-                return jsonify({"error": "Unauthorized"}), 401
-            return redirect(url_for("login"))
+def is_after_4pm_ist() -> bool:
+    """Returns True if current IST time is after 4:00 PM IST."""
+    ist = get_current_ist_time()
+    return ist.hour >= 16 or (ist.hour == 16 and ist.minute >= 0)
 
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if not SITE_PASSWORD:
-        return redirect(url_for("home"))
-    
-    if session.get("authenticated"):
-        return redirect(url_for("home"))
-        
-    error = None
-    if request.method == "POST":
-        password = request.form.get("password", "")
-        if password == SITE_PASSWORD:
-            session["authenticated"] = True
-            return redirect(url_for("home"))
-        else:
-            error = "Invalid password. Please try again."
-            
-    return render_template("login.html", error=error)
-
-
-@app.route("/logout")
-def logout():
-    session.pop("authenticated", None)
-    return redirect(url_for("login"))
-
-
-@app.route("/favicon.ico")
-def favicon():
-    return "", 204
-
-
-@app.route("/")
-def home():
-    if not STATE["scanning"]:
-        try:
-            STATE["universe"] = load_nifty500_symbols()
-            start_scanner_thread()
-        except Exception as e:
-            STATE["error"] = f"Failed to start scanner on load: {e}"
-            app.logger.exception("start_scanner failed")
-    try:
-        return render_template("dashboard.html")
-    except Exception as e:
-        import traceback
-        return f"<pre style='color:red;padding:20px'>Dashboard render error:\n{traceback.format_exc()}</pre>", 500
-
-
-def save_env_keys(newsapi_key, site_password=None):
-    global NEWSAPI_KEY, SITE_PASSWORD
-    NEWSAPI_KEY = newsapi_key
-    if site_password is not None:
-        SITE_PASSWORD = site_password
-
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    with open(env_path, "w") as f:
-        f.write(f"NEWSAPI_KEY={NEWSAPI_KEY}\n")
-        f.write(f"SITE_PASSWORD={SITE_PASSWORD}\n")
-        f.write(f"NTFY_TOPIC={NTFY_TOPIC}\n")
-        f.write(f"NTFY_ENABLED={'true' if NTFY_ENABLED else 'false'}\n")
-
-
-@app.route("/get-settings")
-def get_settings():
-    return jsonify({
-        "NEWSAPI_KEY": NEWSAPI_KEY,
-        "SITE_PASSWORD": SITE_PASSWORD
-    })
-
-
-@app.route("/update-settings", methods=["POST"])
-def update_settings():
-    data = request.get_json() or {}
-    newsapi_key = data.get("NEWSAPI_KEY", "").strip()
-    site_password = data.get("SITE_PASSWORD", "").strip()
-
-    try:
-        save_env_keys(newsapi_key, site_password)
-        if site_password:
-            session["authenticated"] = True
-        else:
-            session.pop("authenticated", None)
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ---------------------------------------------------------------------------
-# Data fetch helpers (Yahoo Finance & Direct Chart API)
-# ---------------------------------------------------------------------------
-SYMBOL_MAP = {
-    "MCDOWELL-N": "UNITDSPR",
-    "LTI": "LTIM",
-    "CADILAHC": "ZYDUSLIFE",
-    "MINDTREE": "LTIM",
-    "TATAMTRDVR": "TATAMOTORS",
-    "KALPATPOWR": "KPIL",
-    "GMRINFRA": "GMRAIRPORT",
-    "MAHINDCIE": "CIEINDIA",
-    "TBOEK": "TBOTEK",
-    "NIPPON": "NAM-INDIA",
-    "ARCHIAN": "ACI",
-    "VENKYS": "VENKEYS",
-    "AEGISCHEM": "AEGISLOG",
-    "CAPL": "CAPLIPOI",
-    "ISEC": "PVRINOX",
-}
-
-_yf_session = None
-
-def get_yf_session():
-    """Return a shared persistent requests.Session configured with browser headers."""
-    global _yf_session
-    if _yf_session is None:
-        _yf_session = requests.Session()
-        _yf_session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        })
-    return _yf_session
-
-def reset_yf_session():
-    """Reset session and crumb cache if Yahoo returns 429 or 401."""
-    global _yf_session
-    try:
-        if _yf_session:
-            _yf_session.close()
-    except Exception:
-        pass
-    _yf_session = None
-    return get_yf_session()
-
-
-def fetch_candles_via_chart_api(symbol, period="1y"):
-    """Fetch 1y daily OHLCV candles via Yahoo v8 Chart API (no crumb / quoteSummary errors)."""
-    mapped_sym = SYMBOL_MAP.get(symbol.upper(), symbol.upper())
-    ticker = f"{mapped_sym}.NS"
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={period}&interval=1d"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://finance.yahoo.com"
-    }
-    try:
-        session = get_yf_session()
-        resp = session.get(url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        chart = data.get("chart", {})
-        result = chart.get("result")
-        if not result or not result[0]:
-            return []
-        quote = result[0]
-        timestamps = quote.get("timestamp", [])
-        indicators = quote.get("indicators", {})
-        quote_list = indicators.get("quote", [{}])
-        if not quote_list:
-            return []
-        quote_data = quote_list[0]
-        opens = quote_data.get("open", [])
-        highs = quote_data.get("high", [])
-        lows = quote_data.get("low", [])
-        closes = quote_data.get("close", [])
-        volumes = quote_data.get("volume", [])
-
-        candles = []
-        for i in range(len(timestamps)):
-            c = closes[i] if i < len(closes) else None
-            if c is None:
-                continue
-            t = dt.datetime.fromtimestamp(timestamps[i], tz=IST_TZ).strftime("%Y-%m-%dT00:00:00+05:30")
-            o = opens[i] if i < len(opens) and opens[i] is not None else c
-            h = highs[i] if i < len(highs) and highs[i] is not None else c
-            l = lows[i] if i < len(lows) and lows[i] is not None else c
-            v = volumes[i] if i < len(volumes) and volumes[i] is not None else 0
-            candles.append([t, round(float(o), 2), round(float(h), 2), round(float(l), 2), round(float(c), 2), int(v), 0])
-        return candles
-    except Exception:
-        return []
-
-
-def get_daily_candles(symbol, days=365):
-    # Fast direct chart API first
-    candles = fetch_candles_via_chart_api(symbol, "1y")
-    if candles:
-        return candles
-
-    mapped_sym = SYMBOL_MAP.get(symbol.upper(), symbol.upper())
-    ticker_symbol = f"{mapped_sym}.NS"
-    try:
-        df = yf.download(
-            [ticker_symbol],
-            period="1y",
-            interval="1d",
-            ignore_tz=True,
-            progress=False,
-            threads=False,
-            session=get_yf_session()
-        )
-        if df is None or df.empty:
-            return []
-        if isinstance(df.columns, pd.MultiIndex):
-            df = df.xs(ticker_symbol, axis=1, level=1)
-        df = df.dropna(subset=["Close"])
-        
-        res_candles = []
-        for index, row in df.iterrows():
-            ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-            res_candles.append([
-                ts,
-                float(row["Open"]),
-                float(row["High"]),
-                float(row["Low"]),
-                float(row["Close"]),
-                int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                0
-            ])
-        return res_candles
-    except Exception as e:
-        app.logger.warning(f"Error fetching daily candles for {symbol}: {e}")
-        if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
-            reset_yf_session()
-        return []
-
-
-def resample_daily_to_weekly(daily_candles):
-    """Instantly converts daily candles into weekly candles in memory."""
+def resample_daily_to_weekly(daily_candles: list) -> list:
+    """
+    Resamples daily OHLCV candles to weekly candles:
+    Takes Monday to Friday (or week grouping), aggregating:
+      Open = first Open
+      High = max High
+      Low = min Low
+      Close = last Close
+      Volume = sum Volume
+    """
     if not daily_candles or len(daily_candles) < 5:
         return []
 
-    weeks = {}
-    for c in daily_candles:
-        ts = c[0]
-        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
-        try:
-            d = dt.date.fromisoformat(date_str)
-        except Exception:
-            continue
-        cal = d.isocalendar()
-        key = (cal[0], cal[1])
+    df = pd.DataFrame(daily_candles, columns=["date", "open", "high", "low", "close", "volume"])
+    df["date"] = pd.to_datetime(df["date"])
+    df.set_index("date", inplace=True)
 
-        if key not in weeks:
-            weeks[key] = {
-                "ts": f"{date_str}T00:00:00+05:30",
-                "open": float(c[1]),
-                "high": float(c[2]),
-                "low": float(c[3]),
-                "close": float(c[4]),
-                "volume": int(c[5]) if c[5] else 0,
-            }
-        else:
-            w = weeks[key]
-            w["high"] = max(w["high"], float(c[2]))
-            w["low"]  = min(w["low"], float(c[3]))
-            w["close"] = float(c[4])
-            w["volume"] += int(c[5]) if c[5] else 0
-            w["ts"] = f"{date_str}T00:00:00+05:30"
+    # Weekly resample ending on Friday (W-FRI)
+    weekly_df = df.resample("W-FRI").agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": "sum",
+    }).dropna()
 
-    weekly = []
-    for k in sorted(weeks.keys()):
-        w = weeks[k]
-        weekly.append([
-            w["ts"],
-            round(w["open"], 2),
-            round(w["high"], 2),
-            round(w["low"], 2),
-            round(w["close"], 2),
-            w["volume"],
-            0
+    weekly_candles = []
+    for date_idx, row in weekly_df.iterrows():
+        weekly_candles.append([
+            date_idx.strftime("%Y-%m-%d"),
+            round(float(row["open"]), 2),
+            round(float(row["high"]), 2),
+            round(float(row["low"]), 2),
+            round(float(row["close"]), 2),
+            int(row["volume"]),
         ])
-    return weekly
+    return weekly_candles
 
 
-def get_weekly_candles(symbol, weeks=120):
-    """Return weekly candles, derived in-memory from daily candles."""
-    sym = symbol.upper()
-    candles = _candle_cache.get(sym)
-    if not candles:
-        candles = get_daily_candles(sym)
-        if candles:
-            _candle_cache[sym] = candles
-    if candles:
-        return resample_daily_to_weekly(candles)
-    return []
-
-
-def get_yfinance_quotes(symbols):
-    """Fetch current price, net change, change percentage, and volume for symbols in bulk."""
-    if not symbols:
-        return {}
-    
-    mapped_to_orig = {f"{SYMBOL_MAP.get(sym.upper(), sym.upper())}.NS": sym.upper() for sym in symbols}
-    tickers = list(mapped_to_orig.keys())
-    
+def fetch_stock_candles_yf(symbol: str) -> tuple:
+    """
+    Fetches daily and weekly candles for an NSE stock via Yahoo Finance.
+    Returns (daily_candles, weekly_candles).
+    """
+    ticker_sym = f"{symbol}.NS"
     try:
-        session = get_yf_session()
-        df = yf.download(tickers, period="5d", ignore_tz=True, progress=False, threads=False, session=session)
-        if df is None or df.empty:
-            return {}
-        
-        result = {}
-        for ticker_ns, sym in mapped_to_orig.items():
-            try:
-                ticker_df = _extract_ticker_df(df, ticker_ns, tickers)
-                if ticker_df is None or ticker_df.empty:
-                    continue
-                close_col = ticker_df['Close'].dropna()
-                vol_col = ticker_df['Volume'].dropna()
-                
-                if len(close_col) >= 1:
-                    ltp = float(close_col.iloc[-1])
-                    volume = int(vol_col.iloc[-1]) if len(vol_col) >= 1 else 0
-                    
-                    if len(close_col) >= 2:
-                        prev_close = float(close_col.iloc[-2])
-                        net_change = ltp - prev_close
-                        change_pct = (net_change / prev_close) * 100
-                    else:
-                        prev_close = ltp
-                        net_change = 0.0
-                        change_pct = 0.0
-                        
-                    result[sym] = {
-                        "ltp": round(ltp, 2),
-                        "change_pct": round(change_pct, 2),
-                        "volume": volume,
-                        "net_change": round(net_change, 2)
-                    }
-            except Exception as e:
-                app.logger.warning(f"Error fetching yfinance quote for {sym}: {e}")
-                
-        return result
+        ticker = yf.Ticker(ticker_sym)
+        # Fetch 1 year of daily history to ensure sufficient lookback for 44 MA
+        df = ticker.history(period="1y", interval="1d", auto_adjust=False)
+        if df.empty or len(df) < 45:
+            # Fallback with auto_adjust=True
+            df = ticker.history(period="1y", interval="1d", auto_adjust=True)
+
+        if df.empty or len(df) < 45:
+            return None, None
+
+        daily = []
+        for index, row in df.iterrows():
+            d_str = index.strftime("%Y-%m-%d") if hasattr(index, "strftime") else str(index)[:10]
+            daily.append([
+                d_str,
+                round(float(row["Open"]), 2),
+                round(float(row["High"]), 2),
+                round(float(row["Low"]), 2),
+                round(float(row["Close"]), 2),
+                int(row["Volume"]),
+            ])
+
+        weekly = resample_daily_to_weekly(daily)
+        return daily, weekly
     except Exception as e:
-        app.logger.warning(f"get_yfinance_quotes error: {e}")
-        if "401" in str(e) or "429" in str(e) or "Crumb" in str(e):
-            reset_yf_session()
-        return {}
+        print(f"Error fetching candles for {symbol}: {e}")
+        return None, None
 
 
-def _refresh_live_ltp(symbols):
-    """Fetch live LTP for all symbols using Yahoo Finance and cache them."""
-    global _live_ltp_cache
-    if not symbols:
-        return
-    # Fetch in batches of 100
-    batch_size = 100
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i + batch_size]
+def get_cached_candles(symbol: str, force_refresh: bool = False) -> tuple:
+    """Retrieves candles from memory cache or fetches from Yahoo Finance."""
+    sym = symbol.upper()
+    with _cache_lock:
+        if not force_refresh and sym in _daily_cache and sym in _weekly_cache:
+            return _daily_cache[sym], _weekly_cache[sym]
+
+    d_candles, w_candles = fetch_stock_candles_yf(sym)
+    if d_candles and w_candles:
+        with _cache_lock:
+            _daily_cache[sym] = d_candles
+            _weekly_cache[sym] = w_candles
+    return d_candles, w_candles
+
+
+def background_cache_warmup():
+    """Warms up the candle cache for priority stocks in background."""
+    print("Initiating candle cache prefetch for top liquid stocks...")
+    priority_list = UNIVERSE_NIFTY500[:100]
+    for sym in priority_list:
         try:
-            quotes = get_yfinance_quotes(batch)
-            for sym, q in quotes.items():
-                if q.get("ltp"):
-                    _live_ltp_cache[sym] = q["ltp"]
-        except Exception as e:
-            app.logger.warning(f"Live LTP refresh error: {e}")
+            get_cached_candles(sym)
+            time.sleep(0.05)  # slight pacing to respect rate limits
+        except Exception:
+            pass
+    print("Initial cache prefetch complete.")
 
 
-def merge_candles(existing_candles, new_candles):
-    """Merge new candles into existing candles list, avoiding duplicates by date."""
-    candle_dict = {c[0][:10]: c for c in existing_candles}
-    for nc in new_candles:
-        date_str = nc[0][:10]
-        candle_dict[date_str] = nc
-    sorted_dates = sorted(candle_dict.keys())
-    return [candle_dict[d] for d in sorted_dates]
+# Start warmup thread once on launch
+threading.Thread(target=background_cache_warmup, daemon=True).start()
 
 
-def passes_liquidity_filter(candles):
-    if len(candles) < 20:
-        return False
-    turnovers = [c[4] * c[5] for c in candles[-20:]]
-    avg_turnover_cr = (sum(turnovers) / len(turnovers)) / 1e7
-    return avg_turnover_cr >= MIN_AVG_DAILY_TURNOVER_CR
+# ═══════════════════════════════════════════════════════════════════════════
+# API Endpoints
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/")
+def index_page():
+    """Renders the main responsive dashboard."""
+    return render_template("dashboard.html")
 
 
-def evaluate_symbol(symbol, candles, live_ltp):
-    if not passes_liquidity_filter(candles):
-        return None
+@app.route("/api/universe")
+def api_universe():
+    """Returns universe options and stock counts."""
+    return jsonify({
+        "nifty50_count": len(UNIVERSE_NIFTY50),
+        "nifty100_count": len(UNIVERSE_NIFTY100),
+        "nifty500_count": len(UNIVERSE_NIFTY500),
+    })
+
+
+@app.route("/api/scanner/44ma")
+def api_scanner_44ma():
+    """
+    Core 44 MA Touch & Near Scanner endpoint.
+    Query parameters:
+      - index: 'nifty500' (default), 'nifty100', 'nifty50'
+      - max_above: float (default 2.0)
+      - max_below: float (default 3.0)
+      - statuses: comma-separated list of statuses (e.g. 'Touching,Above,Near Below')
+      - min_price: float (default 0.0)
+      - min_weekly_vol: int (default 100000)
+      - rising_only: '1' or '0' (default '0')
+      - green_only: '1' or '0' (default '0')
+      - refresh: '1' or '0'
+    """
+    index_param = request.args.get("index", "nifty500").lower()
+    if index_param == "nifty50":
+        universe = UNIVERSE_NIFTY50
+    elif index_param == "nifty100":
+        universe = UNIVERSE_NIFTY100
+    else:
+        universe = UNIVERSE_NIFTY500
+
     try:
-        return strategies.build_alert(symbol, candles, live_ltp, timeframe="daily")
-    except Exception:
-        return None
+        max_above = float(request.args.get("max_above", 2.0))
+    except ValueError:
+        max_above = 2.0
 
-
-def evaluate_symbol_weekly(symbol, candles, live_ltp):
-    if len(candles) < 20:
-        return None
     try:
-        return strategies.build_alert(symbol, candles, live_ltp, timeframe="weekly")
-    except Exception:
-        return None
+        max_below = float(request.args.get("max_below", 3.0))
+    except ValueError:
+        max_below = 3.0
 
-
-def get_news_flag(symbol):
-    if not NEWSAPI_KEY:
-        return None
     try:
-        r = requests.get(
-            "https://newsapi.org/v2/everything",
-            params={"q": symbol, "language": "en", "sortBy": "publishedAt", "pageSize": 3,
-                    "apiKey": NEWSAPI_KEY},
-            timeout=8,
+        min_price = float(request.args.get("min_price", 0.0))
+    except ValueError:
+        min_price = 0.0
+
+    try:
+        min_weekly_vol = int(request.args.get("min_weekly_vol", 100000))
+    except ValueError:
+        min_weekly_vol = 100000
+
+    rising_only = request.args.get("rising_only") == "1"
+    green_only = request.args.get("green_only") == "1"
+    force_refresh = request.args.get("refresh") == "1"
+
+    status_filter = request.args.get("statuses", "")
+    allowed_statuses = [s.strip().lower() for s in status_filter.split(",") if s.strip()] if status_filter else []
+
+    both_results = []
+    daily_results = []
+    weekly_results = []
+
+    for sym in universe:
+        d_candles, w_candles = get_cached_candles(sym, force_refresh=force_refresh)
+        if not d_candles:
+            continue
+
+        comp_name = get_company_name(sym)
+        stock_eval = strategies.evaluate_44ma_stock(
+            symbol=sym,
+            company_name=comp_name,
+            daily_candles=d_candles,
+            weekly_candles=w_candles,
+            max_above_a=max_above,
+            max_below_b=max_below,
+            min_price=min_price,
+            min_weekly_vol=min_weekly_vol,
+            rising_only=rising_only,
+            green_only=green_only,
         )
-        arts = r.json().get("articles", [])
-        return [{"title": a["title"], "source": a["source"]["name"], "url": a["url"]} for a in arts]
-    except Exception:
-        return None
 
+        if not stock_eval:
+            continue
 
-# ---------------------------------------------------------------------------
-# Background scanner loop
-# ---------------------------------------------------------------------------
-_candle_cache = {}
-_weekly_candle_cache = {}
-_live_ltp_cache = {}
-_candle_cache_date   = None
-_weekly_cache_date   = None
+        # Status filter check
+        if allowed_statuses:
+            stat = stock_eval["status"].lower()
+            if not any(a in stat for a in allowed_statuses):
+                continue
 
-CANDLE_CACHE_FILE = os.path.join(
-    "/data" if os.path.isdir("/data") else os.path.dirname(os.path.abspath(__file__)),
-    "candle_cache.json.gz"
-)
+        # Segment into tabs and separate into Confirmed vs Watchlist
+        tf = stock_eval["timeframe"]
+        is_conf = stock_eval.get("is_confirmed", False)
+        
+        if tf == "Both":
+            both_results.append(stock_eval)
+        elif tf == "Daily":
+            daily_results.append(stock_eval)
+        elif tf == "Weekly":
+            weekly_results.append(stock_eval)
 
+    # Sort each list by smallest abs(Distance %) first (closest to 44 MA first!)
+    both_results.sort(key=lambda s: s["abs_distance"])
+    daily_results.sort(key=lambda s: s["abs_distance"])
+    weekly_results.sort(key=lambda s: s["abs_distance"])
 
-def save_candle_cache_to_disk():
-    try:
-        trimmed_daily = {sym: c[-180:] for sym, c in _candle_cache.items()}
-        trimmed_weekly = {sym: c[-80:] for sym, c in _weekly_candle_cache.items()}
-        data = {
-            "date": _candle_cache_date.isoformat() if _candle_cache_date else None,
-            "weekly_date": _weekly_cache_date.isoformat() if _weekly_cache_date else None,
-            "daily": trimmed_daily,
-            "weekly": trimmed_weekly
+    # Separate Confirmed (Touching / Above) from Pre-Breakout Watchlist (Near Below)
+    both_confirmed = [s for s in both_results if s.get("is_confirmed", False)]
+    both_watch = [s for s in both_results if not s.get("is_confirmed", False)]
+
+    daily_confirmed = [s for s in daily_results if s.get("is_confirmed", False)]
+    daily_watch = [s for s in daily_results if not s.get("is_confirmed", False)]
+
+    weekly_confirmed = [s for s in weekly_results if s.get("is_confirmed", False)]
+    weekly_watch = [s for s in weekly_results if not s.get("is_confirmed", False)]
+
+    now_ist = get_current_ist_time()
+    last_updated_str = now_ist.strftime("%d-%b-%Y %I:%M %p IST")
+
+    return jsonify({
+        "last_updated": last_updated_str,
+        "universe": index_param.upper(),
+        "total_scanned": len(universe),
+        "counts": {
+            "both": len(both_results),
+            "both_confirmed": len(both_confirmed),
+            "both_watch": len(both_watch),
+            "daily": len(daily_results),
+            "daily_confirmed": len(daily_confirmed),
+            "daily_watch": len(daily_watch),
+            "weekly": len(weekly_results),
+            "weekly_confirmed": len(weekly_confirmed),
+            "weekly_watch": len(weekly_watch),
+            "total_qualifying": len(both_results) + len(daily_results) + len(weekly_results),
+        },
+        "results": {
+            "both": both_results,
+            "both_confirmed": both_confirmed,
+            "both_watch": both_watch,
+            "daily": daily_results,
+            "daily_confirmed": daily_confirmed,
+            "daily_watch": daily_watch,
+            "weekly": weekly_results,
+            "weekly_confirmed": weekly_confirmed,
+            "weekly_watch": weekly_watch,
         }
-        with gzip.open(CANDLE_CACHE_FILE, "wt", encoding="utf-8") as f:
-            json.dump(data, f)
-        app.logger.info(f"Candle cache saved to disk ({len(trimmed_daily)} symbols).")
-    except Exception as e:
-        app.logger.warning(f"Could not save candle cache to disk: {e}")
+    })
 
 
-def load_candle_cache_from_disk():
-    global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
-    if not os.path.exists(CANDLE_CACHE_FILE):
-        return
-    try:
-        with gzip.open(CANDLE_CACHE_FILE, "rt", encoding="utf-8") as f:
-            data = json.load(f)
-        cached_daily = data.get("daily", {})
-        cached_weekly = data.get("weekly", {})
-        if cached_daily:
-            _candle_cache.update(cached_daily)
-            _candle_cache_date = dt.date.today()
-            app.logger.info(f"Loaded {len(_candle_cache)} daily candles from disk cache.")
-        if cached_weekly:
-            _weekly_candle_cache.update(cached_weekly)
-            _weekly_cache_date = dt.date.today()
-            app.logger.info(f"Loaded {len(_weekly_candle_cache)} weekly candles from disk cache.")
-        elif cached_daily:
-            for sym, c in cached_daily.items():
-                _weekly_candle_cache[sym] = resample_daily_to_weekly(c)
-            _weekly_cache_date = dt.date.today()
-            app.logger.info(f"Generated {len(_weekly_candle_cache)} weekly candles from daily cache.")
-        if not STATE.get("universe") and _candle_cache:
-            STATE["universe"] = sorted(list(_candle_cache.keys()))
-    except Exception as e:
-        app.logger.warning(f"Could not load candle cache from disk: {e}")
+@app.route("/api/scanner/triangles")
+def api_scanner_triangles():
+    """
+    Ascending & Symmetrical Triangle Breakouts endpoint.
+    Query parameters:
+      - index: 'nifty500', 'nifty100', 'nifty50'
+      - timeframe: 'daily' or 'weekly'
+    """
+    index_param = request.args.get("index", "nifty500").lower()
+    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    tf = request.args.get("timeframe", "daily").lower()
 
-
-def _maybe_invalidate_candle_cache():
-    global _candle_cache_date, _weekly_cache_date
-    today = dt.date.today()
-    if _candle_cache_date != today:
-        _candle_cache_date = today
-    if _weekly_cache_date != today:
-        _weekly_cache_date = today
-
-
-def _extract_ticker_df(df, ticker_ns, tickers_ns):
-    if df is None or df.empty:
-        return None
-
-    try:
-        if isinstance(df.columns, pd.MultiIndex):
-            ticker_df = df.xs(ticker_ns, axis=1, level=1)
-        else:
-            ticker_df = df
-
-        if isinstance(ticker_df.columns, pd.MultiIndex):
-            ticker_df.columns = [c[0] if isinstance(c, tuple) else c for c in ticker_df.columns]
-
-        return ticker_df
-    except KeyError:
-        return None
-
-
-def _download_batch_daily(batch, period="1y"):
-    """Download daily candles for a batch using parallel chart API fetching."""
-    if not batch:
-        return {}
-
-    batch_candles = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_sym = {executor.submit(fetch_candles_via_chart_api, s, period): s for s in batch}
-        for future in as_completed(future_to_sym):
-            sym = future_to_sym[future]
-            try:
-                c = future.result()
-                if c:
-                    batch_candles[sym] = c
-            except Exception:
-                pass
-
-    missing = [s for s in batch if s not in batch_candles]
-    if missing:
-        try:
-            mapped_to_orig = {f"{SYMBOL_MAP.get(sym.upper(), sym.upper())}.NS": sym.upper() for sym in missing}
-            tickers_ns = list(mapped_to_orig.keys())
-            session = get_yf_session()
-            df = yf.download(
-                tickers_ns,
-                period=period,
-                interval="1d",
-                ignore_tz=True,
-                progress=False,
-                threads=False,
-                session=session
-            )
-            if df is not None and not df.empty:
-                for ticker_ns, sym in mapped_to_orig.items():
-                    try:
-                        ticker_df = _extract_ticker_df(df, ticker_ns, tickers_ns)
-                        if ticker_df is None or ticker_df.empty:
-                            continue
-                        ticker_df = ticker_df.dropna(subset=["Close"])
-                        candles = []
-                        for index, row in ticker_df.iterrows():
-                            ts = index.strftime("%Y-%m-%dT00:00:00+05:30")
-                            candles.append([
-                                ts,
-                                float(row["Open"]),
-                                float(row["High"]),
-                                float(row["Low"]),
-                                float(row["Close"]),
-                                int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                                0
-                            ])
-                        if candles:
-                            batch_candles[sym] = candles
-                    except Exception as e:
-                        app.logger.warning(f"Error parsing daily candles for {sym}: {e}")
-        except Exception:
-            pass
-
-    return batch_candles
-
-
-def warm_cache_for_all_symbols(quick_only=False):
-    universe = STATE.get("universe") or []
-    if not universe:
-        return
-
-    _maybe_invalidate_candle_cache()
-
-    target_symbols = universe[:100] if quick_only else universe
-    missing_daily = [sym for sym in target_symbols if sym not in _candle_cache]
-    total_missing = len(missing_daily)
-
-    if total_missing > 0:
-        app.logger.info(f"Warming daily candles for {total_missing} symbols in sequential batches...")
-        batch_size = 50
-        batches = [missing_daily[i:i+batch_size] for i in range(0, total_missing, batch_size)]
-        completed = 0
-        STATE["scan_progress"] = f"0/{total_missing}"
-
-        for b in batches:
-            b_res = _download_batch_daily(b, period="1y")
-            for sym, candles in b_res.items():
-                _candle_cache[sym] = candles
-                _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
-            completed += len(b)
-            STATE["scan_progress"] = f"{min(completed, total_missing)}/{total_missing}"
-            _evaluate_all_symbols()
-            if len(batches) > 1:
-                time.sleep(0.3)
-
-        save_candle_cache_to_disk()
-        app.logger.info("Finished warming daily & weekly candles.")
-    else:
-        for sym in target_symbols:
-            if sym not in _weekly_candle_cache and sym in _candle_cache:
-                _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
-
-
-def is_market_open():
-    """True if Indian stock market is open: Mon-Fri, 9:15 AM to 3:30 PM IST."""
-    now_ist = get_ist_now()
-    if now_ist.weekday() >= 5:
-        return False
-    return MARKET_OPEN <= now_ist.time() <= MARKET_CLOSE
-
-
-def _evaluate_all_symbols():
-    universe = STATE.get("universe") or []
-    if not universe:
-        return [], [], [], []
-    confirmed, watch = [], []
-    w_confirmed, w_watch = [], []
-
-    ist_time_str = get_ist_now().strftime("%H:%M:%S")
+    ascending_triangles = []
+    symmetrical_triangles = []
 
     for sym in universe:
-        candles = _candle_cache.get(sym)
-        if candles:
-            # Fix 5: Use live LTP cache if available
-            live_price = _live_ltp_cache.get(sym, candles[-1][4])
-            res = evaluate_symbol(sym, candles, live_price)
-            if res:
-                res["timestamp"] = ist_time_str
-                res["is_midcap"] = sym in MIDCAP100_SYMBOLS
-                if res["status"] == "confirmed":
-                    if res.get("confidence", 0) >= 60:
-                        # Fix 7: Freshness check: only show confirmed signals from last 7 days
-                        bcd = res.get("breakout_candle_date")
-                        if bcd:
-                            try:
-                                bdate = dt.date.fromisoformat(str(bcd)[:10])
-                                age_days = (dt.date.today() - bdate).days
-                                if age_days > 7:
-                                    # Stale breakout — downgrade to watch
-                                    res["status"] = "pre_breakout_watch"
-                                    watch.append(res)
-                                    continue
-                            except Exception:
-                                pass
-                        confirmed.append(res)
-                else:
-                    watch.append(res)
-                
-            if passes_liquidity_filter(candles):
-                w_candles = _weekly_candle_cache.get(sym)
-                if w_candles:
-                    last_close_w = w_candles[-1][4]
-                    w_res = evaluate_symbol_weekly(sym, w_candles, last_close_w)
-                    if w_res:
-                        w_res["timestamp"] = ist_time_str
-                        w_res["is_midcap"] = sym in MIDCAP100_SYMBOLS
-                        if w_res["status"] == "confirmed":
-                            if w_res.get("confidence", 0) >= 60:
-                                w_confirmed.append(w_res)
-                        else:
-                            w_watch.append(w_res)
+        d_candles, w_candles = get_cached_candles(sym)
+        candles = w_candles if tf == "weekly" else d_candles
+        if not candles or len(candles) < 30:
+            continue
 
-    STATE["confirmed_alerts"] = sorted(confirmed, key=lambda x: -x["confidence"])
-    STATE["watch_alerts"] = sorted(watch, key=lambda x: -x["confidence"])
-    STATE["weekly_confirmed_alerts"] = sorted(w_confirmed, key=lambda x: -x["confidence"])
-    STATE["weekly_watch_alerts"] = sorted(w_watch, key=lambda x: -x["confidence"])
-    return confirmed, watch, w_confirmed, w_watch
+        comp_name = get_company_name(sym)
 
+        # 1. Ascending Triangle Check
+        asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
+        if asc:
+            ascending_triangles.append(asc)
 
-_scan_event = threading.Event()
-_latest_synced_date = None
+        # 2. Symmetrical Triangle Check
+        symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
+        if symm:
+            symmetrical_triangles.append(symm)
 
+    # Sort by smallest distance to breakout trigger first
+    ascending_triangles.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
+    symmetrical_triangles.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
 
-def sync_latest_daily_candles(symbols=None):
-    global _latest_synced_date
-    target_symbols = symbols or STATE.get("universe") or []
-    if not target_symbols:
-        return
-    app.logger.info(f"Syncing live daily candles for {len(target_symbols)} symbols...")
-    batch_size = 50
-    batches = [target_symbols[i:i+batch_size] for i in range(0, len(target_symbols), batch_size)]
+    asc_confirmed = [x for x in ascending_triangles if "Confirmed" in x["status"]]
+    asc_watch = [x for x in ascending_triangles if "Confirmed" not in x["status"]]
 
-    for b in batches:
-        b_res = _download_batch_daily(b, period="5d")
-        for sym, new_candles in b_res.items():
-            if sym in _candle_cache:
-                _candle_cache[sym] = merge_candles(_candle_cache[sym], new_candles)
-            else:
-                _candle_cache[sym] = new_candles
-            _weekly_candle_cache[sym] = resample_daily_to_weekly(_candle_cache[sym])
-        if len(batches) > 1:
-            time.sleep(0.3)
+    symm_confirmed = [x for x in symmetrical_triangles if "Confirmed" in x["status"]]
+    symm_watch = [x for x in symmetrical_triangles if "Confirmed" not in x["status"]]
 
-    _latest_synced_date = get_ist_now().date()
-    save_candle_cache_to_disk()
-
-
-def scan_loop():
-    global _latest_synced_date
-    STATE["scanning"] = True
-
-    load_candle_cache_from_disk()
-
-    if _candle_cache:
-        try:
-            _evaluate_all_symbols()
-            STATE["last_scan"] = get_ist_now().strftime("%H:%M:%S") + " (IST - Cache)"
-        except Exception as e:
-            app.logger.warning(f"Initial cache evaluation error: {e}")
-
-    while True:
-        try:
-            universe = STATE["universe"]
-            if not universe:
-                STATE["universe"] = load_nifty500_symbols()
-                universe = STATE["universe"]
-                if not universe:
-                    STATE["error"] = "Nifty 500 list not loaded yet."
-                    time.sleep(10)
-                    continue
-
-            market_open = is_market_open()
-            STATE["error"] = None
-
-            warm_cache_for_all_symbols()
-
-            if market_open:
-                sync_latest_daily_candles()
-                # Fix 6: Refresh live LTP during market hours
-                _refresh_live_ltp(universe)
-
-            confirmed, watch, w_confirmed, w_watch = _evaluate_all_symbols()
-            STATE["scan_progress"] = None
-
-            try:
-                notify_new_alerts(confirmed + w_confirmed, watch + w_watch)
-            except Exception as e:
-                app.logger.warning(f"Notification error: {e}")
-
-            if market_open:
-                STATE["last_scan"] = get_ist_now().strftime("%H:%M:%S") + " (IST - Live)"
-            else:
-                STATE["last_scan"] = get_ist_now().strftime("%H:%M:%S") + " (IST - EOD)"
-                STATE["error"] = "Market closed (9:15 AM – 3:30 PM IST). Showing EOD patterns. Live scanning resumes tomorrow at 9:15 AM IST."
-
-        except Exception as e:
-            STATE["error"] = f"Scan error: {e}"
-            app.logger.exception("Error in scan_loop")
-
-        sleep_secs = POLL_INTERVAL_SECONDS if is_market_open() else 300
-        _scan_event.clear()
-        _scan_event.wait(timeout=sleep_secs)
-
-
-_thread_started = False
-
-
-def start_scanner_thread():
-    global _thread_started
-    if not _thread_started:
-        t = threading.Thread(target=scan_loop, daemon=True)
-        t.start()
-        _thread_started = True
-
-
-# ---------------------------------------------------------------------------
-# API endpoints for the dashboard
-# ---------------------------------------------------------------------------
-@app.route("/api/signals")
-def api_signals():
+    now_ist = get_current_ist_time()
     return jsonify({
-        "confirmed_alerts": STATE["confirmed_alerts"],
-        "watch_alerts": STATE["watch_alerts"],
-        "last_scan": STATE["last_scan"],
-        "scan_progress": STATE["scan_progress"],
-        "market_open": is_market_open(),
-        "error": STATE["error"],
-        "universe_size": len(STATE["universe"]),
+        "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
+        "timeframe": tf.capitalize(),
+        "ascending": ascending_triangles,
+        "ascending_confirmed": asc_confirmed,
+        "ascending_watch": asc_watch,
+        "symmetrical": symmetrical_triangles,
+        "symmetrical_confirmed": symm_confirmed,
+        "symmetrical_watch": symm_watch,
+        "counts": {
+            "ascending": len(ascending_triangles),
+            "ascending_confirmed": len(asc_confirmed),
+            "ascending_watch": len(asc_watch),
+            "symmetrical": len(symmetrical_triangles),
+            "symmetrical_confirmed": len(symm_confirmed),
+            "symmetrical_watch": len(symm_watch),
+        }
     })
 
 
-@app.route("/api/signals/weekly")
-def api_signals_weekly():
-    return jsonify({
-        "confirmed_alerts": STATE["weekly_confirmed_alerts"],
-        "watch_alerts": STATE["weekly_watch_alerts"],
-        "last_scan": STATE["last_scan"],
-        "scan_progress": STATE["scan_progress"],
-        "market_open": is_market_open(),
-        "error": STATE["error"],
-        "universe_size": len(STATE["universe"]),
-    })
-
-@app.route("/api/news/<symbol>")
-def api_news(symbol):
-    return jsonify({"news": get_news_flag(symbol)})
-
-
-@app.route("/api/ltp")
-def api_ltp():
-    raw_symbols = request.args.get("symbols", "")
-    symbols = [s.strip().upper() for s in raw_symbols.split(",") if s.strip()]
-    if not symbols:
-        return jsonify({}), 200
-
-    try:
-        result = get_yfinance_quotes(symbols)
-        return jsonify(result)
-    except Exception as e:
-        app.logger.warning(f"/api/ltp error: {e}")
-        return jsonify({}), 500
-
-
-@app.route("/api/stocks")
-def api_stocks():
-    """Return all Nifty 500 stocks with live LTP, today's change%, and pattern tags."""
-    universe = STATE["universe"]
-
-    alert_map = {}
-    for a in STATE["confirmed_alerts"]:
-        alert_map[a["symbol"]] = {"pattern": a["strategy_used"], "status": "confirmed", "confidence": a["confidence"]}
-    for a in STATE["watch_alerts"]:
-        if a["symbol"] not in alert_map:
-            alert_map[a["symbol"]] = {"pattern": a["strategy_used"], "status": "watch", "confidence": a["confidence"]}
-
-    stocks = []
-    for sym in universe:
-        candles = _candle_cache.get(sym)
-        
-        if not candles or len(candles) < 2:
-            stocks.append({
-                "symbol": sym,
-                "close": None,
-                "prev_close": None,
-                "change_pct": None,
-                "volume": None,
-                "high_52w": None,
-                "low_52w": None,
-                "pattern": alert_map.get(sym, {}).get("pattern", ""),
-                "status": alert_map.get(sym, {}).get("status", ""),
-                "confidence": alert_map.get(sym, {}).get("confidence", 0),
-            })
-            continue
-
-        ltp = candles[-1][4]
-        prev_close = candles[-2][4]
-        volume = candles[-1][5]
-
-        change_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close else 0.0
-        highs = [c[2] for c in candles[-252:]]
-        lows  = [c[3] for c in candles[-252:]]
-        max_h = max(highs) if highs else None
-        min_l = min(lows) if lows else None
-        dist_52w = round(((max_h - ltp) / max_h) * 100, 2) if max_h and max_h > 0 else None
-
-        stocks.append({
-            "symbol":       sym,
-            "close":        round(ltp, 2),
-            "prev_close":   round(prev_close, 2),
-            "change_pct":   change_pct,
-            "volume":       int(volume),
-            "high_52w":     round(max_h, 2) if max_h else None,
-            "low_52w":      round(min_l, 2) if min_l else None,
-            "dist_52w_pct": dist_52w,
-            "is_52w_high":  (dist_52w is not None and dist_52w <= 0.5),
-            "is_midcap":    sym in MIDCAP100_SYMBOLS,
-            "pattern":      alert_map.get(sym, {}).get("pattern", ""),
-            "status":       alert_map.get(sym, {}).get("status", ""),
-            "confidence":   alert_map.get(sym, {}).get("confidence", 0),
-        })
-
-    stocks.sort(key=lambda x: (-x["confidence"], x["symbol"]))
-    return jsonify({
-        "stocks": stocks,
-        "total": len(stocks),
-        "loaded": sum(1 for s in stocks if s["close"] is not None),
-        "last_scan": STATE["last_scan"],
-        "scan_progress": STATE["scan_progress"],
-    })
-
-
-@app.route("/api/stocks/52w")
-def api_stocks_52w():
-    """
-    Return all Nifty 500 stocks within 5% of their 52-week high,
-    identifying 52W Box Breakouts and Midcap 100 stocks.
-    """
-    universe = STATE.get("universe") or []
-    alert_map = {}
-    for a in STATE.get("confirmed_alerts", []):
-        alert_map[a["symbol"]] = {"pattern": a["strategy_used"], "status": "confirmed", "confidence": a["confidence"]}
-    for a in STATE.get("watch_alerts", []):
-        if a["symbol"] not in alert_map:
-            alert_map[a["symbol"]] = {"pattern": a["strategy_used"], "status": "watch", "confidence": a["confidence"]}
-
-    results = []
-    for sym in universe:
-        candles = _candle_cache.get(sym)
-        if not candles or len(candles) < 20:
-            continue
-        
-        h_bars = candles[-252:]
-        highs = [c[2] for c in h_bars]
-        lows = [c[3] for c in h_bars]
-        if not highs:
-            continue
-        
-        high_52w = max(highs)
-        low_52w = min(lows)
-        ltp = candles[-1][4]
-        prev_close = candles[-2][4] if len(candles) >= 2 else ltp
-        volume = candles[-1][5]
-
-        if high_52w <= 0:
-            continue
-
-        dist_pct = round(((high_52w - ltp) / high_52w) * 100, 2)
-        change_pct = round((ltp - prev_close) / prev_close * 100, 2) if prev_close else 0.0
-
-        if dist_pct <= 5.0:
-            is_box = False
-            box_label = ""
-            box_top = high_52w
-            if len(candles) >= 25:
-                c_bars = candles[-35:-1]
-                c_highs = [c[2] for c in c_bars]
-                c_lows = [c[3] for c in c_bars]
-                box_top = max(c_highs)
-                box_bottom = min(c_lows)
-                box_h_pct = ((box_top - box_bottom) / box_bottom) * 100 if box_bottom > 0 else 999
-
-                if ltp >= box_top * 0.995 or dist_pct <= 0.5:
-                    is_box = True
-                    box_label = "📦 52W Box Breakout"
-                elif dist_pct <= 2.5 and box_h_pct <= 16.0:
-                    is_box = True
-                    box_label = "📦 52W Box Setup"
-
-            existing_pattern = alert_map.get(sym, {}).get("pattern", "")
-            existing_status = alert_map.get(sym, {}).get("status", "")
-            existing_conf = alert_map.get(sym, {}).get("confidence", 0)
-
-            final_pattern = existing_pattern if existing_pattern else (box_label if box_label else "52W High")
-            final_status = existing_status if existing_status else ("confirmed" if (dist_pct <= 0.5 or (is_box and ltp >= box_top * 0.995)) else "watch")
-            final_conf = existing_conf if existing_conf > 0 else (88 if is_box else 75)
-
-            results.append({
-                "symbol": sym,
-                "ltp": round(ltp, 2),
-                "change_pct": change_pct,
-                "high_52w": round(high_52w, 2),
-                "low_52w": round(low_52w, 2),
-                "dist_52w_pct": max(0.0, dist_pct),
-                "is_at_high": dist_pct <= 0.5,
-                "is_box_breakout": is_box,
-                "box_label": box_label,
-                "is_midcap": sym in MIDCAP100_SYMBOLS,
-                "volume": int(volume),
-                "pattern": final_pattern,
-                "status": final_status,
-                "confidence": final_conf,
-            })
-
-    results.sort(key=lambda x: (x["dist_52w_pct"], -x["confidence"], x["symbol"]))
-
-    return jsonify({
-        "stocks": results,
-        "total": len(results),
-        "at_high_count": sum(1 for s in results if s["is_at_high"]),
-        "within_2pct_count": sum(1 for s in results if s["dist_52w_pct"] <= 2.0),
-        "within_5pct_count": len(results),
-        "box_count": sum(1 for s in results if s["is_box_breakout"]),
-        "midcap_count": sum(1 for s in results if s["is_midcap"]),
-        "last_scan": STATE.get("last_scan"),
-    })
-
-
-def get_or_fetch_candles(symbol, force=False):
-    _maybe_invalidate_candle_cache()
-    sym = symbol.upper()
-    if force:
-        try:
-            candles = get_daily_candles(sym)
-            if candles:
-                _candle_cache[sym] = candles
-                _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
-                return candles
-        except Exception:
-            pass
-    candles = _candle_cache.get(sym)
-    if not candles:
-        try:
-            candles = get_daily_candles(sym)
-            if candles:
-                _candle_cache[sym] = candles
-                _weekly_candle_cache[sym] = resample_daily_to_weekly(candles)
-        except Exception:
-            pass
-    return candles
-
-
-def get_or_fetch_weekly_candles(symbol, force=False):
-    _maybe_invalidate_candle_cache()
-    sym = symbol.upper()
-    if force:
-        try:
-            candles = get_weekly_candles(sym)
-            if candles:
-                _weekly_candle_cache[sym] = candles
-                return candles
-        except Exception:
-            pass
-    candles = _weekly_candle_cache.get(sym)
-    if not candles:
-        try:
-            candles = get_weekly_candles(sym)
-            if candles:
-                _weekly_candle_cache[sym] = candles
-        except Exception:
-            pass
-    return candles
-
-
-@app.route("/api/scan/quick", methods=["POST"])
-def api_scan_quick():
-    def do_quick_scan():
-        STATE["scan_progress"] = "Quick Scan (100)..."
-        universe = STATE.get("universe") or []
-        top100 = universe[:100]
-        warm_cache_for_all_symbols(quick_only=True)
-        if is_market_open():
-            sync_latest_daily_candles(top100)
-        _evaluate_all_symbols()
-        STATE["scan_progress"] = None
-        STATE["last_scan"] = dt.datetime.now().strftime("%H:%M:%S") + " (Quick)"
-    
-    threading.Thread(target=do_quick_scan, daemon=True).start()
-    return jsonify({"success": True, "message": "Quick scan started for top 100 liquid stocks."})
-
-
-@app.route("/api/scan/force", methods=["POST"])
-def api_scan_force():
-    mode = request.args.get("mode", "full")
-    if mode == "quick":
-        return api_scan_quick()
-    global _latest_synced_date
-    _latest_synced_date = None
-    _scan_event.set()
-    return jsonify({"success": True, "message": "Full scan triggered immediately."})
-
-
-@app.route("/api/cache/clear", methods=["POST"])
-@app.route("/api/cache/clear/<symbol>", methods=["POST"])
-def api_clear_cache(symbol=None):
-    global _candle_cache, _weekly_candle_cache, _candle_cache_date, _weekly_cache_date
-    if symbol:
-        sym = symbol.upper()
-        _candle_cache.pop(sym, None)
-        _weekly_candle_cache.pop(sym, None)
-        return jsonify({"success": True, "cleared_symbols": 1, "symbol": sym})
-    count = len(_candle_cache) + len(_weekly_candle_cache)
-    _candle_cache.clear()
-    _weekly_candle_cache.clear()
-    _candle_cache_date  = None
-    _weekly_cache_date  = None
-    app.logger.info("Candle cache manually cleared via /api/cache/clear")
-    return jsonify({"success": True, "cleared_symbols": count})
-
-
-def extract_pattern_geometries(candles, timeframe="daily", live_price=None):
-    """
-    Computes geometric drawing data (trendline coordinates and breakout points)
-    for chart overlays. Operates entirely in-memory for instant rendering.
-    """
-    if not candles or len(candles) < 20:
-        return {}
-
-    window = candles[-120:]
-    dates = []
-    for c in window:
-        ts = c[0]
-        dates.append(ts[:10] if isinstance(ts, str) else str(ts)[:10])
-
-    n = len(window)
-    patterns = {}
-
-    def trendline_pts(slope, intercept, x_start, x_end, bar_offset=0):
-        pts = []
-        for xi in (x_start, x_end):
-            idx = bar_offset + xi
-            if 0 <= idx < len(dates):
-                pts.append({"time": dates[idx], "value": round(slope * xi + intercept, 2)})
-        return pts if len(pts) == 2 else []
-
-    cur_p = live_price if live_price is not None else candles[-1][4]
-
-    # ── TRIANGLE ─────────────────────────────────────────────────────────────
-    try:
-        tri = strategies.detect_triangle(candles, timeframe=timeframe, live_price=cur_p)
-        if tri:
-            LOOKBACK = tri.get("lookback", 40 if timeframe == "daily" else 20)
-            LOOKBACK = min(LOOKBACK, n)
-            w = candles[-LOOKBACK:]
-            highs = [c[2] for c in w]
-            lows  = [c[3] for c in w]
-            sh, sl_ = strategies.find_swing_points(highs, lows, window=2)
-            rs, ri, _ = strategies.linreg(sh)
-            ss, si_, _ = strategies.linreg(sl_)
-            off = n - LOOKBACK
-            lx  = LOOKBACK - 1
-
-            if tri["type"] == "Ascending Triangle":
-                res_line = trendline_pts(0, tri["resistance_now"], 0, lx, off)
-            else:
-                if len(sh) >= 2 and rs < 0:
-                    res_line = trendline_pts(rs, ri, 0, lx, off)
-                else:
-                    start_h = max(highs[:5]) if highs else tri["resistance_now"]
-                    m = (tri["resistance_now"] - start_h) / max(1, lx)
-                    res_line = trendline_pts(m, start_h, 0, lx, off)
-
-            if len(sl_) >= 2 and ss > 0:
-                sup_line = trendline_pts(ss, si_, 0, lx, off)
-            else:
-                start_l = min(lows[:5]) if lows else tri["support_now"]
-                m = (tri["support_now"] - start_l) / max(1, lx)
-                sup_line = trendline_pts(m, start_l, 0, lx, off)
-
-            patterns["triangle"] = {
-                "type": tri["type"],
-                "resistance_line": res_line,
-                "support_line":    sup_line,
-                "resistance_level": tri["resistance_now"],
-                "support_level":    tri["support_now"],
-                "breakout_candle_date": candles[-1][0][:10] if tri.get("status") == "confirmed" else None,
-            }
-    except Exception:
-        pass
-
-    # ── PENNANT ───────────────────────────────────────────────────────────────
-    try:
-        pennant = strategies.detect_pennant(candles)
-        if pennant:
-            closes = [c[4] for c in window]
-            pole_si, pole_ei, consol_si = 0, 0, 0
-            for i in range(max(0, n - 25), n - 8):
-                move = (closes[i + 8] - closes[i]) / closes[i] * 100
-                if move >= 6.0:
-                    pole_si   = i
-                    pole_ei   = i + 8
-                    consol_si = pole_ei
-                    break
-            consol_w = window[consol_si:]
-            c_highs = [c[2] for c in consol_w]
-            c_lows  = [c[3] for c in consol_w]
-            if len(consol_w) >= 2:
-                rs, ri, _ = strategies.linreg([(xi, v) for xi, v in enumerate(c_highs)])
-                ss, si_v, _ = strategies.linreg([(xi, v) for xi, v in enumerate(c_lows)])
-                cx = len(consol_w) - 1
-                patterns["pennant"] = {
-                    "type": pennant["type"],
-                    "pole": [
-                        {"time": dates[pole_si],     "value": round(window[pole_si][4],     2)},
-                        {"time": dates[pole_ei - 1], "value": round(window[pole_ei - 1][4], 2)},
-                    ],
-                    "resistance_line": trendline_pts(rs, ri, 0, cx, consol_si),
-                    "support_line":    trendline_pts(ss, si_v, 0, cx, consol_si),
-                    "resistance_level": pennant["resistance"],
-                    "support_level":    pennant["support"],
-                    "pole_move_pct":    pennant["pole_move_pct"],
-                    "breakout_candle_date": candles[-1][0][:10] if pennant.get("status") == "confirmed" else None,
-                }
-    except Exception:
-        pass
-
-    # ── FALLING CHANNEL ──────────────────────────────────────────────────────
-    try:
-        fc = strategies.detect_falling_channel_reversal(candles, timeframe=timeframe, live_price=cur_p)
-        if fc:
-            LOOKBACK = fc.get("lookback", 35 if timeframe == "daily" else 22)
-            LOOKBACK = min(LOOKBACK, n)
-            rs = fc["res_slope"]
-            ri = fc["res_intercept"]
-            ss = fc["sup_slope"]
-            si_ = fc["sup_intercept"]
-            off = n - LOOKBACK
-            lx  = LOOKBACK - 1
-            res_line = trendline_pts(rs, ri, 0, lx, off)
-            sup_line = trendline_pts(ss, si_, 0, lx, off)
-            patterns["falling_channel"] = {
-                "type": fc["type"],
-                "resistance_line": res_line,
-                "support_line":    sup_line,
-                "resistance_level": fc["resistance_now"],
-                "support_level":    fc["support_now"],
-                "breakout_candle_date": fc.get("breakout_candle_date"),
-            }
-    except Exception:
-        pass
-
-    # ── 52W BOX SETUP / BREAKOUT ─────────────────────────────────────────────
-    try:
-        if timeframe == "daily" and len(candles) >= 35:
-            c_bars = candles[-35:-1]
-            c_highs = [c[2] for c in c_bars]
-            c_lows = [c[3] for c in c_bars]
-            box_top = max(c_highs)
-            box_bottom = min(c_lows)
-            box_h_pct = ((box_top - box_bottom) / box_bottom) * 100 if box_bottom > 0 else 999
-            if box_h_pct <= 16.0 and (cur_p >= box_top * 0.985):
-                is_breakout = cur_p >= box_top * 0.995
-                patterns["box"] = {
-                    "type": "52W Box Breakout" if is_breakout else "52W Box Setup",
-                    "resistance_line": trendline_pts(0, box_top, 0, 34, n - 35),
-                    "support_line": trendline_pts(0, box_bottom, 0, 34, n - 35),
-                    "resistance_level": round(box_top, 2),
-                    "support_level": round(box_bottom, 2),
-                    "breakout_candle_date": candles[-1][0][:10] if is_breakout else None,
-                }
-    except Exception:
-        pass
-
-    return patterns
-
-
-# ---------------------------------------------------------------------------
-# High-speed combined Chart Endpoint (Candles + Patterns in ONE request)
-# ---------------------------------------------------------------------------
 @app.route("/api/chart/<symbol>")
-@app.route("/api/chart/<symbol>/<timeframe>")
-def api_chart(symbol, timeframe="daily"):
+def api_chart(symbol):
     """
-    Combined high-performance endpoint: returns both candles and pattern
-    geometry in a single call, eliminating network waterfall delays and rendering
-    instantly.
+    Provides combined OHLCV candles, 44 MA series, and triangle geometries
+    for interactive TradingView / Lightweight Charts rendering.
     """
     sym = symbol.upper()
-    force = request.args.get("force") == "1"
-    tf = request.args.get("tf", timeframe).lower()
+    tf = request.args.get("tf", "daily").lower()
+    d_candles, w_candles = get_cached_candles(sym)
 
-    if tf == "weekly":
-        candles = get_or_fetch_weekly_candles(sym, force=force)
-    else:
-        tf = "daily"
-        candles = get_or_fetch_candles(sym, force=force)
-
+    candles = w_candles if tf == "weekly" else d_candles
     if not candles:
-        return jsonify({"error": f"Candle data for {sym} unavailable."}), 404
+        return jsonify({"error": f"No candle data for {sym}"}), 404
 
-    result = []
-    for c in candles[-120:]:
-        ts = c[0]
-        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
-        result.append({
-            "time":   date_str,
-            "open":   round(c[1], 2),
-            "high":   round(c[2], 2),
-            "low":    round(c[3], 2),
-            "close":  round(c[4], 2),
-            "volume": int(c[5]),
+    closes = [c[4] for c in candles]
+    highs = [c[2] for c in candles]
+    lows = [c[3] for c in candles]
+    ma44_series = strategies.calculate_ma44(closes)
+
+    candle_data = []
+    ma_line_data = []
+
+    for i, c in enumerate(candles[-120:]):
+        c_idx = len(candles) - 120 + i if len(candles) >= 120 else i
+        candle_data.append({
+            "time": c[0],
+            "open": c[1],
+            "high": c[2],
+            "low": c[3],
+            "close": c[4],
+            "volume": c[5],
         })
+        ma_val = ma44_series[c_idx]
+        if ma_val is not None:
+            ma_line_data.append({
+                "time": c[0],
+                "value": ma_val
+            })
 
-    live_price = _live_ltp_cache.get(sym, candles[-1][4])
-    patterns = extract_pattern_geometries(candles, timeframe=tf, live_price=live_price)
+    # Pattern check
+    comp_name = get_company_name(sym)
+    asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
+    symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
+
+    # Detect 44 MA Touch date
+    touch_date = None
+    cur_ma = ma44_series[-1]
+    if cur_ma is not None and len(candles) >= 1:
+        if lows[-1] <= cur_ma <= highs[-1]:
+            touch_date = candles[-1][0]
+        elif len(candles) >= 2 and lows[-2] <= ma44_series[-2] <= highs[-2]:
+            touch_date = candles[-2][0]
+
+    # Active pattern selection (prioritize confirmed pattern, then watch)
+    active_pat = asc if (asc and "Confirmed" in asc.get("status", "")) else (
+        symm if (symm and "Confirmed" in symm.get("status", "")) else (asc or symm)
+    )
+
+    breakout_date = None
+    res_line = None
+    sup_line = None
+    pat_type = None
+
+    if active_pat:
+        pat_type = active_pat.get("pattern")
+        breakout_date = active_pat.get("breakout_candle_date")
+        res_line = active_pat.get("resistance_line")
+        sup_line = active_pat.get("support_line")
 
     return jsonify({
         "symbol": sym,
+        "company": comp_name,
         "timeframe": tf,
-        "candles": result,
-        "patterns": patterns,
-        "ltp": round(live_price, 2),
+        "candles": candle_data,
+        "ma44_line": ma_line_data,
+        "current_ma44": ma44_series[-1] if ma44_series else None,
+        "cmp": closes[-1] if closes else None,
+        "pattern_type": pat_type,
+        "resistance_line": res_line,
+        "support_line": sup_line,
+        "breakout_candle_date": breakout_date,
+        "touch_candle_date": touch_date,
+        "ascending_pattern": asc,
+        "symmetrical_pattern": symm,
     })
 
 
-@app.route("/api/candles/<symbol>")
-def api_candles(symbol):
-    sym = symbol.upper()
-    force = request.args.get("force") == "1"
-    candles = get_or_fetch_candles(sym, force=force)
-    if not candles:
-        return jsonify({"error": "Symbol candle data not loaded or unavailable."}), 404
+@app.route("/api/export/csv")
+def api_export_csv():
+    """Generates and downloads CSV of current 44 MA qualifying stocks."""
+    tab = request.args.get("tab", "both").lower()
+    index_param = request.args.get("index", "nifty500").lower()
+    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
 
-    result = []
-    for c in candles[-120:]:
-        ts = c[0]
-        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
-        result.append({
-            "time":   date_str,
-            "open":   round(c[1], 2),
-            "high":   round(c[2], 2),
-            "low":    round(c[3], 2),
-            "close":  round(c[4], 2),
-            "volume": int(c[5]),
-        })
-
-    return jsonify({"symbol": sym, "candles": result})
-
-
-@app.route("/api/candles/<symbol>/weekly")
-def api_candles_weekly(symbol):
-    sym = symbol.upper()
-    force = request.args.get("force") == "1"
-    candles = get_or_fetch_weekly_candles(sym, force=force)
-    if not candles:
-        return jsonify({"error": "Symbol weekly candle data not loaded or unavailable."}), 404
-
-    result = []
-    for c in candles[-120:]:
-        ts = c[0]
-        date_str = ts[:10] if isinstance(ts, str) else str(ts)[:10]
-        result.append({
-            "time":   date_str,
-            "open":   round(c[1], 2),
-            "high":   round(c[2], 2),
-            "low":    round(c[3], 2),
-            "close":  round(c[4], 2),
-            "volume": int(c[5]),
-        })
-
-    return jsonify({"symbol": sym, "candles": result})
-
-
-# ---------------------------------------------------------------------------
-# Pattern geometry endpoint — returns trendline data for chart drawing
-# ---------------------------------------------------------------------------
-@app.route("/api/pattern/<symbol>")
-def api_pattern(symbol):
-    sym = symbol.upper()
-    candles = get_or_fetch_candles(sym)
-    if not candles:
-        return jsonify({"error": "No candle data"}), 404
-
-    live_price = _live_ltp_cache.get(sym, candles[-1][4])
-    patterns = extract_pattern_geometries(candles, timeframe="daily", live_price=live_price)
-    return jsonify({"symbol": sym, "patterns": patterns})
-
-
-@app.route("/api/pattern/<symbol>/weekly")
-def api_pattern_weekly(symbol):
-    sym = symbol.upper()
-    candles = get_or_fetch_weekly_candles(sym)
-    if not candles:
-        return jsonify({"error": "No candle data"}), 404
-
-    live_price = _live_ltp_cache.get(sym, candles[-1][4])
-    patterns = extract_pattern_geometries(candles, timeframe="weekly", live_price=live_price)
-    return jsonify({"symbol": sym, "patterns": patterns})
-
-
-# ---------------------------------------------------------------------------
-# Notification endpoints (ntfy.sh)
-# ---------------------------------------------------------------------------
-@app.route("/api/notifications/settings", methods=["GET"])
-def api_notification_settings_get():
-    return jsonify({
-        "topic": NTFY_TOPIC,
-        "enabled": NTFY_ENABLED,
-        "server": NTFY_SERVER,
-    })
-
-
-@app.route("/api/notifications/settings", methods=["POST"])
-def api_notification_settings_save():
-    global NTFY_TOPIC, NTFY_ENABLED
-    d = request.json or {}
-    NTFY_TOPIC = d.get("topic", "").strip()
-    NTFY_ENABLED = bool(d.get("enabled", False))
-
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    env_lines = []
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                if not line.startswith("NTFY_TOPIC=") and not line.startswith("NTFY_ENABLED="):
-                    env_lines.append(line.rstrip("\n"))
-    env_lines.append(f"NTFY_TOPIC={NTFY_TOPIC}")
-    env_lines.append(f"NTFY_ENABLED={'true' if NTFY_ENABLED else 'false'}")
-    with open(env_path, "w") as f:
-        f.write("\n".join(env_lines) + "\n")
-
-    return jsonify({"success": True})
-
-
-@app.route("/api/notifications/test", methods=["POST"])
-def api_notification_test():
-    if not NTFY_TOPIC:
-        return jsonify({"success": False, "error": "No topic configured"}), 400
-    ok = send_ntfy_notification(
-        "🔔 Test Notification",
-        "Your Stock Scanner notifications are working! You'll receive alerts here when breakouts are detected.",
-        priority="default",
-        tags=["white_check_mark"],
-    )
-    return jsonify({"success": ok, "error": None if ok else "Failed to send notification"})
-
-
-# ---------------------------------------------------------------------------
-# App Entry Point
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
     try:
-        STATE["universe"] = load_nifty500_symbols()
-        start_scanner_thread()
-    except Exception as e:
-        print(f"Error starting scanner on startup: {e}")
-        
+        max_above = float(request.args.get("max_above", 2.0))
+        max_below = float(request.args.get("max_below", 3.0))
+    except ValueError:
+        max_above, max_below = 2.0, 3.0
+
+    rows = []
+    for sym in universe:
+        d_candles, w_candles = get_cached_candles(sym)
+        if not d_candles:
+            continue
+        eval_res = strategies.evaluate_44ma_stock(
+            symbol=sym,
+            company_name=get_company_name(sym),
+            daily_candles=d_candles,
+            weekly_candles=w_candles,
+            max_above_a=max_above,
+            max_below_b=max_below,
+        )
+        if not eval_res:
+            continue
+
+        if tab != "all" and eval_res["timeframe"].lower() != tab:
+            continue
+
+        rows.append(eval_res)
+
+    rows.sort(key=lambda s: s["abs_distance"])
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Symbol", "Company", "CMP", "MA44", "Distance %", "Status", "Day Change %", "Volume", "Timeframe"])
+    for r in rows:
+        writer.writerow([
+            r["symbol"],
+            r["company"],
+            r["cmp"],
+            r["ma44"],
+            f"{r['distance_pct']}%",
+            r["status"],
+            f"{r['day_change_pct']}%",
+            r["volume"],
+            r["timeframe"]
+        ])
+
+    output.seek(0)
+    filename = f"44MA_Scanner_{index_param}_{tab}_{dt.date.today().strftime('%Y%m%d')}.csv"
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment;filename={filename}"}
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Application Entry Point
+# ═══════════════════════════════════════════════════════════════════════════
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"\nScanner active at http://0.0.0.0:{port}\n")
+    print(f"\n=======================================================")
+    print(f" 🚀 44 MA Touch & Near Scanner Active at http://0.0.0.0:{port}")
+    print(f"=======================================================\n")
     app.run(host="0.0.0.0", port=port, debug=False)

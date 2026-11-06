@@ -1,4 +1,6 @@
 flask==3.0.3
+fastapi>=0.111.0
+uvicorn>=0.30.0
 requests==2.32.3
 python-dotenv>=1.0.1
 yfinance>=0.2.40
