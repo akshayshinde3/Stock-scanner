@@ -31,6 +31,12 @@ DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 NIFTY500_FILE = os.path.join(DATA_DIR, "nifty500.txt")
 TEMPLATE_FILE = os.path.join(DATA_DIR, "templates", "dashboard.html")
 
+SITE_PASSWORD = (
+    os.environ.get("SITE_PASSWORD")
+    or os.environ.get("APP_PASSWORD")
+    or "Akshay1999"
+).strip()
+
 # Company Name Mapping
 COMPANY_NAMES = {
     "RELIANCE": "Reliance Industries Ltd.",

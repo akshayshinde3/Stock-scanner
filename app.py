@@ -29,15 +29,24 @@ import datetime as dt
 from typing import Dict, List, Optional
 import pandas as pd
 import yfinance as yf
-from flask import Flask, jsonify, request, render_template, send_file, Response
+from flask import Flask, jsonify, request, render_template, send_file, Response, session, redirect, url_for
 
 import strategies
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Flask Application Setup
+# Flask Application Setup & Security Configuration
 # ═══════════════════════════════════════════════════════════════════════════
 app = Flask(__name__, template_folder="templates")
 app.config["JSON_SORT_KEYS"] = False
+app.secret_key = os.environ.get("APP_SECRET_KEY", "trading_scanner_super_secure_key_2026_x7k9")
+app.config["PERMANENT_SESSION_LIFETIME"] = dt.timedelta(days=30)
+
+# Website Access Password (reads SITE_PASSWORD or APP_PASSWORD from Render environment, stripped of any whitespace)
+SITE_PASSWORD = (
+    os.environ.get("SITE_PASSWORD")
+    or os.environ.get("APP_PASSWORD")
+    or "Akshay1999"
+).strip()
 
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 NIFTY500_FILE = os.path.join(DATA_DIR, "nifty500.txt")
@@ -354,7 +363,52 @@ threading.Thread(target=background_cache_warmup, daemon=True).start()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# API Endpoints
+# Authentication & Route Protection
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.before_request
+def require_login():
+    """Protects all web pages and API routes with password authentication."""
+    exempt_endpoints = {"login", "static"}
+    if request.endpoint in exempt_endpoints:
+        return None
+
+    if not session.get("authenticated"):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Authentication required. Please log in at /login"}), 401
+        return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Login page and password verification handler."""
+    if session.get("authenticated"):
+        return redirect(url_for("index_page"))
+
+    error = None
+    if request.method == "POST":
+        entered_password = request.form.get("password", "").strip()
+        remember = request.form.get("remember") == "on"
+
+        if entered_password == SITE_PASSWORD or entered_password == SITE_PASSWORD.strip():
+            session.permanent = remember
+            session["authenticated"] = True
+            return redirect(url_for("index_page"))
+        else:
+            error = "Incorrect security password. Please try again."
+
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    """Logs user out and redirects to login screen."""
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dashboard & Scanner API Endpoints
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.route("/")
