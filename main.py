@@ -9,6 +9,8 @@ Run with:
 import os
 import io
 import csv
+import json
+import urllib.request
 import datetime as dt
 from typing import Optional, List
 import pandas as pd
@@ -92,10 +94,59 @@ def get_ist():
 def fetch_candles(sym: str):
     if sym in _d_cache and sym in _w_cache:
         return _d_cache[sym], _w_cache[sym]
+    ticker_sym = f"{sym}.NS"
+    # 1. Primary: Direct v8 chart API (bypasses yfinance quoteSummary 404 bug)
     try:
-        df = yf.Ticker(f"{sym}.NS").history(period="1y", interval="1d", auto_adjust=False)
-        if df.empty or len(df) < 45:
-            df = yf.Ticker(f"{sym}.NS").history(period="1y", interval="1d", auto_adjust=True)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_sym}?range=1y&interval=1d"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                res_list = data.get("chart", {}).get("result")
+                if res_list:
+                    item = res_list[0]
+                    timestamps = item.get("timestamp", [])
+                    quotes = item.get("indicators", {}).get("quote", [{}])[0]
+                    opens = quotes.get("open", [])
+                    highs = quotes.get("high", [])
+                    lows = quotes.get("low", [])
+                    closes = quotes.get("close", [])
+                    volumes = quotes.get("volume", [])
+
+                    daily = []
+                    for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
+                        if o is None or h is None or l is None or c is None:
+                            continue
+                        d_str = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).strftime("%Y-%m-%d")
+                        daily.append([
+                            d_str,
+                            round(float(o), 2),
+                            round(float(h), 2),
+                            round(float(l), 2),
+                            round(float(c), 2),
+                            int(v or 0)
+                        ])
+                    if len(daily) >= 45:
+                        df_temp = pd.DataFrame(daily, columns=["date", "open", "high", "low", "close", "volume"])
+                        df_temp["date"] = pd.to_datetime(df_temp["date"])
+                        df_temp.set_index("date", inplace=True)
+                        df_w = df_temp.resample("W-FRI").agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna()
+                        weekly = []
+                        for idx, row in df_w.iterrows():
+                            weekly.append([idx.strftime("%Y-%m-%d"), round(float(row["open"]), 2), round(float(row["high"]), 2), round(float(row["low"]), 2), round(float(row["close"]), 2), int(row["volume"])])
+                        _d_cache[sym] = daily
+                        _w_cache[sym] = weekly
+                        return daily, weekly
+    except Exception:
+        pass
+
+    # 2. Fallback
+    try:
+        df = yf.Ticker(ticker_sym).history(period="1y", interval="1d", auto_adjust=True)
         if df.empty or len(df) < 45:
             return None, None
         daily = []
@@ -168,46 +219,20 @@ async def scan_44ma(
     daily.sort(key=lambda x: x["abs_distance"])
     weekly.sort(key=lambda x: x["abs_distance"])
 
-    both_confirmed = [s for s in both if s.get("is_confirmed", False)]
-    both_watch = [s for s in both if not s.get("is_confirmed", False)]
-    daily_confirmed = [s for s in daily if s.get("is_confirmed", False)]
-    daily_watch = [s for s in daily if not s.get("is_confirmed", False)]
-    weekly_confirmed = [s for s in weekly if s.get("is_confirmed", False)]
-    weekly_watch = [s for s in weekly if not s.get("is_confirmed", False)]
-
     return {
         "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
         "universe": index.upper(),
         "total_scanned": len(universe),
-        "counts": {
-            "both": len(both),
-            "both_confirmed": len(both_confirmed),
-            "both_watch": len(both_watch),
-            "daily": len(daily),
-            "daily_confirmed": len(daily_confirmed),
-            "daily_watch": len(daily_watch),
-            "weekly": len(weekly),
-            "weekly_confirmed": len(weekly_confirmed),
-            "weekly_watch": len(weekly_watch),
-            "total_qualifying": len(both)+len(daily)+len(weekly)
-        },
-        "results": {
-            "both": both,
-            "both_confirmed": both_confirmed,
-            "both_watch": both_watch,
-            "daily": daily,
-            "daily_confirmed": daily_confirmed,
-            "daily_watch": daily_watch,
-            "weekly": weekly,
-            "weekly_confirmed": weekly_confirmed,
-            "weekly_watch": weekly_watch
-        }
+        "counts": {"both": len(both), "daily": len(daily), "weekly": len(weekly), "total_qualifying": len(both)+len(daily)+len(weekly)},
+        "results": {"both": both, "daily": daily, "weekly": weekly}
     }
 
 @app.get("/api/scanner/triangles")
 async def scan_triangles(index: str = "nifty500", timeframe: str = "daily"):
     universe = UNIVERSE_50 if index == "nifty50" else (UNIVERSE_100 if index == "nifty100" else UNIVERSE_500)
     ascending, symmetrical = [], []
+    confirmed_breakouts, pre_breakouts = [], []
+
     for sym in universe:
         d_c, w_c = fetch_candles(sym)
         c = w_c if timeframe == "weekly" else d_c
@@ -217,34 +242,36 @@ async def scan_triangles(index: str = "nifty500", timeframe: str = "daily"):
         asc = strategies.detect_ascending_triangle(sym, comp, c, timeframe=timeframe)
         if asc:
             ascending.append(asc)
+            if "Confirmed" in asc["status"]:
+                confirmed_breakouts.append(asc)
+            elif "Watch" in asc["status"]:
+                pre_breakouts.append(asc)
+
         symm = strategies.detect_symmetrical_triangle(sym, comp, c, timeframe=timeframe)
         if symm:
             symmetrical.append(symm)
+            if "Confirmed" in symm["status"]:
+                confirmed_breakouts.append(symm)
+            elif "Watch" in symm["status"]:
+                pre_breakouts.append(symm)
 
     ascending.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
     symmetrical.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
-
-    asc_confirmed = [x for x in ascending if "Confirmed" in x["status"]]
-    asc_watch = [x for x in ascending if "Confirmed" not in x["status"]]
-    symm_confirmed = [x for x in symmetrical if "Confirmed" in x["status"]]
-    symm_watch = [x for x in symmetrical if "Confirmed" not in x["status"]]
+    confirmed_breakouts.sort(key=lambda x: x["abs_distance"])
+    pre_breakouts.sort(key=lambda x: x["abs_distance"])
 
     return {
         "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
         "timeframe": timeframe.capitalize(),
         "ascending": ascending,
-        "ascending_confirmed": asc_confirmed,
-        "ascending_watch": asc_watch,
         "symmetrical": symmetrical,
-        "symmetrical_confirmed": symm_confirmed,
-        "symmetrical_watch": symm_watch,
+        "confirmed_breakouts": confirmed_breakouts,
+        "pre_breakouts": pre_breakouts,
         "counts": {
             "ascending": len(ascending),
-            "ascending_confirmed": len(asc_confirmed),
-            "ascending_watch": len(asc_watch),
             "symmetrical": len(symmetrical),
-            "symmetrical_confirmed": len(symm_confirmed),
-            "symmetrical_watch": len(symm_watch),
+            "confirmed_breakouts": len(confirmed_breakouts),
+            "pre_breakouts": len(pre_breakouts),
         }
     }
 
@@ -259,62 +286,37 @@ async def get_chart(symbol: str, tf: str = "daily"):
     highs = [c[2] for c in candles]
     lows = [c[3] for c in candles]
     ma44 = strategies.calculate_ma44(closes)
-    candle_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles[-120:]]
-    ma_line = [{"time": c[0], "value": ma44[len(candles)-120+i]} for i, c in enumerate(candles[-120:]) if ma44[len(candles)-120+i] is not None]
     
-    comp_name = get_company(sym)
-    asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
-    symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
+    display_bars = candles[-120:] if len(candles) >= 120 else candles
+    offset = len(candles) - len(display_bars)
 
-    touch_date = None
-    cur_ma = ma44[-1] if ma44 else None
-    if cur_ma is not None and len(candles) >= 1:
-        if lows[-1] <= cur_ma <= highs[-1]:
-            touch_date = candles[-1][0]
-        elif len(candles) >= 2 and lows[-2] <= ma44[-2] <= highs[-2]:
-            touch_date = candles[-2][0]
+    candle_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in display_bars]
+    ma_line = [{"time": c[0], "value": ma44[offset + i]} for i, c in enumerate(display_bars) if ma44[offset + i] is not None]
+    
+    current_ma = ma44[-1] if ma44 else None
+    cmp_price = closes[-1] if closes else None
+    dist_pct = round(((cmp_price - current_ma) / current_ma) * 100, 2) if current_ma else 0.0
+    touch = strategies.is_touch(lows[-1], highs[-1], current_ma)
+    near_bel = strategies.is_near_below(cmp_price, current_ma, dist_pct, 3.0)
+    above_z = strategies.is_above_zone(cmp_price, current_ma, dist_pct, 2.0)
+    status_44ma = strategies.get_status(touch, above_z, near_bel, 2.0)
 
-    active_pat = asc if (asc and "Confirmed" in asc.get("status", "")) else (
-        symm if (symm and "Confirmed" in symm.get("status", "")) else (asc or symm)
-    )
-
-    breakout_date = None
-    res_line = None
-    sup_line = None
-    pat_type = None
-
-    if active_pat:
-        pat_type = active_pat.get("pattern")
-        breakout_date = active_pat.get("breakout_candle_date")
-        res_line = active_pat.get("resistance_line")
-        sup_line = active_pat.get("support_line")
+    comp = get_company(sym)
+    asc = strategies.detect_ascending_triangle(sym, comp, candles, timeframe=tf)
+    symm = strategies.detect_symmetrical_triangle(sym, comp, candles, timeframe=tf)
 
     return {
         "symbol": sym,
-        "company": comp_name,
+        "company": comp,
         "timeframe": tf,
         "candles": candle_data,
         "ma44_line": ma_line,
-        "current_ma44": cur_ma,
-        "cmp": closes[-1] if closes else None,
-        "pattern_type": pat_type,
-        "resistance_line": res_line,
-        "support_line": sup_line,
-        "breakout_candle_date": breakout_date,
-        "touch_candle_date": touch_date,
+        "current_ma44": current_ma,
+        "cmp": cmp_price,
+        "status_44ma": status_44ma,
+        "distance_pct": dist_pct,
         "ascending_pattern": asc,
         "symmetrical_pattern": symm,
-    }
-    candle_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles[-120:]]
-    ma_line = [{"time": c[0], "value": ma44[len(candles)-120+i]} for i, c in enumerate(candles[-120:]) if ma44[len(candles)-120+i] is not None]
-    return {
-        "symbol": sym,
-        "company": get_company(sym),
-        "timeframe": tf,
-        "candles": candle_data,
-        "ma44_line": ma_line,
-        "current_ma44": ma44[-1] if ma44 else None,
-        "cmp": closes[-1] if closes else None,
     }
 
 if __name__ == "__main__":

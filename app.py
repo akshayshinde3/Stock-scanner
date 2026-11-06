@@ -24,6 +24,7 @@ import csv
 import time
 import json
 import threading
+import urllib.request
 import datetime as dt
 from typing import Dict, List, Optional
 import pandas as pd
@@ -152,10 +153,46 @@ def get_company_name(symbol: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # Candle Cache & Data Fetching (Daily & Weekly via Yahoo Finance .NS)
 # ═══════════════════════════════════════════════════════════════════════════
+CACHE_FILE = os.path.join(DATA_DIR, "eod_cache.json")
 _daily_cache: Dict[str, list] = {}
 _weekly_cache: Dict[str, list] = {}
 _last_cache_update_time: Optional[dt.datetime] = None
 _cache_lock = threading.Lock()
+
+
+def load_disk_cache():
+    """Loads cached candles from local disk file if present (Instant Startup)."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                with _cache_lock:
+                    for sym, val in data.items():
+                        _daily_cache[sym] = val.get("daily", [])
+                        _weekly_cache[sym] = val.get("weekly", [])
+            print(f"Loaded {len(_daily_cache)} symbols instantly from persistent disk cache.")
+        except Exception as e:
+            print(f"Warning: Could not load disk cache: {e}")
+
+
+def save_disk_cache():
+    """Persists memory candle cache to disk so restarts are instantaneous."""
+    try:
+        data = {}
+        with _cache_lock:
+            for sym in _daily_cache:
+                data[sym] = {
+                    "daily": _daily_cache[sym],
+                    "weekly": _weekly_cache.get(sym, [])
+                }
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Warning: Could not save disk cache: {e}")
+
+
+# Load on module import
+load_disk_cache()
 
 
 def get_current_ist_time() -> dt.datetime:
@@ -213,17 +250,55 @@ def resample_daily_to_weekly(daily_candles: list) -> list:
 def fetch_stock_candles_yf(symbol: str) -> tuple:
     """
     Fetches daily and weekly candles for an NSE stock via Yahoo Finance.
+    Bypasses yfinance's buggy quoteSummary 404 endpoint using direct v8 chart API.
     Returns (daily_candles, weekly_candles).
     """
     ticker_sym = f"{symbol}.NS"
+    # 1. Primary: Direct Yahoo Finance v8 chart API (Fast, reliable, never throws quoteSummary 404)
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_sym}?range=1y&interval=1d"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                res_list = data.get("chart", {}).get("result")
+                if res_list:
+                    item = res_list[0]
+                    timestamps = item.get("timestamp", [])
+                    quotes = item.get("indicators", {}).get("quote", [{}])[0]
+                    opens = quotes.get("open", [])
+                    highs = quotes.get("high", [])
+                    lows = quotes.get("low", [])
+                    closes = quotes.get("close", [])
+                    volumes = quotes.get("volume", [])
+
+                    daily = []
+                    for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
+                        if o is None or h is None or l is None or c is None:
+                            continue
+                        d_str = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).strftime("%Y-%m-%d")
+                        daily.append([
+                            d_str,
+                            round(float(o), 2),
+                            round(float(h), 2),
+                            round(float(l), 2),
+                            round(float(c), 2),
+                            int(v or 0)
+                        ])
+                    if len(daily) >= 45:
+                        weekly = resample_daily_to_weekly(daily)
+                        return daily, weekly
+    except Exception:
+        pass
+
+    # 2. Fallback: yfinance download/history
     try:
         ticker = yf.Ticker(ticker_sym)
-        # Fetch 1 year of daily history to ensure sufficient lookback for 44 MA
-        df = ticker.history(period="1y", interval="1d", auto_adjust=False)
-        if df.empty or len(df) < 45:
-            # Fallback with auto_adjust=True
-            df = ticker.history(period="1y", interval="1d", auto_adjust=True)
-
+        df = ticker.history(period="1y", interval="1d", auto_adjust=True)
         if df.empty or len(df) < 45:
             return None, None
 
@@ -380,10 +455,8 @@ def api_scanner_44ma():
             if not any(a in stat for a in allowed_statuses):
                 continue
 
-        # Segment into tabs and separate into Confirmed vs Watchlist
+        # Segment into tabs
         tf = stock_eval["timeframe"]
-        is_conf = stock_eval.get("is_confirmed", False)
-        
         if tf == "Both":
             both_results.append(stock_eval)
         elif tf == "Daily":
@@ -396,16 +469,6 @@ def api_scanner_44ma():
     daily_results.sort(key=lambda s: s["abs_distance"])
     weekly_results.sort(key=lambda s: s["abs_distance"])
 
-    # Separate Confirmed (Touching / Above) from Pre-Breakout Watchlist (Near Below)
-    both_confirmed = [s for s in both_results if s.get("is_confirmed", False)]
-    both_watch = [s for s in both_results if not s.get("is_confirmed", False)]
-
-    daily_confirmed = [s for s in daily_results if s.get("is_confirmed", False)]
-    daily_watch = [s for s in daily_results if not s.get("is_confirmed", False)]
-
-    weekly_confirmed = [s for s in weekly_results if s.get("is_confirmed", False)]
-    weekly_watch = [s for s in weekly_results if not s.get("is_confirmed", False)]
-
     now_ist = get_current_ist_time()
     last_updated_str = now_ist.strftime("%d-%b-%Y %I:%M %p IST")
 
@@ -415,26 +478,14 @@ def api_scanner_44ma():
         "total_scanned": len(universe),
         "counts": {
             "both": len(both_results),
-            "both_confirmed": len(both_confirmed),
-            "both_watch": len(both_watch),
             "daily": len(daily_results),
-            "daily_confirmed": len(daily_confirmed),
-            "daily_watch": len(daily_watch),
             "weekly": len(weekly_results),
-            "weekly_confirmed": len(weekly_confirmed),
-            "weekly_watch": len(weekly_watch),
             "total_qualifying": len(both_results) + len(daily_results) + len(weekly_results),
         },
         "results": {
             "both": both_results,
-            "both_confirmed": both_confirmed,
-            "both_watch": both_watch,
             "daily": daily_results,
-            "daily_confirmed": daily_confirmed,
-            "daily_watch": daily_watch,
             "weekly": weekly_results,
-            "weekly_confirmed": weekly_confirmed,
-            "weekly_watch": weekly_watch,
         }
     })
 
@@ -443,9 +494,11 @@ def api_scanner_44ma():
 def api_scanner_triangles():
     """
     Ascending & Symmetrical Triangle Breakouts endpoint.
-    Query parameters:
-      - index: 'nifty500', 'nifty100', 'nifty50'
-      - timeframe: 'daily' or 'weekly'
+    Returns categorized lists:
+      - ascending: all ascending triangles
+      - symmetrical: all symmetrical triangles
+      - confirmed_breakouts: all confirmed breakout stocks across both patterns
+      - pre_breakouts: all pre-breakout watchlist stocks coiling near apex
     """
     index_param = request.args.get("index", "nifty500").lower()
     universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
@@ -453,6 +506,8 @@ def api_scanner_triangles():
 
     ascending_triangles = []
     symmetrical_triangles = []
+    confirmed_breakouts = []
+    pre_breakouts = []
 
     for sym in universe:
         d_candles, w_candles = get_cached_candles(sym)
@@ -466,39 +521,40 @@ def api_scanner_triangles():
         asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
         if asc:
             ascending_triangles.append(asc)
+            if asc["status"] in ["Confirmed Breakout", "Confirmed Retest"]:
+                confirmed_breakouts.append(asc)
+            elif asc["status"] == "Pre-Breakout Watch":
+                pre_breakouts.append(asc)
 
         # 2. Symmetrical Triangle Check
         symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
         if symm:
             symmetrical_triangles.append(symm)
+            if symm["status"] == "Confirmed Breakout":
+                confirmed_breakouts.append(symm)
+            elif symm["status"] == "Pre-Breakout Watch":
+                pre_breakouts.append(symm)
 
     # Sort by smallest distance to breakout trigger first
     ascending_triangles.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
     symmetrical_triangles.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
-
-    asc_confirmed = [x for x in ascending_triangles if "Confirmed" in x["status"]]
-    asc_watch = [x for x in ascending_triangles if "Confirmed" not in x["status"]]
-
-    symm_confirmed = [x for x in symmetrical_triangles if "Confirmed" in x["status"]]
-    symm_watch = [x for x in symmetrical_triangles if "Confirmed" not in x["status"]]
+    confirmed_breakouts.sort(key=lambda x: x["abs_distance"])
+    pre_breakouts.sort(key=lambda x: x["abs_distance"])
 
     now_ist = get_current_ist_time()
     return jsonify({
         "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
         "timeframe": tf.capitalize(),
         "ascending": ascending_triangles,
-        "ascending_confirmed": asc_confirmed,
-        "ascending_watch": asc_watch,
         "symmetrical": symmetrical_triangles,
-        "symmetrical_confirmed": symm_confirmed,
-        "symmetrical_watch": symm_watch,
+        "confirmed_breakouts": confirmed_breakouts,
+        "pre_breakouts": pre_breakouts,
         "counts": {
             "ascending": len(ascending_triangles),
-            "ascending_confirmed": len(asc_confirmed),
-            "ascending_watch": len(asc_watch),
             "symmetrical": len(symmetrical_triangles),
-            "symmetrical_confirmed": len(symm_confirmed),
-            "symmetrical_watch": len(symm_watch),
+            "confirmed_breakouts": len(confirmed_breakouts),
+            "pre_breakouts": len(pre_breakouts),
+            "total_patterns": len(ascending_triangles) + len(symmetrical_triangles),
         }
     })
 
@@ -506,8 +562,8 @@ def api_scanner_triangles():
 @app.route("/api/chart/<symbol>")
 def api_chart(symbol):
     """
-    Provides combined OHLCV candles, 44 MA series, and triangle geometries
-    for interactive TradingView / Lightweight Charts rendering.
+    Provides combined OHLCV candles, 44 MA series, pattern trendlines,
+    and breakout candle markers for fast interactive charting.
     """
     sym = symbol.upper()
     tf = request.args.get("tf", "daily").lower()
@@ -520,13 +576,17 @@ def api_chart(symbol):
     closes = [c[4] for c in candles]
     highs = [c[2] for c in candles]
     lows = [c[3] for c in candles]
+    opens = [c[1] for c in candles]
     ma44_series = strategies.calculate_ma44(closes)
 
     candle_data = []
     ma_line_data = []
 
-    for i, c in enumerate(candles[-120:]):
-        c_idx = len(candles) - 120 + i if len(candles) >= 120 else i
+    display_bars = candles[-120:] if len(candles) >= 120 else candles
+    offset = len(candles) - len(display_bars)
+
+    for i, c in enumerate(display_bars):
+        c_idx = offset + i
         candle_data.append({
             "time": c[0],
             "open": c[1],
@@ -542,35 +602,19 @@ def api_chart(symbol):
                 "value": ma_val
             })
 
-    # Pattern check
+    # 44 MA Status on latest bar
+    current_ma = ma44_series[-1]
+    cmp_price = closes[-1]
+    dist_pct = round(((cmp_price - current_ma) / current_ma) * 100, 2) if current_ma else 0.0
+    touch = strategies.is_touch(lows[-1], highs[-1], current_ma)
+    near_bel = strategies.is_near_below(cmp_price, current_ma, dist_pct, 3.0)
+    above_z = strategies.is_above_zone(cmp_price, current_ma, dist_pct, 2.0)
+    status_44ma = strategies.get_status(touch, above_z, near_bel, 2.0)
+
+    # Patterns
     comp_name = get_company_name(sym)
     asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
     symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
-
-    # Detect 44 MA Touch date
-    touch_date = None
-    cur_ma = ma44_series[-1]
-    if cur_ma is not None and len(candles) >= 1:
-        if lows[-1] <= cur_ma <= highs[-1]:
-            touch_date = candles[-1][0]
-        elif len(candles) >= 2 and lows[-2] <= ma44_series[-2] <= highs[-2]:
-            touch_date = candles[-2][0]
-
-    # Active pattern selection (prioritize confirmed pattern, then watch)
-    active_pat = asc if (asc and "Confirmed" in asc.get("status", "")) else (
-        symm if (symm and "Confirmed" in symm.get("status", "")) else (asc or symm)
-    )
-
-    breakout_date = None
-    res_line = None
-    sup_line = None
-    pat_type = None
-
-    if active_pat:
-        pat_type = active_pat.get("pattern")
-        breakout_date = active_pat.get("breakout_candle_date")
-        res_line = active_pat.get("resistance_line")
-        sup_line = active_pat.get("support_line")
 
     return jsonify({
         "symbol": sym,
@@ -578,13 +622,10 @@ def api_chart(symbol):
         "timeframe": tf,
         "candles": candle_data,
         "ma44_line": ma_line_data,
-        "current_ma44": ma44_series[-1] if ma44_series else None,
-        "cmp": closes[-1] if closes else None,
-        "pattern_type": pat_type,
-        "resistance_line": res_line,
-        "support_line": sup_line,
-        "breakout_candle_date": breakout_date,
-        "touch_candle_date": touch_date,
+        "current_ma44": current_ma,
+        "cmp": cmp_price,
+        "status_44ma": status_44ma,
+        "distance_pct": dist_pct,
         "ascending_pattern": asc,
         "symmetrical_pattern": symm,
     })

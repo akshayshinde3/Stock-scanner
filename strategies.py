@@ -158,19 +158,13 @@ def analyze_44ma_timeframe(candles: list, max_above_a: float = 2.0, max_below_b:
     recent_vol = sum(volumes[-5:]) if len(volumes) >= 5 else sum(volumes)
 
     # Sparkline prices (last 12 closes normalized for sparkline visualization)
-    sparkline = [round(c, 2) for c in closes[-12:]]
-
-    is_confirmed_signal = (touch or above_z)
-    is_watch_signal = near_bel
+    sparkline = [round(c, 2) for c in closes[-12:]]\
 
     return {
         "cmp": round(cur_close, 2),
         "ma44": round(current_ma, 2),
         "distance_pct": dist_pct,
         "status": status_label,
-        "is_confirmed": is_confirmed_signal,
-        "is_watch": is_watch_signal,
-        "touch_candle_date": candles[-1][0] if touch else None,
         "day_change_pct": day_change_pct,
         "volume": int(cur_vol),
         "weekly_volume": int(recent_vol),
@@ -236,9 +230,6 @@ def evaluate_44ma_stock(
         "ma44": primary["ma44"],
         "distance_pct": primary["distance_pct"],
         "status": primary["status"],
-        "is_confirmed": primary.get("is_confirmed", False),
-        "is_watch": primary.get("is_watch", False),
-        "touch_candle_date": primary.get("touch_candle_date"),
         "day_change_pct": primary["day_change_pct"],
         "volume": primary["volume"],
         "timeframe": timeframe_badge,
@@ -282,7 +273,7 @@ def linreg(points: list):
     ss_tot = sum((y - mean_y) ** 2 for y in ys)
     ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in points)
     r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
-    return slope, intercept, max(0.0, min(1.0, r2))
+    return slope, intercept, max(0.0, min(1.0, r2))\
 
 
 def detect_ascending_triangle(symbol: str, company: str, candles: list, timeframe: str = "daily") -> dict:
@@ -372,8 +363,7 @@ def detect_ascending_triangle(symbol: str, company: str, candles: list, timefram
         else:
             continue
 
-        # Risk & Target (Target = Buy Price + Triangle Height)
-        # Ensure 1:3 R:R maintained as per educational specs
+        # Target = Buy Price + Triangle Height (1:3 R:R)
         risk = buy_price - stop_loss
         if risk <= 0:
             stop_loss = round(buy_price * 0.965, 2)
@@ -391,18 +381,14 @@ def detect_ascending_triangle(symbol: str, company: str, candles: list, timefram
         if vol_surge:
             pattern_score += 10
 
-        # Construct trendline points for chart overlay
-        sup_start_val = sup_slope * 0 + sup_intercept
-        sup_end_val = sup_slope * (n - 1) + sup_intercept
-        res_line = [
-            {"time": window[0][0], "value": round(res_level, 2)},
-            {"time": window[-1][0], "value": round(res_level, 2)}
+        # Trendline points for charting
+        dates_in_pattern = [c[0] for c in window]
+        upper_line_points = [{"time": d, "value": round(res_level, 2)} for d in dates_in_pattern]
+        lower_line_points = [
+            {"time": dates_in_pattern[i], "value": round(sup_slope * i + sup_intercept, 2)}
+            for i in range(len(dates_in_pattern))
         ]
-        sup_line = [
-            {"time": window[0][0], "value": round(sup_start_val, 2)},
-            {"time": window[-1][0], "value": round(sup_end_val, 2)}
-        ]
-        breakout_candle_date = window[-1][0] if ("Confirmed" in status) else None
+        breakout_date = window[-1][0] if status in ["Confirmed Breakout", "Confirmed Retest"] else None
 
         res_obj = {
             "symbol": symbol,
@@ -423,9 +409,9 @@ def detect_ascending_triangle(symbol: str, company: str, candles: list, timefram
             "confidence": min(98, pattern_score),
             "sparkline": [round(c, 2) for c in closes[-12:]],
             "abs_distance": abs(round(((cur_close - res_level) / res_level) * 100, 2)),
-            "resistance_line": res_line,
-            "support_line": sup_line,
-            "breakout_candle_date": breakout_candle_date,
+            "upper_line_points": upper_line_points,
+            "lower_line_points": lower_line_points,
+            "breakout_date": breakout_date,
         }
 
         if not best_pattern or (res_obj["confidence"], res_touches) > (best_pattern["confidence"], best_pattern["touches"]):
@@ -529,20 +515,17 @@ def detect_symmetrical_triangle(symbol: str, company: str, candles: list, timefr
         if vol_surge:
             pattern_score += 10
 
-        # Construct trendline points for chart overlay
-        res_start_val = res_slope * 0 + res_intercept
-        res_end_val = res_slope * (n - 1) + res_intercept
-        sup_start_val = sup_slope * 0 + sup_intercept
-        sup_end_val = sup_slope * (n - 1) + sup_intercept
-        res_line = [
-            {"time": window[0][0], "value": round(res_start_val, 2)},
-            {"time": window[-1][0], "value": round(res_end_val, 2)}
+        # Trendline points for charting
+        dates_in_pattern = [c[0] for c in window]
+        upper_line_points = [
+            {"time": dates_in_pattern[i], "value": round(res_slope * i + res_intercept, 2)}
+            for i in range(len(dates_in_pattern))
         ]
-        sup_line = [
-            {"time": window[0][0], "value": round(sup_start_val, 2)},
-            {"time": window[-1][0], "value": round(sup_end_val, 2)}
+        lower_line_points = [
+            {"time": dates_in_pattern[i], "value": round(sup_slope * i + sup_intercept, 2)}
+            for i in range(len(dates_in_pattern))
         ]
-        breakout_candle_date = window[-1][0] if ("Confirmed" in status) else None
+        breakout_date = window[-1][0] if status == "Confirmed Breakout" else None
 
         res_obj = {
             "symbol": symbol,
@@ -563,9 +546,9 @@ def detect_symmetrical_triangle(symbol: str, company: str, candles: list, timefr
             "confidence": min(98, pattern_score),
             "sparkline": [round(c, 2) for c in closes[-12:]],
             "abs_distance": abs(round(((cur_close - res_now) / res_now) * 100, 2)),
-            "resistance_line": res_line,
-            "support_line": sup_line,
-            "breakout_candle_date": breakout_candle_date,
+            "upper_line_points": upper_line_points,
+            "lower_line_points": lower_line_points,
+            "breakout_date": breakout_date,
         }
 
         if not best_pattern or (res_obj["confidence"] > best_pattern["confidence"]):

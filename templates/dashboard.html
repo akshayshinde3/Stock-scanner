@@ -20,6 +20,7 @@
             accentGreen: '#10b981',
             accentOrange: '#f59e0b',
             accentPurple: '#8b5cf6',
+            accentCyan: '#06b6d4',
           },
           fontFamily: {
             mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
@@ -40,7 +41,7 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Lightweight Charts (TradingView) for 44 MA & Pattern Overlay -->
+  <!-- Lightweight Charts (TradingView) -->
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
   <style>
@@ -78,9 +79,9 @@
 
   <!-- React Application Logic -->
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-    // Helper: format numbers
+    // Helper: format Indian rupee numbers
     const fmt = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
     const fmtVol = (n) => {
       if (!n) return "0";
@@ -96,8 +97,8 @@
       const min = Math.min(...points);
       const max = Math.max(...points);
       const range = max - min || 1;
-      const width = 80;
-      const height = 24;
+      const width = 76;
+      const height = 22;
       
       const pathData = points.map((p, i) => {
         const x = (i / (points.length - 1)) * width;
@@ -113,211 +114,31 @@
       );
     };
 
-    // Results Table Component (Used for Confirmed and Pre-Breakout Watchlist)
-    function StockTable({ items, title, icon, count, badgeColor, onSelectStock, isTriangle = false }) {
-      if (!items || items.length === 0) {
-        return (
-          <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-6 text-center text-gray-500 text-xs">
-            No stocks currently in this category.
-          </div>
-        );
-      }
-
-      return (
-        <div className="flex flex-col gap-2">
-          {/* Section Header */}
-          <div className="flex items-center justify-between px-1">
-            <h3 className="text-sm font-bold text-gray-200 flex items-center gap-2">
-              <span>{icon}</span>
-              <span>{title}</span>
-              <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-semibold ${badgeColor}`}>
-                {count}
-              </span>
-            </h3>
-          </div>
-
-          {/* Table Container */}
-          <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/90 shadow-md custom-scrollbar">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-gray-800 bg-gray-950/80 text-gray-400 font-semibold select-none">
-                  <th className="py-2.5 px-4">Symbol</th>
-                  <th className="py-2.5 px-3">Company</th>
-                  <th className="py-2.5 px-3 text-right">CMP (₹)</th>
-                  {!isTriangle ? (
-                    <>
-                      <th className="py-2.5 px-3 text-right">44 MA</th>
-                      <th className="py-2.5 px-3 text-right">Distance %</th>
-                      <th className="py-2.5 px-3 text-center">Status</th>
-                      <th className="py-2.5 px-3 text-right">Day Chg %</th>
-                      <th className="py-2.5 px-3 text-right">Volume</th>
-                      <th className="py-2.5 px-3 text-center">Timeframe</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="py-2.5 px-3 text-right">Resistance</th>
-                      <th className="py-2.5 px-3 text-right">Support</th>
-                      <th className="py-2.5 px-3 text-right">Target (1:3)</th>
-                      <th className="py-2.5 px-3 text-right">Stop-Loss</th>
-                      <th className="py-2.5 px-3 text-center">Status / Entry</th>
-                      <th className="py-2.5 px-3 text-center">Touches</th>
-                    </>
-                  )}
-                  <th className="py-2.5 px-3 text-center">Trend (12B)</th>
-                  <th className="py-2.5 px-4 text-center">Chart</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800/60 font-mono">
-                {items.map((item) => {
-                  const isUp = (item.day_change_pct || 0) >= 0;
-                  const dist = item.distance_pct != null ? item.distance_pct : 0;
-                  
-                  let statusColor = "bg-gray-800 text-gray-300 border-gray-700";
-                  if (item.status === "Touching") {
-                    statusColor = "bg-blue-900/40 text-blue-300 border-blue-500/40";
-                  } else if (item.status && item.status.includes("Above")) {
-                    statusColor = "bg-emerald-900/40 text-emerald-300 border-emerald-500/40";
-                  } else if (item.status === "Near Below") {
-                    statusColor = "bg-amber-900/40 text-amber-300 border-amber-500/40";
-                  } else if (item.status && item.status.includes("Confirmed")) {
-                    statusColor = "bg-emerald-900/40 text-emerald-300 border-emerald-500/40";
-                  } else if (item.status && item.status.includes("Watch")) {
-                    statusColor = "bg-amber-900/40 text-amber-300 border-amber-500/40";
-                  }
-
-                  return (
-                    <tr 
-                      key={item.symbol} 
-                      className="hover:bg-gray-800/60 transition cursor-pointer"
-                      onClick={() => onSelectStock(item)}
-                    >
-                      <td className="py-2.5 px-4 font-bold text-white hover:text-blue-400">
-                        {item.symbol}
-                      </td>
-                      <td className="py-2.5 px-3 font-sans text-gray-300 text-xs truncate max-w-[150px]" title={item.company}>
-                        {item.company}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-bold text-gray-100">
-                        ₹{fmt(item.cmp)}
-                      </td>
-
-                      {!isTriangle ? (
-                        <>
-                          <td className="py-2.5 px-3 text-right text-blue-400">
-                            ₹{fmt(item.ma44)}
-                          </td>
-                          <td className={`py-2.5 px-3 text-right font-bold ${dist > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                            {dist > 0 ? `+${dist.toFixed(2)}%` : `${dist.toFixed(2)}%`}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-sans">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusColor}`}>
-                              {item.status}
-                            </span>
-                          </td>
-                          <td className={`py-2.5 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {isUp ? `+${item.day_change_pct.toFixed(2)}%` : `${item.day_change_pct.toFixed(2)}%`}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-gray-400">
-                            {fmtVol(item.volume)}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-sans">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
-                              item.timeframe === "Both" 
-                                ? "bg-purple-900/40 text-purple-300 border border-purple-500/30" 
-                                : "bg-gray-800 text-gray-400 border border-gray-700"
-                            }`}>
-                              {item.timeframe}
-                            </span>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="py-2.5 px-3 text-right text-red-400 font-semibold">
-                            ₹{fmt(item.resistance_level)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-emerald-400">
-                            ₹{fmt(item.support_level)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-emerald-300 font-bold">
-                            ₹{fmt(item.target)}
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-rose-400">
-                            ₹{fmt(item.stop_loss)}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-sans">
-                            <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusColor}`}>
-                              {item.status}
-                            </span>
-                            {item.entry_type && (
-                              <div className="text-[10px] text-gray-400 mt-0.5">{item.entry_type}</div>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3 text-center text-gray-300">
-                            {item.touches} touches
-                          </td>
-                        </>
-                      )}
-
-                      <td className="py-2.5 px-3 text-center">
-                        <Sparkline points={item.sparkline} isUp={isUp} />
-                      </td>
-
-                      <td className="py-2.5 px-4 text-center font-sans">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelectStock(item);
-                          }}
-                          className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-xs font-semibold border border-blue-500/30 transition flex items-center gap-1 mx-auto"
-                        >
-                          <span>📈</span> View Pattern
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      );
-    }
-
     // Main App Component
     function App() {
       // Top State
-      const [activeTab, setActiveTab] = useState("daily"); // 'daily', 'weekly', 'both', 'ascending', 'symmetrical'
-      const [subFilter, setSubFilter] = useState("all"); // 'all', 'confirmed', 'watch'
+      // Tabs: 'both', 'daily', 'weekly', 'ascending', 'symmetrical', 'breakout_hub'
+      const [activeTab, setActiveTab] = useState("both");
       const [indexSelector, setIndexSelector] = useState("nifty500");
       const [loading, setLoading] = useState(false);
       const [lastUpdated, setLastUpdated] = useState("");
       const [searchQuery, setSearchQuery] = useState("");
 
-      // 44 MA Scanner Results
-      const [scannerData, setScannerData] = useState({
-        daily_confirmed: [], daily_watch: [],
-        weekly_confirmed: [], weekly_watch: [],
-        both_confirmed: [], both_watch: []
-      });
-      const [counts, setCounts] = useState({
-        daily: 0, daily_confirmed: 0, daily_watch: 0,
-        weekly: 0, weekly_confirmed: 0, weekly_watch: 0,
-        both: 0, both_confirmed: 0, both_watch: 0
-      });
+      // 44 MA Scanner Results & Counts
+      const [scannerData, setScannerData] = useState({ both: [], daily: [], weekly: [] });
+      const [counts, setCounts] = useState({ both: 0, daily: 0, weekly: 0, total_qualifying: 0 });
 
       // Triangles Results
       const [trianglesData, setTrianglesData] = useState({
-        ascending_confirmed: [], ascending_watch: [],
-        symmetrical_confirmed: [], symmetrical_watch: []
-      });
-      const [triCounts, setTriCounts] = useState({
-        ascending: 0, ascending_confirmed: 0, ascending_watch: 0,
-        symmetrical: 0, symmetrical_confirmed: 0, symmetrical_watch: 0
+        ascending: [],
+        symmetrical: [],
+        confirmed_breakouts: [],
+        pre_breakouts: [],
       });
 
-      // Sidebar Filters
-      const [maxAbove, setMaxAbove] = useState(2.0);
-      const [maxBelow, setMaxBelow] = useState(3.0);
+      // Sidebar Filters (All User Adjustable)
+      const [maxAbove, setMaxAbove] = useState(2.0); // Slider: 0.5% - 5.0%, default 2%
+      const [maxBelow, setMaxBelow] = useState(3.0); // Slider: 0.5% - 5.0%, default 3%
       const [statusTouch, setStatusTouch] = useState(true);
       const [statusAbove, setStatusAbove] = useState(true);
       const [statusNearBelow, setStatusNearBelow] = useState(true);
@@ -326,12 +147,31 @@
       const [risingOnly, setRisingOnly] = useState(false);
       const [greenOnly, setGreenOnly] = useState(false);
 
-      // Modal Chart View
+      // Table Sorting
+      const [sortField, setSortField] = useState("abs_distance");
+      const [sortAsc, setSortAsc] = useState(true);
+
+      // Modal Chart View & Fast Prefetch Cache (<5s loading)
       const [selectedStock, setSelectedStock] = useState(null);
       const [chartTf, setChartTf] = useState("daily");
-      const [chartDataState, setChartDataState] = useState(null);
       const chartContainerRef = useRef(null);
       const chartInstance = useRef(null);
+      const chartCacheRef = useRef(new Map());
+
+      // Hover prefetch for instantaneous chart opening
+      const prefetchChart = useCallback((sym, tf = "daily") => {
+        if (!sym) return;
+        const key = `${sym.toUpperCase()}_${tf}`;
+        if (chartCacheRef.current.has(key)) return;
+        fetch(`/api/chart/${sym}?tf=${tf}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.candles) {
+              chartCacheRef.current.set(key, data);
+            }
+          })
+          .catch(() => {});
+      }, []);
 
       // Fetch 44 MA Data
       const fetch44MaData = async (forceRefresh = false) => {
@@ -355,18 +195,10 @@
           });
 
           const res = await fetch(`/api/scanner/44ma?${params.toString()}`);
-          if (!res.ok) throw new Error("Failed to load scanner data");
+          if (!res.ok) throw new Error("Failed to load 44 MA scanner data");
           const data = await res.json();
-          
-          setScannerData({
-            daily_confirmed: data.results?.daily_confirmed || [],
-            daily_watch: data.results?.daily_watch || [],
-            weekly_confirmed: data.results?.weekly_confirmed || [],
-            weekly_watch: data.results?.weekly_watch || [],
-            both_confirmed: data.results?.both_confirmed || [],
-            both_watch: data.results?.both_watch || [],
-          });
-          setCounts(data.counts || {});
+          setScannerData(data.results || { both: [], daily: [], weekly: [] });
+          setCounts(data.counts || { both: 0, daily: 0, weekly: 0 });
           setLastUpdated(data.last_updated || new Date().toLocaleTimeString());
         } catch (err) {
           console.error("44 MA Scanner fetch error:", err);
@@ -382,33 +214,70 @@
           if (!res.ok) throw new Error("Failed to load triangle data");
           const data = await res.json();
           setTrianglesData({
-            ascending_confirmed: data.ascending_confirmed || [],
-            ascending_watch: data.ascending_watch || [],
-            symmetrical_confirmed: data.symmetrical_confirmed || [],
-            symmetrical_watch: data.symmetrical_watch || [],
+            ascending: data.ascending || [],
+            symmetrical: data.symmetrical || [],
+            confirmed_breakouts: data.confirmed_breakouts || [],
+            pre_breakouts: data.pre_breakouts || [],
           });
-          setTriCounts(data.counts || {});
         } catch (err) {
           console.error("Triangles fetch error:", err);
         }
       };
 
+      // Load data on filter change
       useEffect(() => {
         fetch44MaData();
         fetchTrianglesData();
       }, [indexSelector, maxAbove, maxBelow, statusTouch, statusAbove, statusNearBelow, minPrice, minWeeklyVol, risingOnly, greenOnly]);
 
-      // Filter by search query
-      const filterItems = (list) => {
-        if (!searchQuery.trim()) return list;
-        const q = searchQuery.toLowerCase().trim();
-        return (list || []).filter(it => 
-          it.symbol.toLowerCase().includes(q) || 
-          (it.company && it.company.toLowerCase().includes(q))
-        );
+      // Filter and Sort helper
+      const sortItems = (items) => {
+        let filtered = [...items];
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          filtered = filtered.filter(it => 
+            it.symbol.toLowerCase().includes(q) || 
+            (it.company && it.company.toLowerCase().includes(q))
+          );
+        }
+        return filtered.sort((a, b) => {
+          let valA = a[sortField];
+          let valB = b[sortField];
+          if (valA == null) valA = 0;
+          if (valB == null) valB = 0;
+          if (typeof valA === "string") {
+            return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+          }
+          return sortAsc ? valA - valB : valB - valA;
+        });
       };
 
-      // Chart Rendering with Trendlines and Breakout Candle Marker
+      const handleSort = (field) => {
+        if (sortField === field) {
+          setSortAsc(!sortAsc);
+        } else {
+          setSortField(field);
+          setSortAsc(true);
+        }
+      };
+
+      // Status badge styling
+      const getStatusBadge = (status) => {
+        if (status === "Touching") {
+          return "bg-blue-900/40 text-blue-300 border-blue-500/40";
+        } else if (status && status.includes("Above")) {
+          return "bg-emerald-900/40 text-emerald-300 border-emerald-500/40";
+        } else if (status === "Near Below") {
+          return "bg-amber-900/40 text-amber-300 border-amber-500/40";
+        } else if (status && status.includes("Confirmed")) {
+          return "bg-emerald-900/50 text-emerald-300 border-emerald-500/50 shadow-sm";
+        } else if (status && status.includes("Watch")) {
+          return "bg-amber-900/40 text-amber-300 border-amber-500/40";
+        }
+        return "bg-gray-800 text-gray-300 border-gray-700";
+      };
+
+      // Render TradingView Lightweight Chart in Modal with Pattern & Breakout Marker
       useEffect(() => {
         if (!selectedStock || !chartContainerRef.current) return;
 
@@ -424,8 +293,8 @@
             textColor: "#9ca3af",
           },
           grid: {
-            vertLines: { color: "#1f2937" },
-            horzLines: { color: "#1f2937" },
+            vertLines: { color: "#1a2234" },
+            horzLines: { color: "#1a2234" },
           },
           timeScale: {
             borderColor: "#374151",
@@ -451,73 +320,114 @@
           title: "44 MA",
         });
 
-        // Resistance line series
-        const resSeries = chart.addLineSeries({
-          color: "#f87171",
+        // Upper & Lower Pattern Lines Series
+        const upperTrendSeries = chart.addLineSeries({
+          color: "#38bdf8", // bright cyan matching chart diagrams
           lineWidth: 2,
-          lineStyle: 0, // Solid
           title: "Upper Resistance",
         });
 
-        // Support line series
-        const supSeries = chart.addLineSeries({
-          color: "#34d399",
+        const lowerTrendSeries = chart.addLineSeries({
+          color: "#38bdf8",
           lineWidth: 2,
-          lineStyle: 0, // Solid
           title: "Lower Support",
         });
 
-        fetch(`/api/chart/${selectedStock.symbol}?tf=${chartTf}`)
-          .then(res => res.json())
-          .then(data => {
-            if (!isMounted || !data.candles) return;
-            setChartDataState(data);
-            candleSeries.setData(data.candles);
+        const applyChartPayload = (data) => {
+          if (!isMounted || !data || !data.candles) return;
 
-            if (data.ma44_line) {
-              ma44Series.setData(data.ma44_line);
-            }
+          candleSeries.setData(data.candles);
+          if (data.ma44_line && data.ma44_line.length > 0) {
+            ma44Series.setData(data.ma44_line);
+          }
 
-            // Draw Chart Pattern Trendlines if present
-            if (data.resistance_line && data.resistance_line.length >= 2) {
-              resSeries.setData(data.resistance_line);
-            }
-            if (data.support_line && data.support_line.length >= 2) {
-              supSeries.setData(data.support_line);
-            }
+          // Check if pattern is present (either ascending or symmetrical)
+          const pat = data.ascending_pattern || data.symmetrical_pattern || selectedStock;
+          
+          if (pat && pat.upper_line_points && pat.upper_line_points.length > 0) {
+            upperTrendSeries.setData(pat.upper_line_points);
+          }
+          if (pat && pat.lower_line_points && pat.lower_line_points.length > 0) {
+            lowerTrendSeries.setData(pat.lower_line_points);
+          }
 
-            // ══════════════════════════════════════════════════════════
-            // EXPLICIT BREAKOUT CANDLE / 44 MA TOUCH MARKER
-            // ══════════════════════════════════════════════════════════
-            const markers = [];
+          // Price Lines: Entry, Target, Stop Loss (Educational R:R)
+          if (pat && pat.buy_price) {
+            candleSeries.createPriceLine({
+              price: pat.buy_price,
+              color: "#06b6d4",
+              lineWidth: 2,
+              lineStyle: LightweightCharts.LineStyle.Solid,
+              axisLabelVisible: true,
+              title: `ENTRY: ₹${pat.buy_price}`,
+            });
+          }
+          if (pat && pat.target) {
+            candleSeries.createPriceLine({
+              price: pat.target,
+              color: "#10b981",
+              lineWidth: 2,
+              lineStyle: LightweightCharts.LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: `TARGET (1:3): ₹${pat.target}`,
+            });
+          }
+          if (pat && pat.stop_loss) {
+            candleSeries.createPriceLine({
+              price: pat.stop_loss,
+              color: "#ef4444",
+              lineWidth: 2,
+              lineStyle: LightweightCharts.LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: `STOP LOSS: ₹${pat.stop_loss}`,
+            });
+          }
 
-            if (data.breakout_candle_date) {
-              markers.push({
-                time: data.breakout_candle_date,
-                position: 'aboveBar',
-                color: '#10b981',
-                shape: 'arrowDown',
-                text: '🚀 BREAKOUT CANDLE',
-                size: 2,
-              });
-            } else if (data.touch_candle_date) {
-              markers.push({
-                time: data.touch_candle_date,
-                position: 'belowBar',
-                color: '#3b82f6',
-                shape: 'arrowUp',
-                text: '📍 44 MA TOUCH',
-                size: 2,
-              });
-            }
+          // BREAKOUT CANDLE MARKER on chart!
+          const markers = [];
+          if (pat && pat.breakout_date) {
+            markers.push({
+              time: pat.breakout_date,
+              position: "aboveBar",
+              color: "#10b981",
+              shape: "arrowDown",
+              text: `BREAKOUT CANDLE 🚀 (${pat.status || 'Confirmed'})`,
+              size: 2,
+            });
+          } else if (data.status_44ma && data.candles.length > 0) {
+            // 44 MA touch or zone marker on latest bar
+            const lastBar = data.candles[data.candles.length - 1];
+            markers.push({
+              time: lastBar.time,
+              position: data.status_44ma === "Near Below" ? "belowBar" : "aboveBar",
+              color: data.status_44ma === "Touching" ? "#3b82f6" : (data.status_44ma.includes("Above") ? "#10b981" : "#f59e0b"),
+              shape: data.status_44ma === "Near Below" ? "arrowUp" : "arrowDown",
+              text: `44 MA: ${data.status_44ma}`,
+              size: 2,
+            });
+          }
 
-            if (markers.length > 0) {
-              candleSeries.setMarkers(markers);
-            }
+          if (markers.length > 0) {
+            candleSeries.setMarkers(markers);
+          }
 
-            chart.timeScale().fitContent();
-          })
-          .catch(err => console.error("Chart load err:", err));
+          chart.timeScale().fitContent();
+        };
+
+        const cacheKey = `${selectedStock.symbol.toUpperCase()}_${chartTf}`;
+        if (chartCacheRef.current.has(cacheKey)) {
+          // Instant load from RAM cache (<0.01s)
+          applyChartPayload(chartCacheRef.current.get(cacheKey));
+        } else {
+          // Fetch from API (<1s)
+          fetch(`/api/chart/${selectedStock.symbol}?tf=${chartTf}`)
+            .then(res => res.json())
+            .then(data => {
+              chartCacheRef.current.set(cacheKey, data);
+              applyChartPayload(data);
+            })
+            .catch(err => console.error("Chart load err:", err));
+        }
 
         const handleResize = () => {
           if (chartInstance.current && container) {
@@ -536,26 +446,30 @@
         };
       }, [selectedStock, chartTf]);
 
-      // Active Section Lists Resolution
-      const currentConfirmed = useMemo(() => {
-        if (activeTab === "daily") return filterItems(scannerData.daily_confirmed);
-        if (activeTab === "weekly") return filterItems(scannerData.weekly_confirmed);
-        if (activeTab === "both") return filterItems(scannerData.both_confirmed);
-        if (activeTab === "ascending") return filterItems(trianglesData.ascending_confirmed);
-        if (activeTab === "symmetrical") return filterItems(trianglesData.symmetrical_confirmed);
-        return [];
-      }, [activeTab, scannerData, trianglesData, searchQuery]);
+      // Sub-lists for Triangles: Separate Confirmed vs Pre-Breakout
+      const ascConfirmed = useMemo(() => sortItems(trianglesData.ascending.filter(x => x.status && x.status.includes("Confirmed"))), [trianglesData.ascending, searchQuery, sortField, sortAsc]);
+      const ascPreBreakout = useMemo(() => sortItems(trianglesData.ascending.filter(x => x.status && x.status.includes("Watch"))), [trianglesData.ascending, searchQuery, sortField, sortAsc]);
 
-      const currentWatch = useMemo(() => {
-        if (activeTab === "daily") return filterItems(scannerData.daily_watch);
-        if (activeTab === "weekly") return filterItems(scannerData.weekly_watch);
-        if (activeTab === "both") return filterItems(scannerData.both_watch);
-        if (activeTab === "ascending") return filterItems(trianglesData.ascending_watch);
-        if (activeTab === "symmetrical") return filterItems(trianglesData.symmetrical_watch);
-        return [];
-      }, [activeTab, scannerData, trianglesData, searchQuery]);
+      const symmConfirmed = useMemo(() => sortItems(trianglesData.symmetrical.filter(x => x.status && x.status.includes("Confirmed"))), [trianglesData.symmetrical, searchQuery, sortField, sortAsc]);
+      const symmPreBreakout = useMemo(() => sortItems(trianglesData.symmetrical.filter(x => x.status && x.status.includes("Watch"))), [trianglesData.symmetrical, searchQuery, sortField, sortAsc]);
 
-      const isTriangleTab = activeTab === "ascending" || activeTab === "symmetrical";
+      const allConfirmed = useMemo(() => sortItems(trianglesData.confirmed_breakouts), [trianglesData.confirmed_breakouts, searchQuery, sortField, sortAsc]);
+      const allPreBreakouts = useMemo(() => sortItems(trianglesData.pre_breakouts), [trianglesData.pre_breakouts, searchQuery, sortField, sortAsc]);
+
+      // Sub-lists for 44 MA
+      const bothList = useMemo(() => sortItems(scannerData.both), [scannerData.both, searchQuery, sortField, sortAsc]);
+      const dailyList = useMemo(() => sortItems(scannerData.daily), [scannerData.daily, searchQuery, sortField, sortAsc]);
+      const weeklyList = useMemo(() => sortItems(scannerData.weekly), [scannerData.weekly, searchQuery, sortField, sortAsc]);
+
+      // Category counts for Daily alerts
+      const dailyTouchingCount = useMemo(() => scannerData.daily.filter(x => x.status === "Touching").length, [scannerData.daily]);
+      const dailyAboveCount = useMemo(() => scannerData.daily.filter(x => x.status && x.status.includes("Above")).length, [scannerData.daily]);
+      const dailyNearBelowCount = useMemo(() => scannerData.daily.filter(x => x.status === "Near Below").length, [scannerData.daily]);
+
+      // Category counts for Weekly alerts
+      const weeklyTouchingCount = useMemo(() => scannerData.weekly.filter(x => x.status === "Touching").length, [scannerData.weekly]);
+      const weeklyAboveCount = useMemo(() => scannerData.weekly.filter(x => x.status && x.status.includes("Above")).length, [scannerData.weekly]);
+      const weeklyNearBelowCount = useMemo(() => scannerData.weekly.filter(x => x.status === "Near Below").length, [scannerData.weekly]);
 
       return (
         <div className="flex flex-col min-h-screen">
@@ -563,24 +477,25 @@
           <header className="border-b border-gray-800 bg-[#0f172a] px-5 py-3 sticky top-0 z-30 shadow-md">
             <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold font-mono text-xl">
+                <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold font-mono text-xl shadow-inner">
                   44
                 </div>
                 <div>
                   <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
                     44 MA Touch & Near Scanner
                     <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-normal">
-                      NSE India
+                      NSE Indian Markets
                     </span>
                   </h1>
                   <p className="text-xs text-gray-400">
-                    Separate Daily & Weekly Alerts with Confirmed & Pre-Breakout Watchlists
+                    44 MA Touch & Near • Ascending & Symmetrical Triangles • 1:3 R:R Breakouts
                   </p>
                 </div>
               </div>
 
               {/* Header Right Controls */}
               <div className="flex items-center flex-wrap gap-3">
+                {/* Index Selector Dropdown */}
                 <div className="flex items-center space-x-1.5 bg-gray-900 border border-gray-700/60 rounded-lg px-2.5 py-1 text-xs">
                   <span className="text-gray-400 font-medium">Universe:</span>
                   <select 
@@ -594,20 +509,22 @@
                   </select>
                 </div>
 
+                {/* CSV Export Button */}
                 <a 
                   href={`/api/export/csv?tab=${activeTab}&index=${indexSelector}&max_above=${maxAbove}&max_below=${maxBelow}`}
                   className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 transition"
                   title="Export results to CSV"
                 >
-                  <span>⬇ CSV</span>
+                  <span>⬇ Export CSV</span>
                 </a>
 
+                {/* Refresh Button */}
                 <button 
-                  onClick={() => fetch44MaData(true)} 
+                  onClick={() => { fetch44MaData(true); fetchTrianglesData(); }} 
                   disabled={loading}
                   className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm transition disabled:opacity-50"
                 >
-                  <span>{loading ? "Scanning..." : "⟳ Scan Now"}</span>
+                  <span>{loading ? "Scanning..." : "⟳ Scan Live"}</span>
                 </button>
               </div>
             </div>
@@ -780,12 +697,25 @@
             </aside>
 
             {/* MAIN CONTENT AREA */}
-            <main className="flex-1 flex flex-col gap-5">
+            <main className="flex-1 flex flex-col gap-4">
               
-              {/* PRIMARY ALERT SECTION TABS */}
+              {/* TABS (Both shown first as highest priority) */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Dedicated 44 Daily Alerts Tab */}
+                  <button
+                    onClick={() => setActiveTab("both")}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
+                      activeTab === "both"
+                        ? "bg-blue-600 text-white shadow"
+                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
+                    }`}
+                  >
+                    <span>⭐ 44 MA Both (Confluence)</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-blue-900/80 text-[11px] font-mono">
+                      {counts.both}
+                    </span>
+                  </button>
+
                   <button
                     onClick={() => setActiveTab("daily")}
                     className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
@@ -794,13 +724,12 @@
                         : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
                     }`}
                   >
-                    <span>📅 44 MA Daily Alerts</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-blue-900/80 text-[11px] font-mono">
-                      {counts.daily || (scannerData.daily_confirmed.length + scannerData.daily_watch.length)}
+                    <span>📅 Daily 44 MA</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-gray-700 text-[11px] font-mono">
+                      {counts.daily}
                     </span>
                   </button>
 
-                  {/* Dedicated 44 Weekly Alerts Tab */}
                   <button
                     onClick={() => setActiveTab("weekly")}
                     className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
@@ -809,28 +738,12 @@
                         : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
                     }`}
                   >
-                    <span>🗓️ 44 MA Weekly Alerts</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-blue-900/80 text-[11px] font-mono">
-                      {counts.weekly || (scannerData.weekly_confirmed.length + scannerData.weekly_watch.length)}
+                    <span>📆 Weekly 44 MA</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-gray-700 text-[11px] font-mono">
+                      {counts.weekly}
                     </span>
                   </button>
 
-                  {/* Both Daily + Weekly Confluence Tab */}
-                  <button
-                    onClick={() => setActiveTab("both")}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
-                      activeTab === "both"
-                        ? "bg-purple-600 text-white shadow"
-                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
-                    }`}
-                  >
-                    <span>⭐ Both (Daily & Weekly)</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-purple-900/80 text-[11px] font-mono">
-                      {counts.both || (scannerData.both_confirmed.length + scannerData.both_watch.length)}
-                    </span>
-                  </button>
-
-                  {/* Ascending Triangle Tab */}
                   <button
                     onClick={() => setActiveTab("ascending")}
                     className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
@@ -841,22 +754,35 @@
                   >
                     <span>📐 Ascending Triangle (1:3 R:R)</span>
                     <span className="px-1.5 py-0.2 rounded-full bg-emerald-900/60 text-emerald-300 text-[11px] font-mono">
-                      {triCounts.ascending || (trianglesData.ascending_confirmed.length + trianglesData.ascending_watch.length)}
+                      {trianglesData.ascending.length}
                     </span>
                   </button>
 
-                  {/* Symmetrical Triangle Tab */}
                   <button
                     onClick={() => setActiveTab("symmetrical")}
                     className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
                       activeTab === "symmetrical"
-                        ? "bg-amber-600 text-white shadow"
+                        ? "bg-purple-600 text-white shadow"
                         : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
                     }`}
                   >
                     <span>📐 Symmetrical Triangle (Coil)</span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-amber-900/60 text-amber-300 text-[11px] font-mono">
-                      {triCounts.symmetrical || (trianglesData.symmetrical_confirmed.length + trianglesData.symmetrical_watch.length)}
+                    <span className="px-1.5 py-0.2 rounded-full bg-purple-900/60 text-purple-300 text-[11px] font-mono">
+                      {trianglesData.symmetrical.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab("breakout_hub")}
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
+                      activeTab === "breakout_hub"
+                        ? "bg-cyan-600 text-white shadow"
+                        : "bg-gray-800/80 text-gray-300 hover:bg-gray-800 hover:text-white"
+                    }`}
+                  >
+                    <span>⚡ Breakouts vs Watchlist Hub</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-cyan-900/60 text-cyan-300 text-[11px] font-mono">
+                      {trianglesData.confirmed_breakouts.length + trianglesData.pre_breakouts.length}
                     </span>
                   </button>
                 </div>
@@ -881,106 +807,308 @@
                 </div>
               </div>
 
-              {/* Sub-Filter Toggles: All Signals | Confirmed Only | Pre-Breakout Watchlist */}
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-900/70 p-2.5 rounded-xl border border-gray-800">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 font-medium">View:</span>
-                  <button
-                    onClick={() => setSubFilter("all")}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
-                      subFilter === "all" ? "bg-gray-800 text-white border border-gray-700" : "text-gray-400 hover:text-gray-200"
-                    }`}
-                  >
-                    ⚡ All Signals ({currentConfirmed.length + currentWatch.length})
-                  </button>
-                  <button
-                    onClick={() => setSubFilter("confirmed")}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                      subFilter === "confirmed" 
-                        ? "bg-emerald-900/50 text-emerald-300 border border-emerald-500/40" 
-                        : "text-gray-400 hover:text-emerald-400"
-                    }`}
-                  >
-                    <span>✅ Confirmed ({currentConfirmed.length})</span>
-                  </button>
-                  <button
-                    onClick={() => setSubFilter("watch")}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                      subFilter === "watch" 
-                        ? "bg-amber-900/50 text-amber-300 border border-amber-500/40" 
-                        : "text-gray-400 hover:text-amber-400"
-                    }`}
-                  >
-                    <span>👀 Pre-Breakout Watch ({currentWatch.length})</span>
-                  </button>
-                </div>
-
-                <div className="text-xs text-gray-400">
-                  Click any stock row to view interactive pattern drawing & breakout candle marker
-                </div>
-              </div>
-
-              {/* ══════════════════════════════════════════════════════════ */}
-              {/* SEPARATE SECTIONS: CONFIRMED & PRE-BREAKOUT WATCHLIST    */}
-              {/* ══════════════════════════════════════════════════════════ */}
-              
-              {loading ? (
-                <div className="bg-gray-900/50 border border-gray-800 rounded-xl py-16 text-center text-gray-400 text-sm">
-                  <div className="inline-block animate-spin mr-2 text-xl">⟳</div>
-                  Scanning Nifty universe for setups...
-                </div>
-              ) : (
-                <div className="flex flex-col gap-6">
-                  {/* Section 1: Confirmed Breakouts / Touching Zone */}
-                  {(subFilter === "all" || subFilter === "confirmed") && (
-                    <StockTable 
-                      items={currentConfirmed}
-                      title={isTriangleTab ? "✅ Confirmed Pattern Breakouts / Retests" : "✅ Confirmed Touching & Active 44 MA Zone"}
-                      icon="⚡"
-                      count={currentConfirmed.length}
-                      badgeColor="bg-emerald-900/60 text-emerald-300 border border-emerald-500/40"
-                      onSelectStock={setSelectedStock}
-                      isTriangle={isTriangleTab}
-                    />
-                  )}
-
-                  {/* Section 2: Pre-Breakout Watchlist */}
-                  {(subFilter === "all" || subFilter === "watch") && (
-                    <StockTable 
-                      items={currentWatch}
-                      title={isTriangleTab ? "👀 Pre-Breakout Watchlist (Coiling Near Resistance)" : "👀 Pre-Breakout Watchlist (Near Below 44 MA Coiling)"}
-                      icon="👀"
-                      count={currentWatch.length}
-                      badgeColor="bg-amber-900/60 text-amber-300 border border-amber-500/40"
-                      onSelectStock={setSelectedStock}
-                      isTriangle={isTriangleTab}
-                    />
-                  )}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {/* 1. SEPARATE 44 MA DAILY ALERT SECTION */}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {activeTab === "daily" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-blue-400 font-medium">Daily Touching Alerts</div>
+                      <div className="text-xl font-bold font-mono text-blue-300">{dailyTouchingCount}</div>
+                      <div className="text-[10px] text-gray-400">Low ≤ MA44 ≤ High</div>
+                    </div>
+                    <span className="text-2xl text-blue-400">🎯</span>
+                  </div>
+                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-emerald-400 font-medium">Daily Above Alerts (0-{maxAbove}%)</div>
+                      <div className="text-xl font-bold font-mono text-emerald-300">{dailyAboveCount}</div>
+                      <div className="text-[10px] text-gray-400">Close ≥ MA44 & ≤ +{maxAbove}%</div>
+                    </div>
+                    <span className="text-2xl text-emerald-400">✅</span>
+                  </div>
+                  <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-amber-400 font-medium">Daily Near Below Alerts (-{maxBelow}%)</div>
+                      <div className="text-xl font-bold font-mono text-amber-300">{dailyNearBelowCount}</div>
+                      <div className="text-[10px] text-gray-400">Close &lt; MA44 & ≥ -{maxBelow}%</div>
+                    </div>
+                    <span className="text-2xl text-amber-400">⏳</span>
+                  </div>
                 </div>
               )}
+
+              {/* ─────────────────────────────────────────────────────────── */}
+              {/* 2. SEPARATE 44 MA WEEKLY ALERT SECTION */}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {activeTab === "weekly" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="bg-blue-950/30 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-blue-400 font-medium">Weekly Touching Alerts</div>
+                      <div className="text-xl font-bold font-mono text-blue-300">{weeklyTouchingCount}</div>
+                      <div className="text-[10px] text-gray-400">Macro support touch</div>
+                    </div>
+                    <span className="text-2xl text-blue-400">🎯</span>
+                  </div>
+                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-emerald-400 font-medium">Weekly Above Alerts (0-{maxAbove}%)</div>
+                      <div className="text-xl font-bold font-mono text-emerald-300">{weeklyAboveCount}</div>
+                      <div className="text-[10px] text-gray-400">Strong higher-timeframe trend</div>
+                    </div>
+                    <span className="text-2xl text-emerald-400">✅</span>
+                  </div>
+                  <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between">
+                    <div>
+                      <div className="text-[11px] text-amber-400 font-medium">Weekly Near Below Alerts (-{maxBelow}%)</div>
+                      <div className="text-xl font-bold font-mono text-amber-300">{weeklyNearBelowCount}</div>
+                      <div className="text-[10px] text-gray-400">Weekly mean-reversion watch</div>
+                    </div>
+                    <span className="text-2xl text-amber-400">⏳</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ─────────────────────────────────────────────────────────── */}
+              {/* 3. ASCENDING TRIANGLE SEPARATE SECTIONS */}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {activeTab === "ascending" && (
+                <div className="flex flex-col gap-6">
+                  {/* Section A: Confirmed Breakouts */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between bg-emerald-950/30 border border-emerald-500/30 px-4 py-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <h3 className="text-sm font-bold text-emerald-300">
+                          🚀 Confirmed Breakouts (Direct & Retest Entry)
+                        </h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 font-mono">
+                          {ascConfirmed.length} Active
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">Minimum 1:3 Risk:Reward Target • Breakout candle marked</span>
+                    </div>
+
+                    <TriangleTable 
+                      items={ascConfirmed} 
+                      onSelect={(stock) => setSelectedStock(stock)} 
+                      onHover={(sym) => prefetchChart(sym, "daily")}
+                      handleSort={handleSort}
+                      sortField={sortField}
+                      sortAsc={sortAsc}
+                      getStatusBadge={getStatusBadge}
+                      emptyText="No confirmed ascending triangle breakouts at this moment."
+                    />
+                  </div>
+
+                  {/* Section B: Pre-Breakout Watchlist */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between bg-amber-950/30 border border-amber-500/30 px-4 py-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                        <h3 className="text-sm font-bold text-amber-300">
+                          ⏳ Pre-Breakout Watchlist (Coiling Near Resistance)
+                        </h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 font-mono">
+                          {ascPreBreakout.length} Coiling
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">Coiling inside triangle • Approaching apex breakout</span>
+                    </div>
+
+                    <TriangleTable 
+                      items={ascPreBreakout} 
+                      onSelect={(stock) => setSelectedStock(stock)} 
+                      onHover={(sym) => prefetchChart(sym, "daily")}
+                      handleSort={handleSort}
+                      sortField={sortField}
+                      sortAsc={sortAsc}
+                      getStatusBadge={getStatusBadge}
+                      emptyText="No pre-breakout setups currently coiling near resistance."
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ─────────────────────────────────────────────────────────── */}
+              {/* 4. SYMMETRICAL TRIANGLE SEPARATE SECTIONS */}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {activeTab === "symmetrical" && (
+                <div className="flex flex-col gap-6">
+                  {/* Section A: Confirmed Breakouts */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between bg-purple-950/30 border border-purple-500/30 px-4 py-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse"></span>
+                        <h3 className="text-sm font-bold text-purple-300">
+                          🚀 Confirmed Symmetrical Breakouts (Coil Expansion)
+                        </h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 font-mono">
+                          {symmConfirmed.length} Active
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">Upper descending line broken with volume • Target = base height</span>
+                    </div>
+
+                    <TriangleTable 
+                      items={symmConfirmed} 
+                      onSelect={(stock) => setSelectedStock(stock)} 
+                      onHover={(sym) => prefetchChart(sym, "daily")}
+                      handleSort={handleSort}
+                      sortField={sortField}
+                      sortAsc={sortAsc}
+                      getStatusBadge={getStatusBadge}
+                      emptyText="No confirmed symmetrical triangle breakouts at this moment."
+                    />
+                  </div>
+
+                  {/* Section B: Pre-Breakout Watchlist */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between bg-amber-950/30 border border-amber-500/30 px-4 py-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                        <h3 className="text-sm font-bold text-amber-300">
+                          ⏳ Pre-Breakout Watchlist (Tight Coil Consolidation)
+                        </h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-300 font-mono">
+                          {symmPreBreakout.length} Coiling
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">Volume contraction phase • Near apex</span>
+                    </div>
+
+                    <TriangleTable 
+                      items={symmPreBreakout} 
+                      onSelect={(stock) => setSelectedStock(stock)} 
+                      onHover={(sym) => prefetchChart(sym, "daily")}
+                      handleSort={handleSort}
+                      sortField={sortField}
+                      sortAsc={sortAsc}
+                      getStatusBadge={getStatusBadge}
+                      emptyText="No symmetrical coils currently in pre-breakout watch."
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ─────────────────────────────────────────────────────────── */}
+              {/* 5. BREAKOUTS VS WATCHLIST HUB (Unified Section) */}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {activeTab === "breakout_hub" && (
+                <div className="flex flex-col gap-6">
+                  {/* Confirmed Breakouts Table */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-500/30 px-4 py-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <h3 className="text-sm font-bold text-emerald-300">
+                          🚀 All Confirmed Breakouts (Ascending + Symmetrical)
+                        </h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/80 text-emerald-200 font-mono">
+                          {allConfirmed.length} Triggered
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">Ready for Execution with 1:3 R:R</span>
+                    </div>
+
+                    <TriangleTable 
+                      items={allConfirmed} 
+                      onSelect={(stock) => setSelectedStock(stock)} 
+                      onHover={(sym) => prefetchChart(sym, "daily")}
+                      handleSort={handleSort}
+                      sortField={sortField}
+                      sortAsc={sortAsc}
+                      getStatusBadge={getStatusBadge}
+                      emptyText="No confirmed breakouts across any patterns right now."
+                    />
+                  </div>
+
+                  {/* Pre-Breakout Watchlist Table */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between bg-amber-950/40 border border-amber-500/30 px-4 py-2.5 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                        <h3 className="text-sm font-bold text-amber-300">
+                          ⏳ All Pre-Breakout Watchlist (Ascending + Symmetrical)
+                        </h3>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-900/80 text-amber-200 font-mono">
+                          {allPreBreakouts.length} Coiling
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-400">Anticipatory setups coiling towards resistance</span>
+                    </div>
+
+                    <TriangleTable 
+                      items={allPreBreakouts} 
+                      onSelect={(stock) => setSelectedStock(stock)} 
+                      onHover={(sym) => prefetchChart(sym, "daily")}
+                      handleSort={handleSort}
+                      sortField={sortField}
+                      sortAsc={sortAsc}
+                      getStatusBadge={getStatusBadge}
+                      emptyText="No pre-breakout watchlist setups at this time."
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ─────────────────────────────────────────────────────────── */}
+              {/* 6. 44 MA TABLES (Both, Daily, Weekly) */}
+              {/* ─────────────────────────────────────────────────────────── */}
+              {(activeTab === "both" || activeTab === "daily" || activeTab === "weekly") && (
+                <div>
+                  <div className="flex items-center justify-between text-xs text-gray-400 bg-gray-900/40 p-2.5 rounded-lg border border-gray-800/80 mb-3">
+                    <span className="font-medium text-gray-300">
+                      {activeTab === "both" && "Stocks qualifying on BOTH Daily & Weekly timeframes simultaneously (Highest Confluence)"}
+                      {activeTab === "daily" && "Daily timeframe 44 MA setups (Touching or inside distance buffer)"}
+                      {activeTab === "weekly" && "Weekly timeframe 44 MA setups (Macro swing support)"}
+                    </span>
+                    <span className="font-mono text-gray-400">
+                      Showing <b>{(activeTab === "both" ? bothList : (activeTab === "daily" ? dailyList : weeklyList)).length}</b> matches
+                    </span>
+                  </div>
+
+                  <MaTable 
+                    items={activeTab === "both" ? bothList : (activeTab === "daily" ? dailyList : weeklyList)}
+                    loading={loading}
+                    onSelect={(stock) => setSelectedStock(stock)}
+                    onHover={(sym) => prefetchChart(sym, activeTab === "weekly" ? "weekly" : "daily")}
+                    handleSort={handleSort}
+                    sortField={sortField}
+                    sortAsc={sortAsc}
+                    getStatusBadge={getStatusBadge}
+                  />
+                </div>
+              )}
+
             </main>
           </div>
 
-          {/* Interactive TradingView Chart Modal with Trendlines & Breakout Candle Marker */}
+          {/* ─────────────────────────────────────────────────────────── */}
+          {/* INTERACTIVE TRADINGVIEW CHART MODAL */}
+          {/* ─────────────────────────────────────────────────────────── */}
           {selectedStock && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in duration-150">
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+                
                 {/* Modal Header */}
-                <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950">
-                  <div className="flex items-center gap-3 flex-wrap">
+                <div className="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between bg-gray-950">
+                  <div className="flex items-center flex-wrap gap-3">
                     <span className="text-xl font-bold text-white font-mono">{selectedStock.symbol}</span>
-                    <span className="text-sm text-gray-400 font-sans">{selectedStock.company}</span>
+                    <span className="text-sm text-gray-400 font-sans truncate max-w-[200px]">{selectedStock.company}</span>
                     <span className="text-sm font-bold text-emerald-400 font-mono">₹{fmt(selectedStock.cmp)}</span>
                     
                     {selectedStock.ma44 && (
-                      <span className="text-xs px-2.5 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-500/30 font-mono">
+                      <span className="text-xs px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-500/30 font-mono">
                         44 MA: ₹{fmt(selectedStock.ma44)} ({selectedStock.distance_pct > 0 ? '+' : ''}{selectedStock.distance_pct}%)
                       </span>
                     )}
 
                     {selectedStock.pattern && (
-                      <span className="text-xs px-2.5 py-0.5 rounded bg-purple-900/40 text-purple-300 border border-purple-500/30 font-semibold font-sans">
-                        {selectedStock.pattern} ({selectedStock.status})
+                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-500/30 font-sans font-semibold">
+                        {selectedStock.pattern} • {selectedStock.status}
                       </span>
                     )}
                   </div>
@@ -1003,10 +1131,7 @@
                     </div>
 
                     <button 
-                      onClick={() => {
-                        setSelectedStock(null);
-                        setChartDataState(null);
-                      }}
+                      onClick={() => setSelectedStock(null)}
                       className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none"
                     >
                       ✕
@@ -1014,46 +1139,47 @@
                   </div>
                 </div>
 
-                {/* Pattern Metrics Bar in Modal (Target, Stoploss, Risk:Reward) */}
+                {/* Pattern Metrics Bar (if pattern selected) */}
                 {selectedStock.target && (
-                  <div className="bg-gray-950/90 px-5 py-2.5 border-b border-gray-800 text-xs flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex items-center gap-5">
-                      <span>Resistance: <b className="text-red-400 font-mono">₹{fmt(selectedStock.resistance_level)}</b></span>
-                      <span>Support: <b className="text-emerald-400 font-mono">₹{fmt(selectedStock.support_level)}</b></span>
-                      <span>Target (1:3): <b className="text-emerald-300 font-mono">₹{fmt(selectedStock.target)}</b></span>
-                      <span>Stop-Loss: <b className="text-rose-400 font-mono">₹{fmt(selectedStock.stop_loss)}</b></span>
+                  <div className="bg-[#101726] border-b border-gray-800 px-5 py-2 flex flex-wrap items-center justify-between text-xs font-mono">
+                    <div className="flex items-center gap-4">
+                      <span>Entry: <b className="text-cyan-400">₹{fmt(selectedStock.buy_price)}</b></span>
+                      <span>•</span>
+                      <span>Target (1:3): <b className="text-emerald-400">₹{fmt(selectedStock.target)}</b></span>
+                      <span>•</span>
+                      <span>Stop Loss: <b className="text-rose-400">₹{fmt(selectedStock.stop_loss)}</b></span>
+                      <span>•</span>
+                      <span>R:R: <b className="text-yellow-400">{selectedStock.risk_reward || "1:3"}</b></span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
-                        R:R {selectedStock.risk_reward}
-                      </span>
+                    <div className="text-gray-400">
+                      Resistance: ₹{fmt(selectedStock.resistance_level)} • Touches: {selectedStock.touches}
                     </div>
                   </div>
                 )}
 
                 {/* Lightweight Chart Render Box */}
                 <div className="p-4 bg-[#0b0f19]">
-                  <div ref={chartContainerRef} className="w-full h-[480px]"></div>
+                  <div ref={chartContainerRef} className="w-full h-[460px]"></div>
                 </div>
 
-                {/* Modal Footer Notes with Pattern Legend */}
-                <div className="px-5 py-3 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
-                  <div className="flex items-center gap-4 flex-wrap">
+                {/* Modal Footer Notes */}
+                <div className="px-5 py-2.5 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
+                  <div className="flex items-center gap-4">
                     <span className="flex items-center gap-1.5">
                       <span className="w-3 h-0.5 bg-blue-500 inline-block"></span>
-                      <span>Blue Line: 44-Period MA</span>
+                      <span>44 MA (Blue)</span>
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-red-400 inline-block"></span>
-                      <span>Red Line: Upper Resistance</span>
+                      <span className="w-3 h-0.5 bg-cyan-400 inline-block"></span>
+                      <span>Pattern Lines (Cyan)</span>
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-0.5 bg-emerald-400 inline-block"></span>
-                      <span>Green Line: Lower Support</span>
+                      <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed"></span>
+                      <span>Target 1:3 (Green)</span>
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <span className="text-emerald-400 font-bold">▼</span>
-                      <span className="text-emerald-300">Green Arrow: Breakout Candle</span>
+                      <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed"></span>
+                      <span>Stop Loss (Red)</span>
                     </span>
                   </div>
                   <div>
@@ -1075,9 +1201,228 @@
           <footer className="border-t border-gray-800 bg-[#0b0f19] py-4 px-5 text-center text-xs text-gray-500 mt-auto">
             <p>For educational purposes only. Not investment advice.</p>
             <p className="mt-1 text-[11px] text-gray-600">
-              44 MA Touch & Near Scanner Engine • Separate Daily & Weekly Alert Sections • Confirmed & Pre-Breakout Watchlists
+              44 MA Touch & Near Scanner Engine • Ascending & Symmetrical Triangles • Built for Indian Technical Traders
             </p>
           </footer>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Sub-Component: 44 MA Table
+    // ─────────────────────────────────────────────────────────────────────────
+    function MaTable({ items, loading, onSelect, onHover, handleSort, sortField, sortAsc, getStatusBadge }) {
+      return (
+        <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
+                <th className="py-3 px-4 cursor-pointer hover:text-white" onClick={() => handleSort("symbol")}>
+                  Symbol {sortField === "symbol" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3">Company</th>
+                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("cmp")}>
+                  CMP (₹) {sortField === "cmp" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("ma44")}>
+                  44 MA {sortField === "ma44" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("abs_distance")}>
+                  Distance % {sortField === "abs_distance" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3 text-center">Status</th>
+                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("day_change_pct")}>
+                  Day Chg % {sortField === "day_change_pct" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3 text-right">Volume</th>
+                <th className="py-3 px-3 text-center">Timeframe</th>
+                <th className="py-3 px-3 text-center">Trend (12B)</th>
+                <th className="py-3 px-4 text-center">Chart</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800/60 font-mono">
+              {loading ? (
+                <tr>
+                  <td colSpan="11" className="py-12 text-center text-gray-500 font-sans">
+                    <div className="inline-block animate-spin mr-2">⟳</div>
+                    Scanning Nifty universe...
+                  </td>
+                </tr>
+              ) : items.length === 0 ? (
+                <tr>
+                  <td colSpan="11" className="py-12 text-center text-gray-500 font-sans">
+                    No stocks found matching active filters. Adjust your sliders or status checkboxes.
+                  </td>
+                </tr>
+              ) : (
+                items.map((item) => {
+                  const isUp = (item.day_change_pct || 0) >= 0;
+                  const dist = item.distance_pct != null ? item.distance_pct : 0;
+                  const statusStyle = getStatusBadge(item.status);
+
+                  return (
+                    <tr 
+                      key={item.symbol} 
+                      className="hover:bg-gray-800/50 transition cursor-pointer"
+                      onClick={() => onSelect(item)}
+                      onMouseEnter={() => onHover(item.symbol)}
+                    >
+                      <td className="py-3 px-4 font-bold text-white hover:text-blue-400">
+                        {item.symbol}
+                      </td>
+                      <td className="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[150px]" title={item.company}>
+                        {item.company}
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-gray-100">
+                        ₹{fmt(item.cmp)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-blue-400 font-semibold">
+                        ₹{fmt(item.ma44)}
+                      </td>
+                      <td className={`py-3 px-3 text-right font-bold ${dist >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {dist > 0 ? `+${dist.toFixed(2)}%` : `${dist.toFixed(2)}%`}
+                      </td>
+                      <td className="py-3 px-3 text-center font-sans">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusStyle}`}>
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className={`py-3 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {isUp ? `+${item.day_change_pct.toFixed(2)}%` : `${item.day_change_pct.toFixed(2)}%`}
+                      </td>
+                      <td className="py-3 px-3 text-right text-gray-400">
+                        {fmtVol(item.volume)}
+                      </td>
+                      <td className="py-3 px-3 text-center font-sans">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold ${
+                          item.timeframe === "Both" 
+                            ? "bg-purple-900/40 text-purple-300 border border-purple-500/30" 
+                            : "bg-gray-800 text-gray-400 border border-gray-700"
+                        }`}>
+                          {item.timeframe}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <Sparkline points={item.sparkline} isUp={isUp} />
+                      </td>
+                      <td className="py-3 px-4 text-center font-sans">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(item);
+                          }}
+                          className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-xs font-semibold border border-blue-500/30 transition"
+                        >
+                          View 44 MA
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Sub-Component: Triangle Table (Confirmed & Pre-Breakout)
+    // ─────────────────────────────────────────────────────────────────────────
+    function TriangleTable({ items, onSelect, onHover, handleSort, sortField, sortAsc, getStatusBadge, emptyText }) {
+      return (
+        <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
+                <th className="py-3 px-4 cursor-pointer hover:text-white" onClick={() => handleSort("symbol")}>
+                  Symbol {sortField === "symbol" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3">Company</th>
+                <th className="py-3 px-3 text-right cursor-pointer hover:text-white" onClick={() => handleSort("cmp")}>
+                  CMP (₹) {sortField === "cmp" && (sortAsc ? "▲" : "▼")}
+                </th>
+                <th className="py-3 px-3 text-right">Resistance</th>
+                <th className="py-3 px-3 text-right">Support</th>
+                <th className="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
+                <th className="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
+                <th className="py-3 px-3 text-center">Status / Entry</th>
+                <th className="py-3 px-3 text-center">Touches</th>
+                <th className="py-3 px-3 text-center">Trend (12B)</th>
+                <th className="py-3 px-4 text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800/60 font-mono">
+              {items.length === 0 ? (
+                <tr>
+                  <td colSpan="11" className="py-8 text-center text-gray-500 font-sans">
+                    {emptyText || "No matching patterns."}
+                  </td>
+                </tr>
+              ) : (
+                items.map((item) => {
+                  const isUp = (item.cmp >= (item.resistance_level || 0));
+                  const statusStyle = getStatusBadge(item.status);
+
+                  return (
+                    <tr 
+                      key={item.symbol} 
+                      className="hover:bg-gray-800/50 transition cursor-pointer"
+                      onClick={() => onSelect(item)}
+                      onMouseEnter={() => onHover(item.symbol)}
+                    >
+                      <td className="py-3 px-4 font-bold text-white hover:text-blue-400">
+                        {item.symbol}
+                      </td>
+                      <td className="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[140px]" title={item.company}>
+                        {item.company}
+                      </td>
+                      <td className="py-3 px-3 text-right font-bold text-gray-100">
+                        ₹{fmt(item.cmp)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-red-400 font-semibold">
+                        ₹{fmt(item.resistance_level)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-emerald-400">
+                        ₹{fmt(item.support_level)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-emerald-300 font-bold">
+                        ₹{fmt(item.target)}
+                      </td>
+                      <td className="py-3 px-3 text-right text-rose-400">
+                        ₹{fmt(item.stop_loss)}
+                      </td>
+                      <td className="py-3 px-3 text-center font-sans">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusStyle}`}>
+                          {item.status}
+                        </span>
+                        {item.entry_type && (
+                          <div className="text-[10px] text-gray-400 mt-0.5">{item.entry_type}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-center text-gray-300">
+                        {item.touches} touches
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <Sparkline points={item.sparkline} isUp={isUp} />
+                      </td>
+                      <td className="py-3 px-4 text-center font-sans">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(item);
+                          }}
+                          className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition flex items-center gap-1 mx-auto"
+                        >
+                          <span>Draw Pattern</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       );
     }
