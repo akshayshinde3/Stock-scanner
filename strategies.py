@@ -208,18 +208,18 @@ def evaluate_44ma_breakout(
     company: str,
     candles: list,
     timeframe: str = "daily",
-    min_dist_pct: float = 1.0,
-    max_dist_pct: float = 7.0,
+    min_dist_pct: float = 0.5,
+    max_dist_pct: float = 6.0,
 ) -> dict:
     """
-    Evaluates stock for 44 MA Breakout status strictly between min 1% and max 7%:
+    Evaluates stock for 44 MA Breakout status strictly between min 0.5% and max 6%:
       1. '44 MA Confirm Breakout':
          - Candle crossed/closed firmly ABOVE 44 MA (Close >= MA44)
-         - Strict distance band: +1.0% <= Distance % <= +7.0%
+         - Strict distance band: +0.5% <= Distance % <= +6.0%
          - Actionable buy signal with entry at CMP, stop loss below 44 MA / breakout low, 1:3 target
       2. '44 MA Pre-Breakout':
          - Price coiling under/at 44 MA (Close < MA44)
-         - Strict distance band: -7.0% <= Distance % <= -1.0% (1.0% <= abs(Distance %) <= 7.0%)
+         - Strict distance band: -6.0% <= Distance % <= -0.5% (0.5% <= abs(Distance %) <= 6.0%)
          - Anticipatory setup preparing to break out above 44 MA, stop loss, 1:3 target
     """
     if not candles or len(candles) < 45:
@@ -274,11 +274,11 @@ def evaluate_44ma_breakout(
             breakout_idx = len(candles) - 1
 
         if is_fresh:
-            status = "44 MA Fresh Breakout (1-7%)"
+            status = "44 MA Fresh Breakout (0.5-6%)"
         elif dist_pct <= 3.0:
-            status = "44 MA Near Support (1-3%)"
+            status = "44 MA Near Support (0.5-3%)"
         else:
-            status = "Above 44 MA Trending (3-7%)"
+            status = "Above 44 MA Trending (3-6%)"
 
         breakout_low = lows[breakout_idx] if breakout_idx is not None else cur_low
         stop_loss = round(min(current_ma * 0.985, breakout_low * 0.99), 2)
@@ -316,7 +316,7 @@ def evaluate_44ma_breakout(
             return None
 
         touch = is_touch(cur_low, cur_high, current_ma)
-        status = "44 MA Touching (Pre-Breakout)" if touch else "44 MA Near Below (1-7%)"
+        status = "44 MA Touching (Pre-Breakout)" if touch else "44 MA Near Below (0.5-6%)"
 
         anticipated_entry = round(current_ma * 1.002, 2)
         stop_loss = round(min(cur_low * 0.99, current_ma * 0.975), 2)

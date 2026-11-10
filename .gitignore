@@ -11,6 +11,8 @@ __pycache__/
 
 # Local user/app data
 paper_journal.json
+*.tmp
+eod_cache.json
 
 # Virtual environment
 venv/

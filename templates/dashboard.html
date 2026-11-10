@@ -78,6 +78,8 @@
             <option value="nifty500" class="bg-gray-900">Nifty 500 (All)</option>
             <option value="nifty100" class="bg-gray-900">Nifty 100 (Large)</option>
             <option value="nifty50" class="bg-gray-900">Nifty 50 (Core)</option>
+            <option value="midcap" class="bg-gray-900">Nifty Midcap</option>
+            <option value="smallcap" class="bg-gray-900">Nifty Smallcap</option>
           </select>
         </div>
 
@@ -103,7 +105,7 @@
       <div class="flex items-center gap-3">
         <span class="flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>4 Primary Strategies with Pre-Breakout & Confirmed Breakout Children</span>
+          <span>4 Primary Strategies</span>
         </span>
         <span>•</span>
         <span>Last Updated: <b id="lastUpdatedText" class="text-gray-200 font-mono">Live</b></span>
@@ -152,7 +154,7 @@
           </span>
           <span id="badge-main-daily" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">44 Daily Pre & Confirmed</div>
+        <div class="text-[11px] text-gray-400 mt-1">44 Daily Confirmed Breakouts</div>
       </button>
 
       <!-- 4. Weekly MA -->
@@ -163,7 +165,7 @@
           </span>
           <span id="badge-main-weekly" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">44 Weekly Pre & Confirmed</div>
+        <div class="text-[11px] text-gray-400 mt-1">44 Weekly Confirmed Breakouts</div>
       </button>
     </div>
 
@@ -383,15 +385,21 @@
       }
 
       // Load all 4 sections in parallel
-      async function loadAllData() {
+      async function loadAllData(forceRefresh = false) {
         const updateText = document.getElementById("lastUpdatedText");
-        updateText.textContent = "Scanning...";
+        const refreshBtn = document.getElementById("btnRefresh");
+        if (updateText) updateText.textContent = forceRefresh ? "Refreshing..." : "Scanning...";
+        if (refreshBtn && forceRefresh) {
+          refreshBtn.classList.add("opacity-50", "pointer-events-none");
+          refreshBtn.textContent = "⟳ Refreshing...";
+        }
 
         try {
+          const refreshParam = forceRefresh ? "&refresh=1" : "";
           const [resTri, resDaily44, resWeekly44] = await Promise.all([
-            fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=daily`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=daily&min_pct=1.0&max_pct=7.0`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=weekly&min_pct=1.0&max_pct=7.0`).then(r => r.json()).catch(() => ({}))
+            fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=daily${refreshParam}`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=daily&min_pct=0.5&max_pct=6.0${refreshParam}`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=weekly&min_pct=0.5&max_pct=6.0${refreshParam}`).then(r => r.json()).catch(() => ({}))
           ]);
 
           // 1. Ascending Triangle Split
@@ -404,19 +412,19 @@
           dataStore.symmetrical.confirmed = resTri.symmetrical_confirmed || rawSymm.filter(x => x.status && (x.status.includes("Confirmed") || x.status.includes("Breakout")));
           dataStore.symmetrical.pre = resTri.symmetrical_pre || rawSymm.filter(x => x.status && (x.status.includes("Watch") || x.status.includes("Pre")));
 
-          // 3. Daily MA Split
+          // 3. Daily MA Split (confirmed only, pre-breakout removed)
           dataStore.daily_ma.confirmed = resDaily44.confirmed_breakouts || [];
-          dataStore.daily_ma.pre = resDaily44.pre_breakouts || [];
+          dataStore.daily_ma.pre = [];
 
-          // 4. Weekly MA Split
+          // 4. Weekly MA Split (confirmed only, pre-breakout removed)
           dataStore.weekly_ma.confirmed = resWeekly44.confirmed_breakouts || [];
-          dataStore.weekly_ma.pre = resWeekly44.pre_breakouts || [];
+          dataStore.weekly_ma.pre = [];
 
           // Update Main Heading Badges
           document.getElementById("badge-main-asc").textContent = dataStore.ascending.confirmed.length + dataStore.ascending.pre.length;
           document.getElementById("badge-main-symm").textContent = dataStore.symmetrical.confirmed.length + dataStore.symmetrical.pre.length;
-          document.getElementById("badge-main-daily").textContent = dataStore.daily_ma.confirmed.length + dataStore.daily_ma.pre.length;
-          document.getElementById("badge-main-weekly").textContent = dataStore.weekly_ma.confirmed.length + dataStore.weekly_ma.pre.length;
+          document.getElementById("badge-main-daily").textContent = dataStore.daily_ma.confirmed.length;
+          document.getElementById("badge-main-weekly").textContent = dataStore.weekly_ma.confirmed.length;
 
           updateText.textContent = resTri.last_updated || new Date().toLocaleTimeString();
 
@@ -424,6 +432,11 @@
         } catch (err) {
           console.error("Error loading scanner data:", err);
           updateText.textContent = "Error";
+        } finally {
+          if (refreshBtn) {
+            refreshBtn.classList.remove("opacity-50", "pointer-events-none");
+            refreshBtn.textContent = "⟳ Refresh";
+          }
         }
       }
 
@@ -464,29 +477,35 @@
         const preCount = sec ? sec.pre.length : 0;
         const confCount = sec ? sec.confirmed.length : 0;
 
+        // Hide pre-breakout for daily_ma and weekly_ma
+        const hidePre = (activeSection === "daily_ma" || activeSection === "weekly_ma");
+
         let preLabel = "⏳ Pre-Breakout";
         let confLabel = "🚀 Confirmed Breakout";
         if (activeSection === "daily_ma") {
-          preLabel = "⏳ 44 Daily Pre-Breakout";
           confLabel = "🚀 44 Daily Confirmed Breakout";
         } else if (activeSection === "weekly_ma") {
-          preLabel = "⏳ 44 Weekly Pre-Breakout";
           confLabel = "🚀 44 Weekly Confirmed Breakout";
         }
 
         const isConfActive = (activeChild === "confirmed");
         const isPreActive = (activeChild === "pre");
 
+        let preButtonHtml = "";
+        if (!hidePre) {
+          preButtonHtml = `
+          <button id="btnChildPre" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isPreActive ? 'bg-amber-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
+            <span>${preLabel}</span>
+            <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isPreActive ? 'bg-amber-950 text-amber-300 border border-amber-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${preCount}</span>
+          </button>`;
+        }
+
         container.innerHTML = `
           <button id="btnChildConfirmed" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isConfActive ? 'bg-emerald-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
             <span>${confLabel}</span>
             <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isConfActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${confCount}</span>
           </button>
-
-          <button id="btnChildPre" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isPreActive ? 'bg-amber-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
-            <span>${preLabel}</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isPreActive ? 'bg-amber-950 text-amber-300 border border-amber-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${preCount}</span>
-          </button>
+          ${preButtonHtml}
         `;
 
         document.getElementById("btnChildConfirmed").addEventListener("click", () => {
@@ -494,10 +513,13 @@
           renderView();
         });
 
-        document.getElementById("btnChildPre").addEventListener("click", () => {
-          activeChild = "pre";
-          renderView();
-        });
+        const preBtn = document.getElementById("btnChildPre");
+        if (preBtn) {
+          preBtn.addEventListener("click", () => {
+            activeChild = "pre";
+            renderView();
+          });
+        }
       }
 
       // Sync active state of the 4 Main Heading Buttons
@@ -516,6 +538,9 @@
 
       // Main Render Function
       function renderView() {
+        if ((activeSection === "daily_ma" || activeSection === "weekly_ma") && activeChild === "pre") {
+          activeChild = "confirmed";
+        }
         syncMainHeadingStyles();
         renderChildBar();
 
@@ -613,90 +638,51 @@
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // 3 & 4: DAILY MA & WEEKLY MA SECTIONS
+        // 3 & 4: DAILY MA & WEEKLY MA SECTIONS (Confirmed Only)
         // ═════════════════════════════════════════════════════════════════════
         if (activeSection === "daily_ma" || activeSection === "weekly_ma") {
           const tfTitle = activeSection === "daily_ma" ? "Daily 44 MA" : "Weekly 44 MA";
-          const isConf = (activeChild === "confirmed");
+          // Daily & Weekly MA are confirmed breakout only
+          const isConf = true;
 
-          if (isConf) {
-            const freshCount = rawList.filter(s => s.status && s.status.includes("Fresh")).length;
-            const nearCount = rawList.filter(s => s.status && s.status.includes("Near")).length;
+          const freshCount = rawList.filter(s => s.status && s.status.includes("Fresh")).length;
+          const nearCount = rawList.filter(s => s.status && s.status.includes("Near")).length;
 
-            statsContainer.innerHTML = `
-              <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
-                <div>
-                  <div class="text-[11px] text-emerald-400 font-medium">${tfTitle} Confirmed</div>
-                  <div class="text-2xl font-bold font-mono text-emerald-300">${rawList.length}</div>
-                  <div class="text-[10px] text-gray-400">Close &ge; 44 MA (+1% to +7%)</div>
-                </div>
-                <span class="text-3xl text-emerald-400">🚀</span>
+          statsContainer.innerHTML = `
+            <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+              <div>
+                <div class="text-[11px] text-emerald-400 font-medium">${tfTitle} Confirmed</div>
+                <div class="text-2xl font-bold font-mono text-emerald-300">${rawList.length}</div>
+                <div class="text-[10px] text-gray-400">Close &ge; 44 MA (+0.5% to +6%)</div>
               </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-emerald-400 font-medium">Distance Range</div>
-                  <div class="text-xl font-bold font-mono text-emerald-300">+1% to +7%</div>
-                  <div class="text-[10px] text-gray-400">Clearance without overextension</div>
-                </div>
-                <span class="text-2xl text-emerald-400">📏</span>
+              <span class="text-3xl text-emerald-400">🚀</span>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div class="text-[11px] text-emerald-400 font-medium">Distance Range</div>
+                <div class="text-xl font-bold font-mono text-emerald-300">+0.5% to +6%</div>
+                <div class="text-[10px] text-gray-400">Clearance without overextension</div>
               </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-blue-400 font-medium">Fresh Cross (${tfTitle})</div>
-                  <div class="text-xl font-bold font-mono text-white">${freshCount}</div>
-                  <div class="text-[10px] text-gray-400">Crossed 44 MA in last 1-2 bars</div>
-                </div>
-                <span class="text-2xl text-blue-400">⚡</span>
+              <span class="text-2xl text-emerald-400">📏</span>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div class="text-[11px] text-blue-400 font-medium">Fresh Cross (${tfTitle})</div>
+                <div class="text-xl font-bold font-mono text-white">${freshCount}</div>
+                <div class="text-[10px] text-gray-400">Crossed 44 MA in last 1-2 bars</div>
               </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-yellow-400 font-medium">Risk : Reward</div>
-                  <div class="text-xl font-bold font-mono text-yellow-400">1 : 3 Strict</div>
-                  <div class="text-[10px] text-gray-400">Target = Entry + 3 × Risk</div>
-                </div>
-                <span class="text-2xl text-yellow-400">🏆</span>
+              <span class="text-2xl text-blue-400">⚡</span>
+            </div>
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div class="text-[11px] text-yellow-400 font-medium">Risk : Reward</div>
+                <div class="text-xl font-bold font-mono text-yellow-400">1 : 3 Strict</div>
+                <div class="text-[10px] text-gray-400">Target = Entry + 3 × Risk</div>
               </div>
-            `;
-            bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${tfTitle} — Confirmed Breakout:</span> Showing stocks strictly between <b class="text-emerald-300 font-mono">+1.0% and +7.0%</b> above 44 MA with green continuation candles. Stop Loss below 44 MA / breakout low, 1:3 profit target.`;
-          } else {
-            const touchCount = rawList.filter(s => s.status && s.status.includes("Touching")).length;
-
-            statsContainer.innerHTML = `
-              <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
-                <div>
-                  <div class="text-[11px] text-amber-400 font-medium">${tfTitle} Pre-Breakout</div>
-                  <div class="text-2xl font-bold font-mono text-amber-300">${rawList.length}</div>
-                  <div class="text-[10px] text-gray-400">Close &lt; 44 MA (-1% to -7%)</div>
-                </div>
-                <span class="text-3xl text-amber-400">⏳</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-amber-400 font-medium">Distance Range</div>
-                  <div class="text-xl font-bold font-mono text-amber-300">-1% to -7%</div>
-                  <div class="text-[10px] text-gray-400">Same 1% to 7% distance band</div>
-                </div>
-                <span class="text-2xl text-amber-400">📏</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-blue-400 font-medium">44 MA Touching</div>
-                  <div class="text-xl font-bold font-mono text-white">${touchCount}</div>
-                  <div class="text-[10px] text-gray-400">Low ≤ 44 MA ≤ High</div>
-                </div>
-                <span class="text-2xl text-blue-400">📍</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-emerald-400 font-medium">Anticipated Trigger</div>
-                  <div class="text-xl font-bold font-mono text-emerald-300">44 MA + 0.2%</div>
-                  <div class="text-[10px] text-gray-400">Buy immediately on cross</div>
-                </div>
-                <span class="text-2xl text-emerald-400">🎯</span>
-              </div>
-            `;
-            bannerDesc.innerHTML = `<span class="text-amber-400 font-bold">${tfTitle} — Pre-Breakout Watchlist:</span> Showing stocks strictly between <b class="text-amber-300 font-mono">-1.0% and -7.0%</b> below 44 MA. Set alerts for an imminent breakout push above 44 MA.`;
-          }
+              <span class="text-2xl text-yellow-400">🏆</span>
+            </div>
+          `;
+          bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${tfTitle} — Confirmed Breakout:</span> Showing stocks strictly between <b class="text-emerald-300 font-mono">+0.5% and +6.0%</b> above 44 MA with green continuation candles. Stop Loss below 44 MA / breakout low, 1:3 profit target.`;
 
           render44MaTable(list, isConf);
           return;
@@ -1024,11 +1010,11 @@
 
       document.getElementById("indexSelector").addEventListener("change", (e) => {
         currentIndex = e.target.value;
-        loadAllData();
+        loadAllData(false);
       });
 
       document.getElementById("btnRefresh").addEventListener("click", () => {
-        loadAllData();
+        loadAllData(true);
       });
 
       document.getElementById("btnExportCsv").addEventListener("click", () => {

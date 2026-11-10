@@ -22,12 +22,15 @@ import os
 import io
 import csv
 import time
+import gzip
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 import datetime as dt
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import pandas as pd
+import requests
 import yfinance as yf
 from flask import Flask, jsonify, request, render_template, send_file, Response, session, redirect, url_for
 
@@ -134,12 +137,13 @@ COMPANY_NAMES = {
 # ═══════════════════════════════════════════════════════════════════════════
 # Universe Loading & Symbol Cache
 # ═══════════════════════════════════════════════════════════════════════════
-def load_universe_symbols() -> List[str]:
-    """Loads Nifty 500 symbols from disk."""
-    if not os.path.exists(NIFTY500_FILE):
-        return list(COMPANY_NAMES.keys())
+def load_symbol_file(filename: str) -> List[str]:
+    """Loads stock symbols from a text file in DATA_DIR."""
+    filepath = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(filepath):
+        return []
     symbols = []
-    with open(NIFTY500_FILE, "r", encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):
@@ -147,9 +151,24 @@ def load_universe_symbols() -> List[str]:
     return symbols
 
 
-UNIVERSE_NIFTY500 = load_universe_symbols()
+UNIVERSE_NIFTY500 = load_symbol_file("nifty500.txt") or list(COMPANY_NAMES.keys())
 UNIVERSE_NIFTY100 = UNIVERSE_NIFTY500[:100] if len(UNIVERSE_NIFTY500) >= 100 else UNIVERSE_NIFTY500
 UNIVERSE_NIFTY50  = UNIVERSE_NIFTY500[:50]  if len(UNIVERSE_NIFTY500) >= 50  else UNIVERSE_NIFTY500
+UNIVERSE_MIDCAP   = load_symbol_file("niftymidcap.txt")
+UNIVERSE_SMALLCAP = load_symbol_file("niftysmallcap.txt")
+
+
+def get_universe(index_param: str) -> List[str]:
+    """Returns the universe list for a given index parameter."""
+    if index_param == "nifty50":
+        return UNIVERSE_NIFTY50
+    elif index_param == "nifty100":
+        return UNIVERSE_NIFTY100
+    elif index_param == "midcap":
+        return UNIVERSE_MIDCAP
+    elif index_param == "smallcap":
+        return UNIVERSE_SMALLCAP
+    return UNIVERSE_NIFTY500
 
 def get_company_name(symbol: str) -> str:
     """Returns human-readable company name for symbol."""
@@ -162,42 +181,185 @@ def get_company_name(symbol: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 # Candle Cache & Data Fetching (Daily & Weekly via Yahoo Finance .NS)
 # ═══════════════════════════════════════════════════════════════════════════
-CACHE_FILE = os.path.join(DATA_DIR, "eod_cache.json")
+PERSISTENT_DIR = "/data" if os.path.isdir("/data") else DATA_DIR
+CACHE_GZ_FILE = os.path.join(PERSISTENT_DIR, "candle_cache.json.gz")
+FALLBACK_GZ_FILE = os.path.join(DATA_DIR, "candle_cache.json.gz")
+CACHE_JSON_FILE = os.path.join(PERSISTENT_DIR, "eod_cache.json")
+
+# Symbol renames / corporate action mapping for Yahoo Finance
+SYMBOL_MAP = {
+    "TATAMOTORS": "TMPV",
+    "ZOMATO": "ETERNAL",
+    "MCDOWELL-N": "UNITDSPR",
+    "LTI": "LTIM",
+    "CADILAHC": "ZYDUSLIFE",
+    "MINDTREE": "LTIM",
+    "TATAMTRDVR": "TMCV",
+    "KALPATPOWR": "KPIL",
+    "GMRINFRA": "GMRAIRPORT",
+    "MAHINDCIE": "CIEINDIA",
+    "TBOEK": "TBOTEK",
+    "NIPPON": "NAM-INDIA",
+    "ARCHIAN": "ACI",
+    "VENKYS": "VENKEYS",
+    "AEGISCHEM": "AEGISLOG",
+    "CAPL": "CAPLIPOI",
+    "ISEC": "PVRINOX",
+}
+
 _daily_cache: Dict[str, list] = {}
 _weekly_cache: Dict[str, list] = {}
 _last_cache_update_time: Optional[dt.datetime] = None
 _cache_lock = threading.Lock()
+_batch_lock = threading.Lock()
+_failed_symbols: set = set()
+
+# High-performance persistent HTTP session with connection pooling
+_http_session = requests.Session()
+_adapter = requests.adapters.HTTPAdapter(pool_connections=35, pool_maxsize=35, max_retries=2)
+_http_session.mount("https://", _adapter)
+_http_session.mount("http://", _adapter)
+_http_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+})
+
+
+def resample_daily_to_weekly_fast(daily_candles: list) -> list:
+    """
+    High-performance pure Python weekly candle aggregation (0.2s for 500 stocks).
+    Aggregates Monday to Friday (or latest day in week):
+      Open = first Open
+      High = max High
+      Low = min Low
+      Close = last Close
+      Volume = sum Volume
+    """
+    if not daily_candles or len(daily_candles) < 5:
+        return []
+    weeks = {}
+    for c in daily_candles:
+        d_str = str(c[0])[:10]
+        try:
+            d = dt.date.fromisoformat(d_str)
+        except Exception:
+            continue
+        key = d.isocalendar()[:2]  # (year, week_num)
+        if key not in weeks:
+            weeks[key] = {
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": int(c[5]),
+                "last_date": d_str
+            }
+        else:
+            w = weeks[key]
+            h = float(c[2])
+            l = float(c[3])
+            if h > w["high"]:
+                w["high"] = h
+            if l < w["low"]:
+                w["low"] = l
+            w["close"] = float(c[4])
+            w["volume"] += int(c[5])
+            w["last_date"] = d_str
+
+    weekly = []
+    for _, w in weeks.items():
+        weekly.append([
+            w["last_date"],
+            round(w["open"], 2),
+            round(w["high"], 2),
+            round(w["low"], 2),
+            round(w["close"], 2),
+            int(w["volume"])
+        ])
+    return weekly
 
 
 def load_disk_cache():
-    """Loads cached candles from local disk file if present (Instant Startup)."""
-    if os.path.exists(CACHE_FILE):
+    """Loads cached candles from persistent disk file if present (Instant Startup)."""
+    target_file = None
+    if os.path.exists(CACHE_GZ_FILE):
+        target_file = CACHE_GZ_FILE
+    elif os.path.exists(FALLBACK_GZ_FILE):
+        target_file = FALLBACK_GZ_FILE
+
+    if target_file:
         try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            with gzip.open(target_file, "rt", encoding="utf-8") as f:
                 data = json.load(f)
-                with _cache_lock:
-                    for sym, val in data.items():
-                        _daily_cache[sym] = val.get("daily", [])
-                        _weekly_cache[sym] = val.get("weekly", [])
-            print(f"Loaded {len(_daily_cache)} symbols instantly from persistent disk cache.")
+            daily_data = data.get("daily", {})
+            weekly_data = data.get("weekly", {})
+            with _cache_lock:
+                for sym, candles in daily_data.items():
+                    if candles:
+                        _daily_cache[sym] = [
+                            [str(c[0])[:10], float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])]
+                            for c in candles
+                        ]
+                for sym, candles in weekly_data.items():
+                    if candles:
+                        _weekly_cache[sym] = [
+                            [str(c[0])[:10], float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])]
+                            for c in candles
+                        ]
+            print(f"Loaded {len(_daily_cache)} symbols instantly from {target_file}.")
+            return
+        except Exception as e:
+            print(f"Warning: Could not load gzip cache ({e}), checking JSON cache...")
+
+    if os.path.exists(CACHE_JSON_FILE):
+        try:
+            with open(CACHE_JSON_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            with _cache_lock:
+                for sym, val in data.items():
+                    _daily_cache[sym] = val.get("daily", [])
+                    _weekly_cache[sym] = val.get("weekly", [])
+            print(f"Loaded {len(_daily_cache)} symbols from JSON cache.")
         except Exception as e:
             print(f"Warning: Could not load disk cache: {e}")
 
 
-def save_disk_cache():
-    """Persists memory candle cache to disk so restarts are instantaneous."""
+def _do_save_disk_cache():
+    """Background task to persist candle cache to disk."""
     try:
-        data = {}
+        data = {
+            "date": dt.date.today().isoformat(),
+            "daily": {},
+            "weekly": {}
+        }
         with _cache_lock:
-            for sym in _daily_cache:
-                data[sym] = {
-                    "daily": _daily_cache[sym],
-                    "weekly": _weekly_cache.get(sym, [])
-                }
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+            data["daily"] = dict(_daily_cache)
+            data["weekly"] = dict(_weekly_cache)
+
+        target_path = CACHE_GZ_FILE if os.path.isdir(PERSISTENT_DIR) else FALLBACK_GZ_FILE
+        tmp_path = target_path + ".tmp"
+        try:
+            with gzip.open(tmp_path, "wt", encoding="utf-8") as f:
+                json.dump(data, f)
+
+            if os.path.exists(target_path):
+                os.replace(tmp_path, target_path)
+            else:
+                os.rename(tmp_path, target_path)
+            print(f"Candle cache saved to disk ({len(data['daily'])} symbols).")
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
     except Exception as e:
         print(f"Warning: Could not save disk cache: {e}")
+
+
+def save_disk_cache():
+    """Persists memory candle cache to disk asynchronously."""
+    threading.Thread(target=_do_save_disk_cache, daemon=True).start()
 
 
 # Load on module import
@@ -217,117 +379,55 @@ def is_after_4pm_ist() -> bool:
     return ist.hour >= 16 or (ist.hour == 16 and ist.minute >= 0)
 
 
-def resample_daily_to_weekly(daily_candles: list) -> list:
-    """
-    Resamples daily OHLCV candles to weekly candles:
-    Takes Monday to Friday (or week grouping), aggregating:
-      Open = first Open
-      High = max High
-      Low = min Low
-      Close = last Close
-      Volume = sum Volume
-    """
-    if not daily_candles or len(daily_candles) < 5:
-        return []
-
-    df = pd.DataFrame(daily_candles, columns=["date", "open", "high", "low", "close", "volume"])
-    df["date"] = pd.to_datetime(df["date"])
-    df.set_index("date", inplace=True)
-
-    # Weekly resample ending on Friday (W-FRI)
-    weekly_df = df.resample("W-FRI").agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-    }).dropna()
-
-    weekly_candles = []
-    for date_idx, row in weekly_df.iterrows():
-        weekly_candles.append([
-            date_idx.strftime("%Y-%m-%d"),
-            round(float(row["open"]), 2),
-            round(float(row["high"]), 2),
-            round(float(row["low"]), 2),
-            round(float(row["close"]), 2),
-            int(row["volume"]),
-        ])
-    return weekly_candles
-
-
 def fetch_stock_candles_yf(symbol: str) -> tuple:
     """
-    Fetches daily and weekly candles for an NSE stock via Yahoo Finance.
-    Bypasses yfinance's buggy quoteSummary 404 endpoint using direct v8 chart API.
+    Fetches daily and weekly candles for an NSE stock via Yahoo Finance direct v8 API.
+    Bypasses yfinance's buggy quoteSummary 404 endpoint and uses connection pooling.
     Returns (daily_candles, weekly_candles).
     """
-    ticker_sym = f"{symbol}.NS"
-    # 1. Primary: Direct Yahoo Finance v8 chart API (Fast, reliable, never throws quoteSummary 404)
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_sym}?range=1y&interval=1d"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json"
-        }
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            if resp.status == 200:
-                data = json.loads(resp.read().decode("utf-8"))
-                res_list = data.get("chart", {}).get("result")
-                if res_list:
-                    item = res_list[0]
-                    timestamps = item.get("timestamp", [])
-                    quotes = item.get("indicators", {}).get("quote", [{}])[0]
-                    opens = quotes.get("open", [])
-                    highs = quotes.get("high", [])
-                    lows = quotes.get("low", [])
-                    closes = quotes.get("close", [])
-                    volumes = quotes.get("volume", [])
+    sym_upper = symbol.upper()
+    mapped_sym = SYMBOL_MAP.get(sym_upper, sym_upper)
+    ticker_sym = f"{mapped_sym}.NS"
+    host = "query2.finance.yahoo.com" if (hash(sym_upper) % 2 == 0) else "query1.finance.yahoo.com"
+    url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=1y&interval=1d"
 
-                    daily = []
-                    for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
-                        if o is None or h is None or l is None or c is None:
-                            continue
-                        d_str = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).strftime("%Y-%m-%d")
-                        daily.append([
-                            d_str,
-                            round(float(o), 2),
-                            round(float(h), 2),
-                            round(float(l), 2),
-                            round(float(c), 2),
-                            int(v or 0)
-                        ])
-                    if len(daily) >= 45:
-                        weekly = resample_daily_to_weekly(daily)
-                        return daily, weekly
+    try:
+        resp = _http_session.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            res_list = data.get("chart", {}).get("result")
+            if res_list:
+                item = res_list[0]
+                timestamps = item.get("timestamp", [])
+                quotes = item.get("indicators", {}).get("quote", [{}])[0]
+                opens = quotes.get("open", [])
+                highs = quotes.get("high", [])
+                lows = quotes.get("low", [])
+                closes = quotes.get("close", [])
+                volumes = quotes.get("volume", [])
+
+                daily = []
+                for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
+                    if o is None or h is None or l is None or c is None:
+                        continue
+                    d_str = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).strftime("%Y-%m-%d")
+                    daily.append([
+                        d_str,
+                        round(float(o), 2),
+                        round(float(h), 2),
+                        round(float(l), 2),
+                        round(float(c), 2),
+                        int(v or 0)
+                    ])
+                if len(daily) >= 45:
+                    weekly = resample_daily_to_weekly_fast(daily)
+                    return daily, weekly
+        elif resp.status_code == 404:
+            return None, None
     except Exception:
         pass
 
-    # 2. Fallback: yfinance download/history
-    try:
-        ticker = yf.Ticker(ticker_sym)
-        df = ticker.history(period="1y", interval="1d", auto_adjust=True)
-        if df.empty or len(df) < 45:
-            return None, None
-
-        daily = []
-        for index, row in df.iterrows():
-            d_str = index.strftime("%Y-%m-%d") if hasattr(index, "strftime") else str(index)[:10]
-            daily.append([
-                d_str,
-                round(float(row["Open"]), 2),
-                round(float(row["High"]), 2),
-                round(float(row["Low"]), 2),
-                round(float(row["Close"]), 2),
-                int(row["Volume"]),
-            ])
-
-        weekly = resample_daily_to_weekly(daily)
-        return daily, weekly
-    except Exception as e:
-        print(f"Error fetching candles for {symbol}: {e}")
-        return None, None
+    return None, None
 
 
 def get_cached_candles(symbol: str, force_refresh: bool = False) -> tuple:
@@ -337,25 +437,73 @@ def get_cached_candles(symbol: str, force_refresh: bool = False) -> tuple:
         if not force_refresh and sym in _daily_cache and sym in _weekly_cache:
             return _daily_cache[sym], _weekly_cache[sym]
 
+    if sym in _failed_symbols and not force_refresh:
+        return None, None
+
     d_candles, w_candles = fetch_stock_candles_yf(sym)
     if d_candles and w_candles:
         with _cache_lock:
             _daily_cache[sym] = d_candles
             _weekly_cache[sym] = w_candles
+    else:
+        _failed_symbols.add(sym)
     return d_candles, w_candles
 
 
+def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 14) -> None:
+    """
+    Ensures all symbols in universe are cached in memory.
+    If any are missing (or force_refresh=True), fetches them in parallel using ThreadPoolExecutor.
+    Thread-safe to prevent redundant fetch storms.
+    """
+    with _batch_lock:
+        if force_refresh:
+            _failed_symbols.clear()
+            symbols_to_fetch = list(universe)
+        else:
+            with _cache_lock:
+                symbols_to_fetch = [
+                    s for s in universe
+                    if (s not in _daily_cache or s not in _weekly_cache) and (s not in _failed_symbols)
+                ]
+
+        if not symbols_to_fetch:
+            return
+
+        print(f"Parallel fetching candles for {len(symbols_to_fetch)} symbols...")
+        t0 = time.time()
+        new_count = 0
+
+        def _fetch_worker(s: str):
+            d, w = fetch_stock_candles_yf(s)
+            return s, d, w
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {executor.submit(_fetch_worker, s): s for s in symbols_to_fetch}
+            for fut in as_completed(future_map):
+                try:
+                    s, d_candles, w_candles = fut.result()
+                    if d_candles and w_candles:
+                        with _cache_lock:
+                            _daily_cache[s] = d_candles
+                            _weekly_cache[s] = w_candles
+                        new_count += 1
+                    else:
+                        _failed_symbols.add(s)
+                except Exception:
+                    pass
+
+        t1 = time.time()
+        print(f"Parallel fetch finished: {new_count}/{len(symbols_to_fetch)} in {t1 - t0:.2f}s")
+        if new_count > 0:
+            save_disk_cache()
+
+
 def background_cache_warmup():
-    """Warms up the candle cache for priority stocks in background."""
-    print("Initiating candle cache prefetch for top liquid stocks...")
-    priority_list = UNIVERSE_NIFTY500[:100]
-    for sym in priority_list:
-        try:
-            get_cached_candles(sym)
-            time.sleep(0.05)  # slight pacing to respect rate limits
-        except Exception:
-            pass
-    print("Initial cache prefetch complete.")
+    """Warms up any missing universe candles in the background."""
+    print("Initiating background candle check for universe...")
+    ensure_universe_cached(UNIVERSE_NIFTY500, force_refresh=False)
+    print(f"Candle cache ready ({len(_daily_cache)} symbols in memory).")
 
 
 # Start warmup thread once on launch
@@ -424,7 +572,26 @@ def api_universe():
         "nifty50_count": len(UNIVERSE_NIFTY50),
         "nifty100_count": len(UNIVERSE_NIFTY100),
         "nifty500_count": len(UNIVERSE_NIFTY500),
+        "midcap_count": len(UNIVERSE_MIDCAP),
+        "smallcap_count": len(UNIVERSE_SMALLCAP),
     })
+
+
+# In-memory scanner results cache for instant response (< 5ms) on Render free tier
+_SCAN_44MA_CACHE: Dict[str, dict] = {}
+_SCAN_ABOVE44_CACHE: Dict[str, dict] = {}
+_SCAN_TRIANGLES_CACHE: Dict[str, dict] = {}
+_SCAN_44BREAKOUTS_CACHE: Dict[str, dict] = {}
+_LAST_SCAN_TIME: Dict[str, float] = {}
+
+
+def clear_scan_caches():
+    """Clears all scanner result caches on forced refresh."""
+    _SCAN_44MA_CACHE.clear()
+    _SCAN_ABOVE44_CACHE.clear()
+    _SCAN_TRIANGLES_CACHE.clear()
+    _SCAN_44BREAKOUTS_CACHE.clear()
+    _LAST_SCAN_TIME.clear()
 
 
 @app.route("/api/scanner/44ma")
@@ -447,6 +614,10 @@ def api_scanner_44ma():
         universe = UNIVERSE_NIFTY50
     elif index_param == "nifty100":
         universe = UNIVERSE_NIFTY100
+    elif index_param == "midcap":
+        universe = UNIVERSE_MIDCAP
+    elif index_param == "smallcap":
+        universe = UNIVERSE_SMALLCAP
     else:
         universe = UNIVERSE_NIFTY500
 
@@ -477,12 +648,22 @@ def api_scanner_44ma():
     status_filter = request.args.get("statuses", "")
     allowed_statuses = [s.strip().lower() for s in status_filter.split(",") if s.strip()] if status_filter else []
 
+    if force_refresh:
+        clear_scan_caches()
+
+    cache_key = f"{index_param}_{max_above}_{max_below}_{min_price}_{min_weekly_vol}_{rising_only}_{green_only}_{status_filter}"
+    now_time = time.time()
+    if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 180):
+        return jsonify(_SCAN_44MA_CACHE[cache_key])
+
+    ensure_universe_cached(universe, force_refresh=force_refresh)
+
     both_results = []
     daily_results = []
     weekly_results = []
 
     for sym in universe:
-        d_candles, w_candles = get_cached_candles(sym, force_refresh=force_refresh)
+        d_candles, w_candles = get_cached_candles(sym)
         if not d_candles:
             continue
 
@@ -526,7 +707,7 @@ def api_scanner_44ma():
     now_ist = get_current_ist_time()
     last_updated_str = now_ist.strftime("%d-%b-%Y %I:%M %p IST")
 
-    return jsonify({
+    payload = {
         "last_updated": last_updated_str,
         "universe": index_param.upper(),
         "total_scanned": len(universe),
@@ -541,38 +722,39 @@ def api_scanner_44ma():
             "daily": daily_results,
             "weekly": weekly_results,
         }
-    })
+    }
 
-
-# In-memory scanner results cache for instant response (< 5ms) on Render free tier
-_SCAN_44MA_CACHE: Dict[str, dict] = {}
-_SCAN_ABOVE44_CACHE: Dict[str, dict] = {}
-_SCAN_TRIANGLES_CACHE: Dict[str, dict] = {}
-_SCAN_44BREAKOUTS_CACHE: Dict[str, dict] = {}
-_LAST_SCAN_TIME: Dict[str, float] = {}
+    _SCAN_44MA_CACHE[cache_key] = payload
+    _LAST_SCAN_TIME[f"44ma_{cache_key}"] = now_time
+    return jsonify(payload)
 
 
 @app.route("/api/scanner/44ma_breakouts")
 def api_scanner_44ma_breakouts():
     """
     Evaluates 44 MA Breakouts split into:
-      - confirmed_breakouts: Close >= MA44 and +1.0% <= Distance % <= +7.0%
-      - pre_breakouts: Close < MA44 and -7.0% <= Distance % <= -1.0% (1% to 7% below 44 MA)
+      - confirmed_breakouts: Close >= MA44 and +0.5% <= Distance % <= +6.0%
+      - pre_breakouts: Close < MA44 and -6.0% <= Distance % <= -0.5% (0.5% to 6% below 44 MA)
     """
     index_param = request.args.get("index", "nifty500").lower()
-    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    universe = get_universe(index_param)
     tf = request.args.get("timeframe", "daily").lower()
     try:
-        min_pct = float(request.args.get("min_pct", 1.0))
-        max_pct = float(request.args.get("max_pct", 7.0))
+        min_pct = float(request.args.get("min_pct", 0.5))
+        max_pct = float(request.args.get("max_pct", 6.0))
     except ValueError:
-        min_pct, max_pct = 1.0, 7.0
+        min_pct, max_pct = 0.5, 6.0
+
+    force_refresh = request.args.get("refresh") == "1"
+    if force_refresh:
+        clear_scan_caches()
 
     cache_key = f"{index_param}_{tf}_{min_pct}_{max_pct}"
-
     now_time = time.time()
-    if cache_key in _SCAN_44BREAKOUTS_CACHE and (now_time - _LAST_SCAN_TIME.get(f"breakouts_{cache_key}", 0) < 180):
+    if not force_refresh and cache_key in _SCAN_44BREAKOUTS_CACHE and (now_time - _LAST_SCAN_TIME.get(f"breakouts_{cache_key}", 0) < 180):
         return jsonify(_SCAN_44BREAKOUTS_CACHE[cache_key])
+
+    ensure_universe_cached(universe, force_refresh=force_refresh)
 
     confirmed = []
     pre_breakout = []
@@ -629,14 +811,18 @@ def api_scanner_above44():
       - Above 44 MA Trending (strong bullish momentum above 44 MA)
     """
     index_param = request.args.get("index", "nifty500").lower()
-    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    universe = get_universe(index_param)
     tf = request.args.get("timeframe", "daily").lower()
-    cache_key = f"{index_param}_{tf}"
+    force_refresh = request.args.get("refresh") == "1"
+    if force_refresh:
+        clear_scan_caches()
 
-    # Return instantly if cached within last 3 minutes
+    cache_key = f"{index_param}_{tf}"
     now_time = time.time()
-    if cache_key in _SCAN_ABOVE44_CACHE and (now_time - _LAST_SCAN_TIME.get(f"above44_{cache_key}", 0) < 180):
+    if not force_refresh and cache_key in _SCAN_ABOVE44_CACHE and (now_time - _LAST_SCAN_TIME.get(f"above44_{cache_key}", 0) < 180):
         return jsonify(_SCAN_ABOVE44_CACHE[cache_key])
+
+    ensure_universe_cached(universe, force_refresh=force_refresh)
 
     results = []
     for sym in universe:
@@ -680,8 +866,18 @@ def api_scanner_triangles():
       - pre_breakouts: all pre-breakout watchlist stocks coiling near apex
     """
     index_param = request.args.get("index", "nifty500").lower()
-    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    universe = get_universe(index_param)
     tf = request.args.get("timeframe", "daily").lower()
+    force_refresh = request.args.get("refresh") == "1"
+    if force_refresh:
+        clear_scan_caches()
+
+    cache_key = f"{index_param}_{tf}"
+    now_time = time.time()
+    if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 180):
+        return jsonify(_SCAN_TRIANGLES_CACHE[cache_key])
+
+    ensure_universe_cached(universe, force_refresh=force_refresh)
 
     ascending_triangles = []
     symmetrical_triangles = []
@@ -726,7 +922,7 @@ def api_scanner_triangles():
     symm_pre = [x for x in symmetrical_triangles if "Watch" in x.get("status", "") or "Pre" in x.get("status", "")]
 
     now_ist = get_current_ist_time()
-    return jsonify({
+    payload = {
         "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
         "timeframe": tf.capitalize(),
         "ascending": ascending_triangles,
@@ -748,7 +944,11 @@ def api_scanner_triangles():
             "pre_breakouts": len(pre_breakouts),
             "total_patterns": len(ascending_triangles) + len(symmetrical_triangles),
         }
-    })
+    }
+
+    _SCAN_TRIANGLES_CACHE[cache_key] = payload
+    _LAST_SCAN_TIME[f"triangles_{cache_key}"] = now_time
+    return jsonify(payload)
 
 
 @app.route("/api/chart/<symbol>")
@@ -832,7 +1032,8 @@ def api_export_csv():
     """Generates and downloads CSV of current 44 MA, Above 44, or Breakout qualifying stocks."""
     tab = request.args.get("tab", "both").lower()
     index_param = request.args.get("index", "nifty500").lower()
-    universe = UNIVERSE_NIFTY50 if index_param == "nifty50" else (UNIVERSE_NIFTY100 if index_param == "nifty100" else UNIVERSE_NIFTY500)
+    universe = get_universe(index_param)
+    ensure_universe_cached(universe)
 
     # 1. 44 MA Daily & Weekly Breakouts CSV Export
     if tab in ["daily_confirmed", "daily_pre", "weekly_confirmed", "weekly_pre", "44_confirm_breakout", "44_pre_breakout"]:
