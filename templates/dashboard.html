@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Indian Stock Screener — 4 Core Strategies</title>
+  <title>Indian Stock Screener — Swing Breakouts & 44 MA</title>
   
   <!-- Tailwind CSS via CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -59,13 +59,16 @@
         </div>
         <div>
           <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            Technical Breakout Scanner
+            Institutional Swing Screener
             <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">
               EOD Live
             </span>
+            <span class="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/30 font-medium hidden sm:inline-block">
+              Best for Swing Trade
+            </span>
           </h1>
           <p class="text-xs text-gray-400">
-            Ascending Triangle • Symmetrical Triangle • Daily 44 MA • Weekly 44 MA
+            Ascending Triangle • Symmetrical Triangle • Bull Pole & Flag • 44 MA (-1% to +3%)
           </p>
         </div>
       </div>
@@ -82,6 +85,10 @@
             <option value="smallcap" class="bg-gray-900">Nifty Smallcap</option>
           </select>
         </div>
+
+        <button id="btnOpenDebugger" class="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900 text-xs font-medium text-indigo-300 border border-indigo-500/40 transition cursor-pointer">
+          🔍 Why Rejected?
+        </button>
 
         <button id="btnExportCsv" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 transition cursor-pointer">
           ⬇ Export CSV
@@ -105,13 +112,15 @@
       <div class="flex items-center gap-3">
         <span class="flex items-center gap-1.5">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>4 Primary Strategies</span>
+          <span>4 Institutional Strategies</span>
         </span>
         <span>•</span>
         <span>Last Updated: <b id="lastUpdatedText" class="text-gray-200 font-mono">Live</b></span>
       </div>
-      <div class="text-gray-400 hidden sm:block">
-        Zero Latency • Optimized for Render Free Tier (<span class="text-emerald-400">0.1 CPU, 512MB RAM</span>)
+      <div class="text-gray-400 hidden sm:flex items-center gap-3">
+        <span>44 MA Band: <b class="text-emerald-400 font-mono">-1.0% to +3.0%</b></span>
+        <span>•</span>
+        <span>Zero Target Inflation • Strict Mathematical R:R</span>
       </div>
     </div>
   </div>
@@ -120,8 +129,8 @@
   <main class="max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 flex-1 flex flex-col gap-4">
     
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <!-- 4 MAIN HEADING SECTIONS ONLY                                            -->
-    <!-- 1. Ascending Triangle | 2. Symmetrical Triangle | 3. Daily MA | 4. Weekly MA -->
+    <!-- 4 MAIN STRATEGY TABS                                                    -->
+    <!-- 1. Ascending Triangle | 2. Symmetrical Triangle | 3. Pole & Flag | 4. 44 MA -->
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5" id="mainHeadingsContainer">
       <!-- 1. Ascending Triangle -->
@@ -132,7 +141,7 @@
           </span>
           <span id="badge-main-asc" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-blue-900/60 text-blue-200 border border-blue-500/40">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">Pre-Breakout & Confirmed</div>
+        <div class="text-[11px] text-gray-400 mt-1">Flat Resistance • 1:3 R:R</div>
       </button>
 
       <!-- 2. Symmetrical Triangle -->
@@ -143,38 +152,38 @@
           </span>
           <span id="badge-main-symm" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">Pre-Breakout & Confirmed</div>
+        <div class="text-[11px] text-gray-400 mt-1">Coil Vol Dry-up • 1:2.5 R:R</div>
       </button>
 
-      <!-- 3. Daily MA -->
-      <button data-section="daily_ma" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+      <!-- 3. Pole & Flag -->
+      <button data-section="pole_and_flag" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>📅 3. Daily MA</span>
+            <span>🚩 3. Pole & Flag</span>
           </span>
-          <span id="badge-main-daily" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
+          <span id="badge-main-flag" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">44 Daily Confirmed Breakouts</div>
+        <div class="text-[11px] text-gray-400 mt-1">Momentum Flag • 1:2.0 R:R</div>
       </button>
 
-      <!-- 4. Weekly MA -->
-      <button data-section="weekly_ma" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+      <!-- 4. 44 MA Scanner -->
+      <button data-section="ma44" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>📆 4. Weekly MA</span>
+            <span>📈 4. 44 MA Scanner</span>
           </span>
-          <span id="badge-main-weekly" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
+          <span id="badge-main-ma44" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">44 Weekly Confirmed Breakouts</div>
+        <div class="text-[11px] text-gray-400 mt-1">Strict -1% to +3% Band</div>
       </button>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <!-- CHILD NAVIGATION BAR (Pre-Breakout vs Confirmed Breakout)               -->
+    <!-- CHILD NAVIGATION BAR (Timeframe + Signals vs Watchlist)                 -->
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <div id="childNavigationBar" class="flex flex-wrap items-center justify-between gap-3 bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
       <div class="flex flex-wrap items-center gap-2" id="childTabsContainer">
-        <!-- Injected dynamically: Pre-Breakout and Confirmed Breakout buttons -->
+        <!-- Injected dynamically: Timeframe pills and Signal vs Watchlist toggles -->
       </div>
 
       <!-- Live Search Box -->
@@ -188,7 +197,7 @@
       </div>
     </div>
 
-    <!-- Strategy Summary Cards Container -->
+    <!-- Strategy Summary Metrics Cards -->
     <div id="statsCardsContainer" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <!-- Injected via JavaScript -->
     </div>
@@ -196,23 +205,42 @@
     <!-- Strategy Info Banner -->
     <div id="strategyBanner" class="flex items-center justify-between text-xs text-gray-400 bg-gray-900/60 p-2.5 rounded-lg border border-gray-800">
       <span id="strategyDescription" class="font-medium text-gray-300">
-        Ascending Triangle — Confirmed Breakout
+        Strategy Description
       </span>
       <span class="font-mono text-gray-400">
-        Showing <b id="matchCountText" class="text-white">0</b> stocks
+        Showing <b id="matchCountText" class="text-white">0</b> setups
       </span>
     </div>
 
-    <!-- Results Table Container -->
+    <!-- Main Results Table -->
     <div class="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
       <table class="w-full text-left text-xs border-collapse">
-        <thead id="tableHead">
-          <!-- Injected dynamically -->
-        </thead>
-        <tbody id="tableBody" class="divide-y divide-gray-800/60 font-mono">
-          <!-- Injected dynamically -->
-        </tbody>
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody" class="divide-y divide-gray-800/60 font-mono"></tbody>
       </table>
+    </div>
+
+    <!-- Collapsible Watchlist Section (Forming Setups) -->
+    <div id="watchlistContainer" class="rounded-xl border border-gray-800 bg-gray-900/40 p-3 mt-1 hidden">
+      <div class="flex items-center justify-between cursor-pointer select-none" id="watchlistHeader">
+        <div class="flex items-center gap-2">
+          <span class="text-amber-400 text-sm">⏳</span>
+          <span class="text-xs font-bold text-amber-300 uppercase tracking-wider">
+            Forming Watchlist (Pre-Breakout Coiling)
+          </span>
+          <span id="watchlistCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-amber-950 text-amber-300 border border-amber-500/40">0</span>
+        </div>
+        <button id="btnToggleWatchlist" class="text-xs text-gray-400 hover:text-white flex items-center gap-1">
+          <span id="watchlistToggleIcon">▼ Expand Watchlist</span>
+        </button>
+      </div>
+
+      <div id="watchlistContent" class="hidden mt-3 overflow-x-auto rounded-lg border border-gray-800/80 bg-gray-950/60">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead id="watchTableHead"></thead>
+          <tbody id="watchTableBody" class="divide-y divide-gray-800/60 font-mono"></tbody>
+        </table>
+      </div>
     </div>
 
   </main>
@@ -227,21 +255,19 @@
           <span id="modalSymbol" class="text-xl font-bold text-white font-mono">—</span>
           <span id="modalCompany" class="text-sm text-gray-400 font-sans truncate max-w-[200px]">—</span>
           <span id="modalCmp" class="text-sm font-bold text-emerald-400 font-mono">—</span>
-          <span id="modalMaBadge" class="text-xs px-2 py-0.5 rounded bg-red-950/50 text-red-300 border border-red-500/40 font-mono font-semibold">
-            44 MA: —
-          </span>
           <span id="modalStatusBadge" class="text-xs px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-500/30 font-sans font-semibold">
             —
           </span>
         </div>
 
         <div class="flex items-center gap-3">
-          <!-- Timeframe Switcher in Modal -->
+          <button id="btnInspectRejection" class="px-2.5 py-1 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/40 text-xs font-semibold hover:bg-indigo-900 transition">
+            Diagnostics 🔍
+          </button>
           <div class="flex rounded-lg bg-gray-800 p-0.5 border border-gray-700 text-xs font-medium">
             <button id="btnModalTfDaily" class="px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition">Daily</button>
             <button id="btnModalTfWeekly" class="px-3 py-1 rounded-md text-gray-400 hover:text-white transition">Weekly</button>
           </div>
-
           <button id="btnCloseModal" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none cursor-pointer">
             ✕
           </button>
@@ -253,102 +279,127 @@
         <div class="flex items-center gap-4">
           <span>Entry: <b id="planEntry" class="text-cyan-400">—</b></span>
           <span>•</span>
-          <span>Target (1:3): <b id="planTarget" class="text-emerald-400">—</b></span>
+          <span>Target: <b id="planTarget" class="text-emerald-400">—</b></span>
           <span>•</span>
           <span>Stop Loss: <b id="planStopLoss" class="text-rose-400">—</b></span>
           <span>•</span>
-          <span>R:R: <b class="text-yellow-400">1:3</b></span>
+          <span>R:R: <b id="planRR" class="text-yellow-400">—</b></span>
         </div>
         <div id="planNotes" class="text-gray-400 text-[11px]">
-          Pattern & Levels drawn on chart
+          Fitted lines & confirmed touch pivots shown
         </div>
       </div>
 
-      <!-- Lightweight Chart Render Box -->
+      <!-- Chart Container -->
       <div class="p-4 bg-[#0b0f19]">
         <div id="chartContainer" class="w-full h-[450px]"></div>
       </div>
 
-      <!-- Modal Footer Notes -->
+      <!-- Footer Notes -->
       <div class="px-5 py-2.5 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
         <div class="flex items-center flex-wrap gap-4">
           <span class="flex items-center gap-1.5">
             <span class="w-3.5 h-1 bg-red-500 rounded inline-block"></span>
-            <span class="font-semibold text-gray-300">44 MA (Red Line)</span>
+            <span class="font-semibold text-gray-300">44 MA</span>
           </span>
           <span class="flex items-center gap-1.5">
             <span class="w-3 h-0.5 bg-cyan-400 inline-block"></span>
-            <span>Pattern Trendlines (Cyan)</span>
+            <span>Pattern Trendlines</span>
           </span>
           <span class="flex items-center gap-1.5">
-            <span class="w-3 h-0.5 bg-cyan-400 inline-block border-b border-solid"></span>
-            <span>Entry Level</span>
-          </span>
-          <span class="flex items-center gap-1.5">
-            <span class="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed"></span>
-            <span>Target Level (1:3)</span>
-          </span>
-          <span class="flex items-center gap-1.5">
-            <span class="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed"></span>
-            <span>Stop Loss</span>
+            <span class="w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
+            <span>Confirmed Touch Pivots</span>
           </span>
         </div>
         <div>
           <a id="modalTvLink" href="#" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline flex items-center gap-1">
-            Open on TradingView ↗
+            TradingView ↗
           </a>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Footer Disclaimer -->
+  <!-- "Why Rejected" Debug Modal -->
+  <div id="debugModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl p-5">
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">🔍</span>
+          <h2 class="text-sm sm:text-base font-bold text-white">Rule Filter Diagnostics</h2>
+        </div>
+        <button id="btnCloseDebugModal" class="text-gray-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <div class="py-4 space-y-3 text-xs">
+        <div class="flex items-center gap-2">
+          <input
+            id="debugSymbolInput"
+            type="text"
+            placeholder="Enter symbol (e.g. RELIANCE, TCS)..."
+            class="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase font-mono"
+          />
+          <select id="debugStrategySelect" class="bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white">
+            <option value="ascending">Ascending Triangle</option>
+            <option value="symmetrical">Symmetrical Triangle</option>
+            <option value="pole_and_flag">Pole & Flag</option>
+            <option value="44ma">44 MA Scanner</option>
+          </select>
+          <button id="btnRunDebug" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 font-bold text-white rounded-lg">
+            Diagnose
+          </button>
+        </div>
+
+        <div id="debugResultsContainer" class="p-3 bg-gray-950 rounded-xl border border-gray-800 max-h-72 overflow-y-auto font-mono text-gray-300">
+          Enter a symbol and strategy to inspect rule compliance and rejection reasons.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
   <footer class="border-t border-gray-800 bg-[#0b0f19] py-3 px-5 text-center text-xs text-gray-500 mt-auto">
     <p>For educational purposes only. Not investment advice.</p>
     <p class="mt-0.5 text-[11px] text-gray-600">
-      Optimized for Render Free Tier • High Speed EOD Scanner Engine • Built for Indian Technical Traders
+      Built for Indian Technical Swing Traders • 44 MA & Geometric Trendline Engines
     </p>
   </footer>
 
   <!-- ═════════════════════════════════════════════════════════════════════════ -->
-  <!-- Ultra-Fast Native JavaScript Application Logic (Zero Babel, Zero Lag)   -->
+  <!-- Application Logic                                                       -->
   <!-- ═════════════════════════════════════════════════════════════════════════ -->
   <script>
     (function () {
-      // 4 Main Heading Sections: 'ascending', 'symmetrical', 'daily_ma', 'weekly_ma'
+      // Main Sections: 'ascending', 'symmetrical', 'pole_and_flag', 'ma44'
       let activeSection = "ascending";
-      // Child Section: 'confirmed' or 'pre'
-      let activeChild = "confirmed";
+      // Sub-timeframe: 'daily' or 'weekly' (or 'both' for ma44)
+      let activeTimeframe = "daily";
+      let showWatchlist = false;
 
       let currentIndex = "nifty500";
-      let modalTimeframe = "daily";
-      let currentStockForModal = null;
       let chartInstance = null;
       let chartCache = new Map();
+      let currentStockForModal = null;
 
-      // Data store partitioned by the 4 headings and their children
-      const dataStore = {
-        ascending: { confirmed: [], pre: [] },
-        symmetrical: { confirmed: [], pre: [] },
-        daily_ma: { confirmed: [], pre: [] },
-        weekly_ma: { confirmed: [], pre: [] }
+      // 44 MA filter states
+      let ma44RisingFilter = false;
+      let ma44GreenFilter = false;
+      let ma44StatusFilter = "";
+
+      // Store
+      const store = {
+        ascending: { daily: { confirmed: [], forming: [] }, weekly: { confirmed: [], forming: [] } },
+        symmetrical: { daily: { confirmed: [], forming: [] }, weekly: { confirmed: [], forming: [] } },
+        pole_and_flag: { daily: { confirmed: [], forming: [] }, weekly: { confirmed: [], forming: [] } },
+        ma44: { both: [], daily: [], weekly: [] }
       };
 
       let searchQuery = "";
       let sortField = "distance_pct";
-      let sortAsc = true; // Lowest percentage first (1% first, 2% next, low to high)
+      let sortAsc = true;
 
-      // Formatting helpers
       const fmt = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-      const fmtVol = (n) => {
-        if (!n) return "0";
-        if (n >= 10000000) return (n / 10000000).toFixed(2) + " Cr";
-        if (n >= 100000) return (n / 100000).toFixed(2) + " L";
-        if (n >= 1000) return (n / 1000).toFixed(1) + " K";
-        return n.toLocaleString("en-IN");
-      };
 
-      // Sparkline SVG generator
       function generateSparklineSvg(points, isUp) {
         if (!points || points.length < 2) return `<span class="text-gray-600">—</span>`;
         const min = Math.min(...points);
@@ -356,35 +407,30 @@
         const range = max - min || 1;
         const width = 76;
         const height = 20;
-        
         let pathData = "";
         for (let i = 0; i < points.length; i++) {
           const x = (i / (points.length - 1)) * width;
           const y = height - ((points[i] - min) / range) * (height - 4) - 2;
           pathData += (i === 0 ? "M" : " L") + ` ${x.toFixed(1)} ${y.toFixed(1)}`;
         }
-        const strokeColor = isUp ? "#10b981" : "#ef4444";
         return `
           <svg width="${width}" height="${height}" class="sparkline-svg inline-block">
-            <path d="${pathData}" class="sparkline-path" stroke="${strokeColor}" />
+            <path d="${pathData}" class="sparkline-path" stroke="${isUp ? '#10b981' : '#ef4444'}" />
           </svg>
         `;
       }
 
-      // Prefetch chart data on row hover
       function prefetchChart(sym, tf = "daily") {
         if (!sym) return;
         const key = `${sym.toUpperCase()}_${tf}`;
         if (chartCache.has(key)) return;
         fetch(`/api/chart/${sym}?tf=${tf}`)
           .then(res => res.json())
-          .then(data => {
-            if (data && data.candles) chartCache.set(key, data);
-          })
+          .then(data => { if (data && data.candles) chartCache.set(key, data); })
           .catch(() => {});
       }
 
-      // Load all 4 sections in parallel
+      // Load all data
       async function loadAllData(forceRefresh = false) {
         const updateText = document.getElementById("lastUpdatedText");
         const refreshBtn = document.getElementById("btnRefresh");
@@ -394,43 +440,55 @@
           refreshBtn.textContent = "⟳ Refreshing...";
         }
 
+        const refreshParam = forceRefresh ? "&refresh=1" : "";
         try {
-          const refreshParam = forceRefresh ? "&refresh=1" : "";
-          const [resTri, resDaily44, resWeekly44] = await Promise.all([
+          const [resTriDaily, resTriWeekly, resFlagDaily, resFlagWeekly, res44] = await Promise.all([
             fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=daily${refreshParam}`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=daily&min_pct=0.5&max_pct=6.0${refreshParam}`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/44ma_breakouts?index=${currentIndex}&timeframe=weekly&min_pct=0.5&max_pct=6.0${refreshParam}`).then(r => r.json()).catch(() => ({}))
+            fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=weekly${refreshParam}`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=daily${refreshParam}`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=weekly${refreshParam}`).then(r => r.json()).catch(() => ({})),
+            fetch(`/api/scanner/44ma?index=${currentIndex}&rising_only=${ma44RisingFilter ? '1' : '0'}&green_only=${ma44GreenFilter ? '1' : '0'}${refreshParam}`).then(r => r.json()).catch(() => ({}))
           ]);
 
-          // 1. Ascending Triangle Split
-          const rawAsc = resTri.ascending || [];
-          dataStore.ascending.confirmed = resTri.ascending_confirmed || rawAsc.filter(x => x.status && (x.status.includes("Confirmed") || x.status.includes("Breakout") || x.status.includes("Retest")));
-          dataStore.ascending.pre = resTri.ascending_pre || rawAsc.filter(x => x.status && (x.status.includes("Watch") || x.status.includes("Pre")));
+          // Ascending
+          store.ascending.daily.confirmed = resTriDaily.ascending_confirmed || [];
+          store.ascending.daily.forming = resTriDaily.ascending_pre || [];
+          store.ascending.weekly.confirmed = resTriWeekly.ascending_confirmed || [];
+          store.ascending.weekly.forming = resTriWeekly.ascending_pre || [];
 
-          // 2. Symmetrical Triangle Split
-          const rawSymm = resTri.symmetrical || [];
-          dataStore.symmetrical.confirmed = resTri.symmetrical_confirmed || rawSymm.filter(x => x.status && (x.status.includes("Confirmed") || x.status.includes("Breakout")));
-          dataStore.symmetrical.pre = resTri.symmetrical_pre || rawSymm.filter(x => x.status && (x.status.includes("Watch") || x.status.includes("Pre")));
+          // Symmetrical
+          store.symmetrical.daily.confirmed = resTriDaily.symmetrical_confirmed || [];
+          store.symmetrical.daily.forming = resTriDaily.symmetrical_pre || [];
+          store.symmetrical.weekly.confirmed = resTriWeekly.symmetrical_confirmed || [];
+          store.symmetrical.weekly.forming = resTriWeekly.symmetrical_pre || [];
 
-          // 3. Daily MA Split (confirmed only, pre-breakout removed)
-          dataStore.daily_ma.confirmed = resDaily44.confirmed_breakouts || [];
-          dataStore.daily_ma.pre = [];
+          // Pole and Flag
+          store.pole_and_flag.daily.confirmed = resFlagDaily.confirmed_breakouts || [];
+          store.pole_and_flag.daily.forming = resFlagDaily.pre_breakouts || [];
+          store.pole_and_flag.weekly.confirmed = resFlagWeekly.confirmed_breakouts || [];
+          store.pole_and_flag.weekly.forming = resFlagWeekly.pre_breakouts || [];
 
-          // 4. Weekly MA Split (confirmed only, pre-breakout removed)
-          dataStore.weekly_ma.confirmed = resWeekly44.confirmed_breakouts || [];
-          dataStore.weekly_ma.pre = [];
+          // 44 MA
+          if (res44 && res44.results) {
+            store.ma44.both = res44.results.both || [];
+            store.ma44.daily = res44.results.daily || [];
+            store.ma44.weekly = res44.results.weekly || [];
+          }
 
-          // Update Main Heading Badges
-          document.getElementById("badge-main-asc").textContent = dataStore.ascending.confirmed.length + dataStore.ascending.pre.length;
-          document.getElementById("badge-main-symm").textContent = dataStore.symmetrical.confirmed.length + dataStore.symmetrical.pre.length;
-          document.getElementById("badge-main-daily").textContent = dataStore.daily_ma.confirmed.length;
-          document.getElementById("badge-main-weekly").textContent = dataStore.weekly_ma.confirmed.length;
+          // Update badges
+          document.getElementById("badge-main-asc").textContent = 
+            (store.ascending.daily.confirmed.length + store.ascending.weekly.confirmed.length);
+          document.getElementById("badge-main-symm").textContent = 
+            (store.symmetrical.daily.confirmed.length + store.symmetrical.weekly.confirmed.length);
+          document.getElementById("badge-main-flag").textContent = 
+            (store.pole_and_flag.daily.confirmed.length + store.pole_and_flag.weekly.confirmed.length);
+          document.getElementById("badge-main-ma44").textContent = 
+            (res44 && res44.counts ? res44.counts.total_qualifying : 0);
 
-          updateText.textContent = resTri.last_updated || new Date().toLocaleTimeString();
-
+          updateText.textContent = resTriDaily.last_updated || new Date().toLocaleTimeString();
           renderView();
-        } catch (err) {
-          console.error("Error loading scanner data:", err);
+        } catch (e) {
+          console.error("Load error:", e);
           updateText.textContent = "Error";
         } finally {
           if (refreshBtn) {
@@ -440,8 +498,7 @@
         }
       }
 
-      // Filter and sort items
-      function getProcessedList(list) {
+      function filterAndSort(list) {
         let items = [...list];
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
@@ -454,75 +511,18 @@
         items.sort((a, b) => {
           let valA = a[sortField];
           let valB = b[sortField];
-          // For distance sorting, use absolute magnitude so 1% shows first, then 2%, up to 7%
           if (sortField === "distance_pct" || sortField === "abs_distance") {
             valA = (a.distance_pct != null) ? Math.abs(a.distance_pct) : 0;
             valB = (b.distance_pct != null) ? Math.abs(b.distance_pct) : 0;
           }
           if (valA == null) valA = 0;
           if (valB == null) valB = 0;
-          if (typeof valA === "string") {
-            return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
-          }
+          if (typeof valA === "string") return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
           return sortAsc ? valA - valB : valB - valA;
         });
-
         return items;
       }
 
-      // Render the Child Bar dynamically based on activeSection
-      function renderChildBar() {
-        const container = document.getElementById("childTabsContainer");
-        const sec = dataStore[activeSection];
-        const preCount = sec ? sec.pre.length : 0;
-        const confCount = sec ? sec.confirmed.length : 0;
-
-        // Hide pre-breakout for daily_ma and weekly_ma
-        const hidePre = (activeSection === "daily_ma" || activeSection === "weekly_ma");
-
-        let preLabel = "⏳ Pre-Breakout";
-        let confLabel = "🚀 Confirmed Breakout";
-        if (activeSection === "daily_ma") {
-          confLabel = "🚀 44 Daily Confirmed Breakout";
-        } else if (activeSection === "weekly_ma") {
-          confLabel = "🚀 44 Weekly Confirmed Breakout";
-        }
-
-        const isConfActive = (activeChild === "confirmed");
-        const isPreActive = (activeChild === "pre");
-
-        let preButtonHtml = "";
-        if (!hidePre) {
-          preButtonHtml = `
-          <button id="btnChildPre" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isPreActive ? 'bg-amber-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
-            <span>${preLabel}</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isPreActive ? 'bg-amber-950 text-amber-300 border border-amber-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${preCount}</span>
-          </button>`;
-        }
-
-        container.innerHTML = `
-          <button id="btnChildConfirmed" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${isConfActive ? 'bg-emerald-600 text-white shadow-md' : 'bg-gray-800 text-gray-300 hover:text-white'}">
-            <span>${confLabel}</span>
-            <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono ${isConfActive ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-900 text-gray-400 border border-gray-700'}">${confCount}</span>
-          </button>
-          ${preButtonHtml}
-        `;
-
-        document.getElementById("btnChildConfirmed").addEventListener("click", () => {
-          activeChild = "confirmed";
-          renderView();
-        });
-
-        const preBtn = document.getElementById("btnChildPre");
-        if (preBtn) {
-          preBtn.addEventListener("click", () => {
-            activeChild = "pre";
-            renderView();
-          });
-        }
-      }
-
-      // Sync active state of the 4 Main Heading Buttons
       function syncMainHeadingStyles() {
         document.querySelectorAll(".main-heading-btn").forEach(btn => {
           const sec = btn.dataset.section;
@@ -536,163 +536,224 @@
         });
       }
 
-      // Main Render Function
-      function renderView() {
-        if ((activeSection === "daily_ma" || activeSection === "weekly_ma") && activeChild === "pre") {
-          activeChild = "confirmed";
+      function renderChildBar() {
+        const container = document.getElementById("childTabsContainer");
+
+        if (activeSection === "ma44") {
+          container.innerHTML = `
+            <div class="flex items-center gap-1.5 bg-gray-950 p-1 rounded-lg border border-gray-800">
+              <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'both' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('both')">
+                Both Daily + Weekly (${store.ma44.both.length})
+              </button>
+              <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
+                Daily (${store.ma44.daily.length})
+              </button>
+              <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
+                Weekly (${store.ma44.weekly.length})
+              </button>
+            </div>
+
+            <!-- Filters -->
+            <label class="flex items-center gap-1.5 text-xs text-gray-300 ml-2 cursor-pointer select-none">
+              <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
+              <span>MA Rising Only</span>
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-gray-300 ml-2 cursor-pointer select-none">
+              <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
+              <span>Green Candle Only</span>
+            </label>
+          `;
+          return;
         }
+
+        // Pattern tabs (ascending, symmetrical, pole_and_flag)
+        const secData = store[activeSection];
+        const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
+        const confirmedList = secData[tf].confirmed;
+        const formingList = secData[tf].forming;
+
+        container.innerHTML = `
+          <!-- Timeframe Switcher -->
+          <div class="flex items-center gap-1 bg-gray-950 p-1 rounded-lg border border-gray-800">
+            <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
+              📅 Daily (${secData.daily.confirmed.length})
+            </button>
+            <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
+              📆 Weekly (${secData.weekly.confirmed.length})
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2 ml-2">
+            <span class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 text-white flex items-center gap-1.5 shadow-sm">
+              <span>🚀 Confirmed Breakout & Retest</span>
+              <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-500/40">${confirmedList.length}</span>
+            </span>
+
+            <button onclick="toggleWatchlistSection()" class="px-3 py-1 rounded-lg text-xs font-bold bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 transition flex items-center gap-1.5 cursor-pointer">
+              <span>⏳ Forming Watchlist</span>
+              <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-amber-950 text-amber-300">${formingList.length}</span>
+            </button>
+          </div>
+        `;
+      }
+
+      window.setTimeframe = function(tf) {
+        activeTimeframe = tf;
+        renderView();
+      };
+
+      window.toggleFilter = function(f) {
+        if (f === "rising") ma44RisingFilter = !ma44RisingFilter;
+        if (f === "green") ma44GreenFilter = !ma44GreenFilter;
+        loadAllData(false);
+      };
+
+      window.toggleWatchlistSection = function() {
+        showWatchlist = !showWatchlist;
+        const cont = document.getElementById("watchlistContent");
+        const icon = document.getElementById("watchlistToggleIcon");
+        if (showWatchlist) {
+          cont.classList.remove("hidden");
+          icon.textContent = "▲ Collapse Watchlist";
+        } else {
+          cont.classList.add("hidden");
+          icon.textContent = "▼ Expand Watchlist";
+        }
+      };
+
+      function renderView() {
         syncMainHeadingStyles();
         renderChildBar();
 
         const statsContainer = document.getElementById("statsCardsContainer");
         const bannerDesc = document.getElementById("strategyDescription");
         const countText = document.getElementById("matchCountText");
-
-        const rawList = (dataStore[activeSection] && dataStore[activeSection][activeChild]) || [];
-        const list = getProcessedList(rawList);
-        countText.textContent = list.length;
+        const watchlistWrap = document.getElementById("watchlistContainer");
 
         // ═════════════════════════════════════════════════════════════════════
-        // 1 & 2: ASCENDING OR SYMMETRICAL TRIANGLE SECTIONS
+        // 44 MA SECTION
         // ═════════════════════════════════════════════════════════════════════
-        if (activeSection === "ascending" || activeSection === "symmetrical") {
-          const patName = activeSection === "ascending" ? "Ascending Triangle" : "Symmetrical Triangle";
-          const isConf = (activeChild === "confirmed");
+        if (activeSection === "ma44") {
+          watchlistWrap.classList.add("hidden");
+          const tfKey = (activeTimeframe === "both" || activeTimeframe === "weekly") ? activeTimeframe : "daily";
+          const rawList = store.ma44[tfKey] || [];
+          const list = filterAndSort(rawList);
+          countText.textContent = list.length;
 
-          if (isConf) {
-            statsContainer.innerHTML = `
-              <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
-                <div>
-                  <div class="text-[11px] text-emerald-400 font-medium">${patName} Confirmed</div>
-                  <div class="text-2xl font-bold font-mono text-emerald-300">${rawList.length}</div>
-                  <div class="text-[10px] text-gray-400">Triggered above resistance</div>
-                </div>
-                <span class="text-3xl text-emerald-400">🚀</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-blue-400 font-medium">Direct Breakout Entry</div>
-                  <div class="text-xl font-bold font-mono text-white">${rawList.filter(x => x.status && x.status.includes('Breakout')).length}</div>
-                  <div class="text-[10px] text-gray-400">Entry on expansion close</div>
-                </div>
-                <span class="text-2xl text-blue-400">⚡</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-purple-400 font-medium">Pullback / Retest Entry</div>
-                  <div class="text-xl font-bold font-mono text-white">${rawList.filter(x => x.status && x.status.includes('Retest')).length}</div>
-                  <div class="text-[10px] text-gray-400">Retesting broken level</div>
-                </div>
-                <span class="text-2xl text-purple-400">🔄</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-yellow-400 font-medium">Risk : Reward</div>
-                  <div class="text-xl font-bold font-mono text-yellow-400">1 : 3 Strict</div>
-                  <div class="text-[10px] text-gray-400">Target = Breakout + Height</div>
-                </div>
-                <span class="text-2xl text-yellow-400">🎯</span>
-              </div>
-            `;
-            bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${patName} — Confirmed Breakout:</span> Stocks that have closed firmly above resistance with volume expansion. Active direct / pullback entries with 1:3 profit target.`;
-          } else {
-            statsContainer.innerHTML = `
-              <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
-                <div>
-                  <div class="text-[11px] text-amber-400 font-medium">${patName} Pre-Breakout</div>
-                  <div class="text-2xl font-bold font-mono text-amber-300">${rawList.length}</div>
-                  <div class="text-[10px] text-gray-400">Coiling tightly near apex</div>
-                </div>
-                <span class="text-3xl text-amber-400">⏳</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-blue-400 font-medium">Multiple Touches</div>
-                  <div class="text-xl font-bold font-mono text-white">2 - 4 Touches</div>
-                  <div class="text-[10px] text-gray-400">Tested boundary levels</div>
-                </div>
-                <span class="text-2xl text-blue-400">📍</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-emerald-400 font-medium">Proximity to Trigger</div>
-                  <div class="text-xl font-bold font-mono text-emerald-300">&lt; 2.5%</div>
-                  <div class="text-[10px] text-gray-400">Within striking distance</div>
-                </div>
-                <span class="text-2xl text-emerald-400">🎯</span>
-              </div>
-              <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-                <div>
-                  <div class="text-[11px] text-purple-400 font-medium">Anticipated Setup</div>
-                  <div class="text-xl font-bold font-mono text-white">Watchlist Alert</div>
-                  <div class="text-[10px] text-gray-400">Enter on breakout close</div>
-                </div>
-                <span class="text-2xl text-purple-400">🔔</span>
-              </div>
-            `;
-            bannerDesc.innerHTML = `<span class="text-amber-400 font-bold">${patName} — Pre-Breakout Watchlist:</span> Stocks consolidating inside the triangle pattern near the apex. Set alerts for breakout confirmation.`;
-          }
-
-          renderTriangleTable(list, isConf);
-          return;
-        }
-
-        // ═════════════════════════════════════════════════════════════════════
-        // 3 & 4: DAILY MA & WEEKLY MA SECTIONS (Confirmed Only)
-        // ═════════════════════════════════════════════════════════════════════
-        if (activeSection === "daily_ma" || activeSection === "weekly_ma") {
-          const tfTitle = activeSection === "daily_ma" ? "Daily 44 MA" : "Weekly 44 MA";
-          // Daily & Weekly MA are confirmed breakout only
-          const isConf = true;
-
-          const freshCount = rawList.filter(s => s.status && s.status.includes("Fresh")).length;
-          const nearCount = rawList.filter(s => s.status && s.status.includes("Near")).length;
+          const touchCount = list.filter(x => x.status && x.status.includes("Touching")).length;
+          const aboveCount = list.filter(x => x.status && x.status.includes("Above")).length;
+          const belowCount = list.filter(x => x.status && x.status.includes("Near Below")).length;
 
           statsContainer.innerHTML = `
-            <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+            <div class="bg-blue-950/50 border border-blue-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
               <div>
-                <div class="text-[11px] text-emerald-400 font-medium">${tfTitle} Confirmed</div>
-                <div class="text-2xl font-bold font-mono text-emerald-300">${rawList.length}</div>
-                <div class="text-[10px] text-gray-400">Close &ge; 44 MA (+0.5% to +6%)</div>
+                <div class="text-[11px] text-blue-400 font-medium">Touching 44 MA</div>
+                <div class="text-2xl font-bold font-mono text-blue-300">${touchCount}</div>
+                <div class="text-[10px] text-gray-400">Low &le; MA44 &le; High</div>
               </div>
-              <span class="text-3xl text-emerald-400">🚀</span>
+              <span class="text-3xl text-blue-400">📍</span>
+            </div>
+            <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div class="text-[11px] text-emerald-400 font-medium">Above (0–3%)</div>
+                <div class="text-2xl font-bold font-mono text-emerald-300">${aboveCount}</div>
+                <div class="text-[10px] text-gray-400">0.0% to +3.0% Clearance</div>
+              </div>
+              <span class="text-3xl text-emerald-400">📈</span>
+            </div>
+            <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div class="text-[11px] text-amber-400 font-medium">Near Below (−1–0%)</div>
+                <div class="text-2xl font-bold font-mono text-amber-300">${belowCount}</div>
+                <div class="text-[10px] text-gray-400">-1.0% to 0.0% Under MA44</div>
+              </div>
+              <span class="text-3xl text-amber-400">⚡</span>
             </div>
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
               <div>
-                <div class="text-[11px] text-emerald-400 font-medium">Distance Range</div>
-                <div class="text-xl font-bold font-mono text-emerald-300">+0.5% to +6%</div>
-                <div class="text-[10px] text-gray-400">Clearance without overextension</div>
+                <div class="text-[11px] text-gray-400 font-medium">Fixed Band Range</div>
+                <div class="text-xl font-bold font-mono text-white">-1.0% to +3.0%</div>
+                <div class="text-[10px] text-emerald-400">Strictly Enforced</div>
               </div>
-              <span class="text-2xl text-emerald-400">📏</span>
-            </div>
-            <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <div class="text-[11px] text-blue-400 font-medium">Fresh Cross (${tfTitle})</div>
-                <div class="text-xl font-bold font-mono text-white">${freshCount}</div>
-                <div class="text-[10px] text-gray-400">Crossed 44 MA in last 1-2 bars</div>
-              </div>
-              <span class="text-2xl text-blue-400">⚡</span>
-            </div>
-            <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <div class="text-[11px] text-yellow-400 font-medium">Risk : Reward</div>
-                <div class="text-xl font-bold font-mono text-yellow-400">1 : 3 Strict</div>
-                <div class="text-[10px] text-gray-400">Target = Entry + 3 × Risk</div>
-              </div>
-              <span class="text-2xl text-yellow-400">🏆</span>
+              <span class="text-2xl text-purple-400">🎯</span>
             </div>
           `;
-          bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${tfTitle} — Confirmed Breakout:</span> Showing stocks strictly between <b class="text-emerald-300 font-mono">+0.5% and +6.0%</b> above 44 MA with green continuation candles. Stop Loss below 44 MA / breakout low, 1:3 profit target.`;
 
-          render44MaTable(list, isConf);
+          bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">44 MA Scanner (${activeTimeframe.toUpperCase()}):</span> All stocks qualifying strictly inside the <b class="text-white font-mono">-1.0% to +3.0%</b> distance band. First match wins: Touching (Blue), Above (0–3%) (Green), Near Below (−1–0%) (Orange).`;
+
+          render44MaTable(list);
           return;
         }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // BREAKOUT PATTERN SECTIONS (Ascending, Symmetrical, Pole & Flag)
+        // ═════════════════════════════════════════════════════════════════════
+        watchlistWrap.classList.remove("hidden");
+        const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
+        const secData = store[activeSection];
+        const confirmedRaw = secData[tf].confirmed || [];
+        const formingRaw = secData[tf].forming || [];
+
+        const confirmedList = filterAndSort(confirmedRaw);
+        const formingList = filterAndSort(formingRaw);
+
+        countText.textContent = confirmedList.length;
+        document.getElementById("watchlistCountBadge").textContent = formingList.length;
+
+        let titleName = "Ascending Triangle";
+        let minRRText = "1:3 Strict";
+        if (activeSection === "symmetrical") {
+          titleName = "Symmetrical Triangle";
+          minRRText = "1:2.5 Strict";
+        } else if (activeSection === "pole_and_flag") {
+          titleName = "Pole & Flag";
+          minRRText = "1:2.0 Strict";
+        }
+
+        statsContainer.innerHTML = `
+          <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
+            <div>
+              <div class="text-[11px] text-emerald-400 font-medium">${titleName} Confirmed</div>
+              <div class="text-2xl font-bold font-mono text-emerald-300">${confirmedRaw.length}</div>
+              <div class="text-[10px] text-gray-400">${tf.toUpperCase()} Breakout & Retest</div>
+            </div>
+            <span class="text-3xl text-emerald-400">🚀</span>
+          </div>
+          <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <div class="text-[11px] text-amber-400 font-medium">Forming Watchlist</div>
+              <div class="text-2xl font-bold font-mono text-amber-300">${formingRaw.length}</div>
+              <div class="text-[10px] text-gray-400">Coiling under breakout trigger</div>
+            </div>
+            <span class="text-3xl text-amber-400">⏳</span>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <div class="text-[11px] text-blue-400 font-medium">Risk : Reward</div>
+              <div class="text-xl font-bold font-mono text-blue-300">${minRRText}</div>
+              <div class="text-[10px] text-gray-400">Uninflated Target</div>
+            </div>
+            <span class="text-2xl text-blue-400">🎯</span>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
+            <div>
+              <div class="text-[11px] text-yellow-400 font-medium">Swing Quality</div>
+              <div class="text-xl font-bold font-mono text-yellow-400">High Conviction</div>
+              <div class="text-[10px] text-gray-400">Volume & Geometry Confirmed</div>
+            </div>
+            <span class="text-2xl text-yellow-400">🏆</span>
+          </div>
+        `;
+
+        bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${titleName} (${tf.toUpperCase()}):</span> Showing institutional breakouts and retest setups meeting strict geometry, confirmed swing touches, volume surge, and minimum R:R rules.`;
+
+        renderPatternTable(confirmedList, "tableHead", "tableBody", false);
+        renderPatternTable(formingList, "watchTableHead", "watchTableBody", true);
       }
 
-      // Render Triangle Table (Ascending / Symmetrical)
-      function renderTriangleTable(list, isConf) {
-        const thead = document.getElementById("tableHead");
-        const tbody = document.getElementById("tableBody");
+      function renderPatternTable(list, headId, bodyId, isWatchlist) {
+        const thead = document.getElementById(headId);
+        const tbody = document.getElementById(bodyId);
 
         thead.innerHTML = `
           <tr class="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
@@ -700,54 +761,66 @@
             <th class="py-3 px-3">Company</th>
             <th class="py-3 px-3 text-center">Pattern</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('cmp')">CMP (₹)</th>
-            <th class="py-3 px-3 text-right text-red-400 font-semibold">Resistance</th>
-            <th class="py-3 px-3 text-right text-emerald-400 font-semibold">Support</th>
-            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">${isConf ? 'Buy Entry' : 'Potential Entry'}</th>
+            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">${isWatchlist ? 'Anticipated Entry' : 'Entry'}</th>
             <th class="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
-            <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
+            <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target</th>
+            <th class="py-3 px-3 text-center text-yellow-400">R:R</th>
+            <th class="py-3 px-3 text-center">Confidence</th>
             <th class="py-3 px-3 text-center">Status</th>
-            <th class="py-3 px-3 text-center">Touches</th>
+            <th class="py-3 px-3 text-center">Signal Date</th>
             <th class="py-3 px-3 text-center">Trend (12B)</th>
             <th class="py-3 px-4 text-center">Chart Action</th>
           </tr>
         `;
 
         if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-gray-500 font-sans">No matching stocks found.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="13" class="py-10 text-center text-gray-500 font-sans">${isWatchlist ? 'No forming setups currently on watchlist.' : 'No confirmed breakouts matching criteria.'}</td></tr>`;
           return;
         }
 
         tbody.innerHTML = list.map(item => {
-          const isUp = (item.cmp >= (item.resistance_level || 0));
-          const statusStyle = isConf 
-            ? "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 shadow-sm" 
-            : "bg-amber-900/40 text-amber-300 border-amber-500/40";
+          const isUp = (item.cmp >= (item.buy_price || 0));
+          const isBestSwing = (item.confidence >= 80 && item.rr_ratio >= 3.0);
+          const statusBadge = isWatchlist
+            ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
+            : (item.status.includes('Retest') ? 'bg-purple-950/60 text-purple-300 border-purple-500/40' : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 font-bold');
 
           return `
-            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', 'daily')" onmouseenter="prefetchChart('${item.symbol}', 'daily')">
-              <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
-              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[140px]">${item.company}</td>
+            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe}')" onmouseenter="prefetchChart('${item.symbol}', '${activeTimeframe}')">
+              <td class="py-3 px-4 font-bold text-white hover:text-blue-400">
+                <div class="flex items-center gap-1.5">
+                  <span>${item.symbol}</span>
+                  ${isBestSwing ? '<span class="text-[9px] px-1 py-0.2 rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 font-sans">BEST SWING</span>' : ''}
+                </div>
+              </td>
+              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
               <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${item.pattern === 'Ascending Triangle' ? 'bg-blue-950/60 text-blue-300 border-blue-500/40' : 'bg-purple-950/60 text-purple-300 border-purple-500/40'}">
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border bg-gray-800 text-gray-300 border-gray-700">
                   ${item.pattern}
                 </span>
               </td>
               <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
-              <td class="py-3 px-3 text-right text-red-400 font-semibold font-mono">₹${fmt(item.resistance_level)}</td>
-              <td class="py-3 px-3 text-right text-emerald-400 font-mono">₹${fmt(item.support_level)}</td>
               <td class="py-3 px-3 text-right text-cyan-400 font-mono font-semibold">₹${fmt(item.buy_price)}</td>
               <td class="py-3 px-3 text-right text-rose-400 font-mono">₹${fmt(item.stop_loss)}</td>
               <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
+              <td class="py-3 px-3 text-center font-bold text-yellow-400 font-mono">${item.risk_reward}</td>
+              <td class="py-3 px-3 text-center">
+                <span class="px-2 py-0.5 rounded text-[11px] font-mono ${item.confidence >= 80 ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-800 text-gray-300'}">
+                  ${item.confidence}%
+                </span>
+              </td>
               <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2 py-0.5 rounded text-[11px] font-semibold border ${statusStyle}">
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${statusBadge}">
                   ${item.status}
                 </span>
               </td>
-              <td class="py-3 px-3 text-center text-gray-300">${item.touches || 2} touches</td>
+              <td class="py-3 px-3 text-center font-mono text-gray-400 text-[11px]">
+                ${item.breakout_date || item.pattern_end_date || 'Recent'}
+              </td>
               <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
               <td class="py-3 px-4 text-center font-sans">
-                <button class="px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1 mx-auto ${isConf ? 'bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border-emerald-500/40' : 'bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border-amber-500/40'}">
-                  <span>${isConf ? 'Draw Breakout 🚀' : 'Draw Pattern 📐'}</span>
+                <button class="px-2.5 py-1 rounded text-xs font-semibold border transition ${isWatchlist ? 'bg-amber-600/20 text-amber-300 border-amber-500/40' : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'}">
+                  <span>Draw Chart 📐</span>
                 </button>
               </td>
             </tr>
@@ -755,64 +828,65 @@
         }).join("");
       }
 
-      // Render 44 MA Table (Daily MA / Weekly MA)
-      function render44MaTable(list, isConf) {
+      function render44MaTable(list) {
         const thead = document.getElementById("tableHead");
         const tbody = document.getElementById("tableBody");
-        const tf = (activeSection === "weekly_ma") ? "weekly" : "daily";
 
         thead.innerHTML = `
           <tr class="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
             <th class="py-3 px-4 cursor-pointer hover:text-white" onclick="changeSort('symbol')">Symbol</th>
             <th class="py-3 px-3">Company</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('cmp')">CMP (₹)</th>
-            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('ma44')">44 MA (₹)</th>
+            <th class="py-3 px-3 text-right text-red-400">44 MA (₹)</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('distance_pct')">Distance %</th>
-            <th class="py-3 px-3 text-center">Status / Signal</th>
-            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">${isConf ? 'Buy Entry' : 'Anticipated Entry'}</th>
+            <th class="py-3 px-3 text-center">Status Badge</th>
+            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">Swing Entry</th>
             <th class="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
             <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
             <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('day_change_pct')">Day Chg %</th>
+            <th class="py-3 px-3 text-center">Timeframe</th>
             <th class="py-3 px-3 text-center">Trend (12B)</th>
             <th class="py-3 px-4 text-center">Chart Action</th>
           </tr>
         `;
 
         if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="12" class="py-12 text-center text-gray-500 font-sans">No matching stocks found.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-gray-500 font-sans">No stocks qualifying in the -1% to +3% band with active filters.</td></tr>`;
           return;
         }
 
         tbody.innerHTML = list.map(item => {
           const isUp = (item.day_change_pct || 0) >= 0;
-          const isTouching = item.status && item.status.includes("Touching");
-          const isFresh = item.status && item.status.includes("Fresh");
-
           let badgeClass = "bg-gray-800 text-gray-300 border-gray-700";
-          if (isFresh) badgeClass = "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 font-bold";
-          else if (isTouching) badgeClass = "bg-blue-900/50 text-blue-300 border-blue-500/40";
-          else if (item.status && item.status.includes("Near")) badgeClass = "bg-amber-900/40 text-amber-300 border-amber-500/40";
+          if (item.status === "Touching") badgeClass = "bg-blue-900/60 text-blue-300 border-blue-500/50 font-bold";
+          else if (item.status === "Above (0–3%)") badgeClass = "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 font-bold";
+          else if (item.status === "Near Below (−1–0%)") badgeClass = "bg-amber-900/50 text-amber-300 border-amber-500/40";
 
           return `
-            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${tf}')" onmouseenter="prefetchChart('${item.symbol}', '${tf}')">
+            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')" onmouseenter="prefetchChart('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')">
               <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
-              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[140px]">${item.company}</td>
+              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
               <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
               <td class="py-3 px-3 text-right text-red-400 font-semibold font-mono">₹${fmt(item.ma44)}</td>
               <td class="py-3 px-3 text-right font-bold ${item.distance_pct >= 0 ? 'text-emerald-400' : 'text-amber-400'}">${item.distance_pct > 0 ? '+' : ''}${Number(item.distance_pct).toFixed(2)}%</td>
               <td class="py-3 px-3 text-center font-sans">
                 <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-semibold border ${badgeClass}">
-                  ${isFresh ? '🚀 ' : (isTouching ? '📍 ' : '')}${item.status}
+                  ${item.status}
                 </span>
               </td>
               <td class="py-3 px-3 text-right text-cyan-400 font-semibold font-mono">₹${fmt(item.buy_price)}</td>
               <td class="py-3 px-3 text-right text-rose-400 font-mono">₹${fmt(item.stop_loss)}</td>
               <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
               <td class="py-3 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}">${isUp ? '+' : ''}${item.day_change_pct}%</td>
+              <td class="py-3 px-3 text-center font-sans">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.timeframe === 'Both' ? 'bg-purple-950 text-purple-300 border border-purple-500/40' : 'bg-gray-800 text-gray-300'}">
+                  ${item.timeframe}
+                </span>
+              </td>
               <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
               <td class="py-3 px-4 text-center font-sans">
-                <button class="px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1 mx-auto ${isConf ? 'bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border-emerald-500/40' : 'bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border-amber-500/40'}">
-                  <span>${isConf ? 'Draw Breakout 🚀' : 'Draw 44 MA 📐'}</span>
+                <button class="px-2.5 py-1 rounded text-xs font-semibold border bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border-blue-500/40">
+                  Draw 44 MA 📐
                 </button>
               </td>
             </tr>
@@ -820,32 +894,21 @@
         }).join("");
       }
 
-      // Sorting handler
       window.changeSort = function (field) {
-        if (sortField === field) {
-          sortAsc = !sortAsc;
-        } else {
+        if (sortField === field) sortAsc = !sortAsc;
+        else {
           sortField = field;
-          sortAsc = true; // Default ascending (lowest percentage first: 1% first, then 2%, etc.)
+          sortAsc = true;
         }
         renderView();
       };
 
-      // Open interactive TradingView Lightweight Chart in Modal
-      window.openChartModal = async function (symbol, tf = null) {
+      // Modal Chart
+      window.openChartModal = async function(symbol, tf = null) {
         currentStockForModal = symbol;
-        if (tf) modalTimeframe = tf;
-        else if (activeSection === "weekly_ma") modalTimeframe = "weekly";
-        else modalTimeframe = "daily";
-
-        // Update modal timeframe buttons
-        if (modalTimeframe === "weekly") {
-          document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
-          document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
-        } else {
-          document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
-          document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
-        }
+        const reqTf = tf || (activeTimeframe === "weekly" ? "weekly" : "daily");
+        document.getElementById("btnModalTfDaily").className = reqTf === "daily" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition" : "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
+        document.getElementById("btnModalTfWeekly").className = reqTf === "weekly" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition" : "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
 
         const modal = document.getElementById("chartModal");
         modal.classList.remove("hidden");
@@ -853,23 +916,10 @@
 
         document.getElementById("modalSymbol").textContent = symbol;
         document.getElementById("modalTvLink").href = `https://in.tradingview.com/chart/?symbol=NSE:${symbol}`;
-
-        renderChart(symbol, modalTimeframe);
+        renderChartCanvas(symbol, reqTf);
       };
 
-      // Close modal
-      function closeModal() {
-        const modal = document.getElementById("chartModal");
-        modal.classList.add("hidden");
-        modal.classList.remove("flex");
-        if (chartInstance) {
-          chartInstance.remove();
-          chartInstance = null;
-        }
-      }
-
-      // Render chart canvas
-      async function renderChart(symbol, tf) {
+      async function renderChartCanvas(symbol, tf) {
         const container = document.getElementById("chartContainer");
         container.innerHTML = "";
 
@@ -881,52 +931,22 @@
         const chart = LightweightCharts.createChart(container, {
           width: container.clientWidth,
           height: 450,
-          layout: {
-            background: { color: "#0b0f19" },
-            textColor: "#9ca3af",
-          },
-          grid: {
-            vertLines: { color: "#1a2234" },
-            horzLines: { color: "#1a2234" },
-          },
-          timeScale: {
-            borderColor: "#374151",
-            timeVisible: true,
-          },
-          rightPriceScale: {
-            borderColor: "#374151",
-          },
+          layout: { background: { color: "#0b0f19" }, textColor: "#9ca3af" },
+          grid: { vertLines: { color: "#1a2234" }, horzLines: { color: "#1a2234" } },
+          timeScale: { borderColor: "#374151", timeVisible: true },
+          rightPriceScale: { borderColor: "#374151" }
         });
         chartInstance = chart;
 
         const candleSeries = chart.addCandlestickSeries({
-          upColor: "#10b981",
-          downColor: "#ef4444",
-          borderVisible: false,
-          wickUpColor: "#10b981",
-          wickDownColor: "#ef4444",
+          upColor: "#10b981", downColor: "#ef4444", borderVisible: false,
+          wickUpColor: "#10b981", wickDownColor: "#ef4444"
         });
 
-        // 44 MA Line (Red Line)
-        const ma44Series = chart.addLineSeries({
-          color: "#ef4444",
-          lineWidth: 2,
-          title: "44 MA (Red)",
-        });
+        const ma44Series = chart.addLineSeries({ color: "#ef4444", lineWidth: 2, title: "44 MA" });
+        const upperLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Upper Trendline" });
+        const lowerLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Lower Trendline" });
 
-        // Pattern Trendlines (Cyan)
-        const upperTrendSeries = chart.addLineSeries({
-          color: "#38bdf8",
-          lineWidth: 2,
-          title: "Resistance",
-        });
-        const lowerTrendSeries = chart.addLineSeries({
-          color: "#38bdf8",
-          lineWidth: 2,
-          title: "Support",
-        });
-
-        // Fetch chart data (<100ms with cache)
         const key = `${symbol.toUpperCase()}_${tf}`;
         let data = chartCache.get(key);
         if (!data) {
@@ -935,7 +955,7 @@
             data = await res.json();
             chartCache.set(key, data);
           } catch (e) {
-            console.error("Failed to load chart data:", e);
+            console.error("Failed chart fetch:", e);
             return;
           }
         }
@@ -943,62 +963,137 @@
         if (!data || !data.candles || data.candles.length === 0) return;
 
         candleSeries.setData(data.candles);
-        if (data.ma44_line && data.ma44_line.length > 0) {
-          ma44Series.setData(data.ma44_line);
-        }
+        if (data.ma44_line && data.ma44_line.length > 0) ma44Series.setData(data.ma44_line);
 
-        // Header info
         document.getElementById("modalCompany").textContent = data.company || "";
         document.getElementById("modalCmp").textContent = `₹${fmt(data.cmp)}`;
-        document.getElementById("modalMaBadge").textContent = `44 MA: ₹${fmt(data.current_ma44)} (${data.distance_pct > 0 ? '+' : ''}${data.distance_pct}%)`;
 
-        const evalBreakout = data.eval_44_breakout;
-        const pat = (activeSection === "ascending" ? data.ascending_pattern : (activeSection === "symmetrical" ? data.symmetrical_pattern : evalBreakout)) || evalBreakout || data.above_44ma || data.ascending_pattern || data.symmetrical_pattern;
-        const statusText = pat ? `${pat.pattern || '44 MA'} • ${pat.status}` : (data.status_44ma || "Active");
-        document.getElementById("modalStatusBadge").textContent = statusText;
+        // Match pattern
+        let pat = null;
+        if (activeSection === "ascending") pat = data.ascending_pattern;
+        else if (activeSection === "symmetrical") pat = data.symmetrical_pattern;
+        else if (activeSection === "pole_and_flag") pat = data.pole_and_flag_pattern;
 
-        // Trade plan
+        if (!pat) pat = data.ascending_pattern || data.symmetrical_pattern || data.pole_and_flag_pattern;
+
+        const statusLabel = pat ? `${pat.pattern} • ${pat.status}` : (data.status_44ma || "44 MA Active");
+        document.getElementById("modalStatusBadge").textContent = statusLabel;
+
         if (pat && pat.buy_price) {
           document.getElementById("planEntry").textContent = `₹${fmt(pat.buy_price)}`;
           document.getElementById("planTarget").textContent = `₹${fmt(pat.target)}`;
           document.getElementById("planStopLoss").textContent = `₹${fmt(pat.stop_loss)}`;
+          document.getElementById("planRR").textContent = pat.risk_reward || "—";
 
           candleSeries.createPriceLine({ price: pat.buy_price, color: "#06b6d4", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: `ENTRY: ₹${pat.buy_price}` });
           candleSeries.createPriceLine({ price: pat.target, color: "#10b981", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `TARGET: ₹${pat.target}` });
           candleSeries.createPriceLine({ price: pat.stop_loss, color: "#ef4444", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `STOP LOSS: ₹${pat.stop_loss}` });
+        } else {
+          document.getElementById("planEntry").textContent = `₹${fmt(data.cmp)}`;
+          document.getElementById("planTarget").textContent = "—";
+          document.getElementById("planStopLoss").textContent = "—";
+          document.getElementById("planRR").textContent = "—";
         }
 
-        // Trendline data
-        if (pat && pat.upper_line_points && pat.upper_line_points.length > 0) upperTrendSeries.setData(pat.upper_line_points);
-        if (pat && pat.lower_line_points && pat.lower_line_points.length > 0) lowerTrendSeries.setData(pat.lower_line_points);
+        // Draw trendlines
+        if (pat && pat.upper_line_points && pat.upper_line_points.length > 0) upperLineSeries.setData(pat.upper_line_points);
+        if (pat && pat.lower_line_points && pat.lower_line_points.length > 0) lowerLineSeries.setData(pat.lower_line_points);
 
-        // Breakout Marker on candle
+        // Draw only genuine confirmed touch pivots as markers
         const markers = [];
-        if (pat && pat.breakout_date) {
-          const isPre = (activeChild === "pre") || (pat.type === "pre_breakout") || (pat.pattern && pat.pattern.includes("Pre-Breakout"));
-          markers.push({
-            time: pat.breakout_date,
-            position: isPre ? "belowBar" : "aboveBar",
-            color: isPre ? "#f59e0b" : "#10b981",
-            shape: isPre ? "arrowUp" : "arrowDown",
-            text: isPre ? "COILING / PRE-BREAKOUT ⏳" : "BREAKOUT CONFIRMED 🚀",
-            size: 2,
+        if (pat && pat.upper_touches) {
+          pat.upper_touches.forEach(tp => {
+            markers.push({ time: tp.time, position: "aboveBar", color: "#38bdf8", shape: "circle", text: `Touch ₹${tp.price}` });
           });
         }
+        if (pat && pat.lower_touches) {
+          pat.lower_touches.forEach(tp => {
+            markers.push({ time: tp.time, position: "belowBar", color: "#38bdf8", shape: "circle", text: `Touch ₹${tp.price}` });
+          });
+        }
+        if (pat && pat.breakout_date) {
+          markers.push({ time: pat.breakout_date, position: "aboveBar", color: "#10b981", shape: "arrowDown", text: "BREAKOUT 🚀", size: 2 });
+        }
         if (markers.length > 0) {
+          markers.sort((a, b) => (a.time > b.time ? 1 : -1));
           candleSeries.setMarkers(markers);
         }
 
         chart.timeScale().fitContent();
       }
 
-      // Event Listeners for the 4 Main Headings
+      function closeModal() {
+        document.getElementById("chartModal").classList.add("hidden");
+        document.getElementById("chartModal").classList.remove("flex");
+        if (chartInstance) {
+          chartInstance.remove();
+          chartInstance = null;
+        }
+      }
+
+      // Debug Modal Logic
+      function openDebugger(sym = "") {
+        document.getElementById("debugModal").classList.remove("hidden");
+        document.getElementById("debugModal").classList.add("flex");
+        if (sym) {
+          document.getElementById("debugSymbolInput").value = sym;
+          runDiagnostics();
+        }
+      }
+
+      function closeDebugger() {
+        document.getElementById("debugModal").classList.add("hidden");
+        document.getElementById("debugModal").classList.remove("flex");
+      }
+
+      async function runDiagnostics() {
+        const sym = document.getElementById("debugSymbolInput").value.trim().toUpperCase();
+        const strat = document.getElementById("debugStrategySelect").value;
+        const resBox = document.getElementById("debugResultsContainer");
+        if (!sym) {
+          resBox.innerHTML = "<span class='text-rose-400'>Please enter a valid stock symbol.</span>";
+          return;
+        }
+        resBox.innerHTML = `Running diagnostics for <b>${sym}</b> on <b>${strat}</b>...`;
+
+        try {
+          const res = await fetch(`/api/debug/${sym}?strategy=${strat}&timeframe=${activeTimeframe}`);
+          const data = await res.json();
+          if (data.error) {
+            resBox.innerHTML = `<span class="text-rose-400">Error: ${data.error}</span>`;
+            return;
+          }
+
+          let out = `<div class="space-y-2">`;
+          out += `<div>Symbol: <b class="text-white">${data.symbol}</b> (${data.company}) • Bars Analyzed: <b>${data.bars_analyzed}</b></div>`;
+          out += `<div>Strategy: <b class="text-cyan-400">${data.strategy}</b> • Qualified: <b class="${data.qualified ? 'text-emerald-400' : 'text-rose-400'}">${data.qualified ? 'YES 🚀' : 'NO ❌'}</b></div>`;
+
+          if (data.qualified && data.setup) {
+            out += `<div class="p-2 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300">`;
+            out += `Status: <b>${data.setup.status}</b> | Entry: <b>₹${data.setup.buy_price}</b> | Target: <b>₹${data.setup.target}</b> | Stop: <b>₹${data.setup.stop_loss}</b> | R:R: <b>${data.setup.risk_reward}</b>`;
+            out += `</div>`;
+          }
+
+          if (data.reject_reasons && data.reject_reasons.length > 0) {
+            out += `<div class="mt-2 text-rose-300 font-bold">Rejection Reasons / Missing Filters:</div><ul class="list-disc pl-5 space-y-1 text-gray-300">`;
+            data.reject_reasons.forEach(r => {
+              out += `<li>${r}</li>`;
+            });
+            out += `</ul>`;
+          }
+          out += `</div>`;
+          resBox.innerHTML = out;
+        } catch (e) {
+          resBox.innerHTML = `<span class="text-rose-400">Diagnostic error: ${e.message}</span>`;
+        }
+      }
+
+      // Event listeners
       document.getElementById("mainHeadingsContainer").addEventListener("click", (e) => {
         const btn = e.target.closest(".main-heading-btn");
         if (!btn) return;
         const sec = btn.dataset.section;
         if (!sec || sec === activeSection) return;
-
         activeSection = sec;
         renderView();
       });
@@ -1018,9 +1113,8 @@
       });
 
       document.getElementById("btnExportCsv").addEventListener("click", () => {
-        let exportTab = `${activeSection}_${activeChild}`;
-        if (activeSection === "daily_ma") exportTab = `daily_${activeChild}`;
-        if (activeSection === "weekly_ma") exportTab = `weekly_${activeChild}`;
+        let exportTab = `${activeSection}_${activeTimeframe}`;
+        if (activeSection === "ma44") exportTab = activeTimeframe;
         window.location.href = `/api/export/csv?tab=${exportTab}&index=${currentIndex}`;
       });
 
@@ -1030,18 +1124,21 @@
       });
 
       document.getElementById("btnModalTfDaily").addEventListener("click", () => {
-        modalTimeframe = "daily";
-        document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
-        document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
-        if (currentStockForModal) renderChart(currentStockForModal, "daily");
+        if (currentStockForModal) openChartModal(currentStockForModal, "daily");
+      });
+      document.getElementById("btnModalTfWeekly").addEventListener("click", () => {
+        if (currentStockForModal) openChartModal(currentStockForModal, "weekly");
       });
 
-      document.getElementById("btnModalTfWeekly").addEventListener("click", () => {
-        modalTimeframe = "weekly";
-        document.getElementById("btnModalTfWeekly").className = "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition";
-        document.getElementById("btnModalTfDaily").className = "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
-        if (currentStockForModal) renderChart(currentStockForModal, "weekly");
+      document.getElementById("btnOpenDebugger").addEventListener("click", () => openDebugger());
+      document.getElementById("btnInspectRejection").addEventListener("click", () => {
+        if (currentStockForModal) openDebugger(currentStockForModal);
       });
+      document.getElementById("btnCloseDebugModal").addEventListener("click", closeDebugger);
+      document.getElementById("debugModal").addEventListener("click", (e) => {
+        if (e.target.id === "debugModal") closeDebugger();
+      });
+      document.getElementById("btnRunDebug").addEventListener("click", runDiagnostics);
 
       window.addEventListener("resize", () => {
         if (chartInstance) {
@@ -1050,7 +1147,7 @@
         }
       });
 
-      // Initial Boot
+      // Initial load
       loadAllData();
     })();
   </script>

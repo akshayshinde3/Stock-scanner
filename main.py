@@ -1,7 +1,7 @@
 """
-main.py — FastAPI Backend for 44 MA Touch & Near Scanner
-=======================================================
-Full FastAPI implementation with pandas for high performance async execution.
+main.py — FastAPI Backend for 44 MA Scanner & Breakout Chart Patterns
+=====================================================================
+Full FastAPI implementation with async execution and pandas integration.
 Run with:
   uvicorn main:app --reload --port 5000
 """
@@ -16,7 +16,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import urllib.request
 import datetime as dt
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import pandas as pd
 import requests
 import yfinance as yf
@@ -25,24 +25,18 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import strategies
+from patterns.geometry import resample_to_weekly
 
 app = FastAPI(
-    title="44 MA Touch & Near Scanner API",
-    description="Stock screener for Nifty 500 with 44 MA & Breakout Patterns",
-    version="2.0.0"
+    title="Indian Stock Screener API",
+    description="44 MA Touch & Near (-1% to +3%), Ascending & Symmetrical Triangles, and Pole & Flag",
+    version="3.0.0"
 )
 
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 NIFTY500_FILE = os.path.join(DATA_DIR, "nifty500.txt")
 TEMPLATE_FILE = os.path.join(DATA_DIR, "templates", "dashboard.html")
 
-SITE_PASSWORD = (
-    os.environ.get("SITE_PASSWORD")
-    or os.environ.get("APP_PASSWORD")
-    or "Akshay1999"
-).strip()
-
-# Company Name Mapping
 COMPANY_NAMES = {
     "RELIANCE": "Reliance Industries Ltd.",
     "TCS": "Tata Consultancy Services Ltd.",
@@ -77,6 +71,7 @@ COMPANY_NAMES = {
     "ULTRACEMCO": "UltraTech Cement Ltd.",
 }
 
+
 def load_symbols():
     if not os.path.exists(NIFTY500_FILE):
         return list(COMPANY_NAMES.keys())
@@ -110,7 +105,6 @@ UNIVERSE_SMALLCAP = load_symbol_file("niftysmallcap.txt")
 
 
 def get_universe(index_param: str):
-    """Returns the universe list for a given index parameter."""
     if index_param == "nifty50":
         return UNIVERSE_50
     elif index_param == "nifty100":
@@ -120,6 +114,7 @@ def get_universe(index_param: str):
     elif index_param == "smallcap":
         return UNIVERSE_SMALLCAP
     return UNIVERSE_500
+
 
 PERSISTENT_DIR = "/data" if os.path.isdir("/data") else DATA_DIR
 CACHE_GZ_FILE = os.path.join(PERSISTENT_DIR, "candle_cache.json.gz")
@@ -174,50 +169,6 @@ def get_ist():
     return utc + dt.timedelta(hours=5, minutes=30)
 
 
-def resample_daily_to_weekly_fast(daily_candles: list) -> list:
-    if not daily_candles or len(daily_candles) < 5:
-        return []
-    weeks = {}
-    for c in daily_candles:
-        d_str = str(c[0])[:10]
-        try:
-            d = dt.date.fromisoformat(d_str)
-        except Exception:
-            continue
-        key = d.isocalendar()[:2]
-        if key not in weeks:
-            weeks[key] = {
-                "open": float(c[1]),
-                "high": float(c[2]),
-                "low": float(c[3]),
-                "close": float(c[4]),
-                "volume": int(c[5]),
-                "last_date": d_str
-            }
-        else:
-            w = weeks[key]
-            h = float(c[2])
-            l = float(c[3])
-            if h > w["high"]:
-                w["high"] = h
-            if l < w["low"]:
-                w["low"] = l
-            w["close"] = float(c[4])
-            w["volume"] += int(c[5])
-            w["last_date"] = d_str
-    weekly = []
-    for _, w in weeks.items():
-        weekly.append([
-            w["last_date"],
-            round(w["open"], 2),
-            round(w["high"], 2),
-            round(w["low"], 2),
-            round(w["close"], 2),
-            int(w["volume"])
-        ])
-    return weekly
-
-
 def load_disk_cache():
     target_file = None
     if os.path.exists(CACHE_GZ_FILE):
@@ -251,7 +202,6 @@ def load_disk_cache():
                 for sym, val in data.items():
                     _d_cache[sym] = val.get("daily", [])
                     _w_cache[sym] = val.get("weekly", [])
-            print(f"FastAPI: Loaded {len(_d_cache)} symbols from JSON cache.")
         except Exception:
             pass
 
@@ -271,10 +221,10 @@ def fetch_candles(sym: str) -> tuple:
     mapped_sym = SYMBOL_MAP.get(sym_upper, sym_upper)
     ticker_sym = f"{mapped_sym}.NS"
     host = "query2.finance.yahoo.com" if (hash(sym_upper) % 2 == 0) else "query1.finance.yahoo.com"
-    url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=1y&interval=1d"
+    url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=5y&interval=1d"
 
     try:
-        resp = _http_session.get(url, timeout=5)
+        resp = _http_session.get(url, timeout=7)
         if resp.status_code == 200:
             data = resp.json()
             res_list = data.get("chart", {}).get("result")
@@ -295,7 +245,7 @@ def fetch_candles(sym: str) -> tuple:
                     d_str = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc).strftime("%Y-%m-%d")
                     daily.append([d_str, round(float(o), 2), round(float(h), 2), round(float(l), 2), round(float(c), 2), int(v or 0)])
                 if len(daily) >= 45:
-                    weekly = resample_daily_to_weekly_fast(daily)
+                    weekly = resample_to_weekly(daily)
                     with _cache_lock:
                         _d_cache[sym_upper] = daily
                         _w_cache[sym_upper] = weekly
@@ -342,55 +292,18 @@ def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max
                 except Exception:
                     pass
 
-        if new_count > 0:
-            save_disk_cache()
-
-
-def _do_save_disk_cache():
-    try:
-        data = {
-            "date": dt.date.today().isoformat(),
-            "daily": {},
-            "weekly": {}
-        }
-        with _cache_lock:
-            data["daily"] = dict(_d_cache)
-            data["weekly"] = dict(_w_cache)
-
-        target_path = CACHE_GZ_FILE if os.path.isdir(PERSISTENT_DIR) else FALLBACK_GZ_FILE
-        tmp_path = target_path + ".tmp"
-        try:
-            with gzip.open(tmp_path, "wt", encoding="utf-8") as f:
-                json.dump(data, f)
-            if os.path.exists(target_path):
-                os.replace(tmp_path, target_path)
-            else:
-                os.rename(tmp_path, target_path)
-        finally:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
-    except Exception as e:
-        print(f"Warning: Could not save disk cache: {e}")
-
-
-def save_disk_cache():
-    threading.Thread(target=_do_save_disk_cache, daemon=True).start()
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     if os.path.exists(TEMPLATE_FILE):
         with open(TEMPLATE_FILE, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse("<h1>44 MA Touch & Near Scanner Active</h1>")
+    return HTMLResponse("<h1>Indian Stock Screener API Active</h1>")
+
 
 @app.get("/api/scanner/44ma")
 async def scan_44ma(
     index: str = "nifty500",
-    max_above: float = 2.0,
-    max_below: float = 3.0,
     min_price: float = 0.0,
     min_weekly_vol: int = 100000,
     rising_only: str = "0",
@@ -402,7 +315,7 @@ async def scan_44ma(
     allowed_stats = [s.strip().lower() for s in statuses.split(",") if s.strip()]
     force_refresh = (refresh == "1")
 
-    cache_key = f"44ma_{index}_{max_above}_{max_below}_{min_price}_{min_weekly_vol}_{rising_only}_{green_only}_{statuses}"
+    cache_key = f"44ma_{index}_{min_price}_{min_weekly_vol}_{rising_only}_{green_only}_{statuses}"
     now_time = time.time()
     if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 180):
         return _SCAN_CACHE[cache_key]
@@ -419,8 +332,6 @@ async def scan_44ma(
             company_name=get_company(sym),
             daily_candles=d_c,
             weekly_candles=w_c,
-            max_above_a=max_above,
-            max_below_b=max_below,
             min_price=min_price,
             min_weekly_vol=min_weekly_vol,
             rising_only=(rising_only == "1"),
@@ -444,6 +355,8 @@ async def scan_44ma(
     result = {
         "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
         "universe": index.upper(),
+        "dist_min": -1.0,
+        "dist_max": 3.0,
         "total_scanned": len(universe),
         "counts": {"both": len(both), "daily": len(daily), "weekly": len(weekly), "total_qualifying": len(both)+len(daily)+len(weekly)},
         "results": {"both": both, "daily": daily, "weekly": weekly}
@@ -452,83 +365,6 @@ async def scan_44ma(
     _LAST_SCAN_TIME[cache_key] = now_time
     return result
 
-@app.get("/api/scanner/44ma_breakouts")
-async def scan_44ma_breakouts(index: str = "nifty500", timeframe: str = "daily", min_pct: float = 0.5, max_pct: float = 6.0, refresh: str = "0"):
-    universe = get_universe(index)
-    force_refresh = (refresh == "1")
-    cache_key = f"breakouts_{index}_{timeframe}_{min_pct}_{max_pct}"
-    now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 180):
-        return _SCAN_CACHE[cache_key]
-
-    ensure_universe_cached(universe, force_refresh=force_refresh)
-
-    confirmed, pre_breakout = [], []
-    for sym in universe:
-        d_c, w_c = fetch_candles(sym)
-        c = w_c if timeframe == "weekly" else d_c
-        if not c or len(c) < 45:
-            continue
-        comp = get_company(sym)
-        eval_res = strategies.evaluate_44ma_breakout(sym, comp, c, timeframe=timeframe, min_dist_pct=min_pct, max_dist_pct=max_pct)
-        if not eval_res:
-            continue
-        if eval_res["type"] == "confirm_breakout":
-            confirmed.append(eval_res)
-        elif eval_res["type"] == "pre_breakout":
-            pre_breakout.append(eval_res)
-
-    # Sort lowest percentage first (1% at top, 2% below, progressing up to 7%)
-    confirmed.sort(key=lambda s: s["distance_pct"])
-    pre_breakout.sort(key=lambda s: abs(s["distance_pct"]))
-
-    result = {
-        "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
-        "timeframe": timeframe.capitalize(),
-        "min_pct": min_pct,
-        "max_pct": max_pct,
-        "total_scanned": len(universe),
-        "counts": {"confirmed": len(confirmed), "pre_breakout": len(pre_breakout)},
-        "confirmed_breakouts": confirmed,
-        "pre_breakouts": pre_breakout
-    }
-    _SCAN_CACHE[cache_key] = result
-    _LAST_SCAN_TIME[cache_key] = now_time
-    return result
-
-@app.get("/api/scanner/above44")
-async def scan_above44(index: str = "nifty500", timeframe: str = "daily", refresh: str = "0"):
-    universe = get_universe(index)
-    force_refresh = (refresh == "1")
-    cache_key = f"above44_{index}_{timeframe}"
-    now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 180):
-        return _SCAN_CACHE[cache_key]
-
-    ensure_universe_cached(universe, force_refresh=force_refresh)
-
-    results = []
-    for sym in universe:
-        d_c, w_c = fetch_candles(sym)
-        c = w_c if timeframe == "weekly" else d_c
-        if not c or len(c) < 45:
-            continue
-        comp = get_company(sym)
-        res = strategies.analyze_above_44ma(sym, comp, c, timeframe=timeframe)
-        if res:
-            results.append(res)
-
-    results.sort(key=lambda s: (0 if "Breakout" in s["status"] else (1 if "Near" in s["status"] else 2), s["distance_pct"]))
-    result = {
-        "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
-        "timeframe": timeframe.capitalize(),
-        "total_scanned": len(universe),
-        "count": len(results),
-        "results": results
-    }
-    _SCAN_CACHE[cache_key] = result
-    _LAST_SCAN_TIME[cache_key] = now_time
-    return result
 
 @app.get("/api/scanner/triangles")
 async def scan_triangles(index: str = "nifty500", timeframe: str = "daily", refresh: str = "0"):
@@ -542,39 +378,38 @@ async def scan_triangles(index: str = "nifty500", timeframe: str = "daily", refr
     ensure_universe_cached(universe, force_refresh=force_refresh)
 
     ascending, symmetrical = [], []
+    asc_confirmed, asc_pre = [], []
+    symm_confirmed, symm_pre = [], []
     confirmed_breakouts, pre_breakouts = [], []
 
     for sym in universe:
         d_c, w_c = fetch_candles(sym)
         c = w_c if timeframe == "weekly" else d_c
-        if not c or len(c) < 30:
+        if not c or len(c) < 25:
             continue
         comp = get_company(sym)
         asc = strategies.detect_ascending_triangle(sym, comp, c, timeframe=timeframe)
         if asc:
             ascending.append(asc)
-            if "Confirmed" in asc["status"]:
+            if asc["status"] in ["Confirmed Breakout", "Retest Entry"]:
+                asc_confirmed.append(asc)
                 confirmed_breakouts.append(asc)
-            elif "Watch" in asc["status"]:
+            elif asc["status"] == "Forming":
+                asc_pre.append(asc)
                 pre_breakouts.append(asc)
 
         symm = strategies.detect_symmetrical_triangle(sym, comp, c, timeframe=timeframe)
         if symm:
             symmetrical.append(symm)
-            if "Confirmed" in symm["status"]:
+            if symm["status"] in ["Confirmed Breakout", "Retest Entry"]:
+                symm_confirmed.append(symm)
                 confirmed_breakouts.append(symm)
-            elif "Watch" in symm["status"]:
+            elif symm["status"] == "Forming":
+                symm_pre.append(symm)
                 pre_breakouts.append(symm)
 
-    ascending.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
-    symmetrical.sort(key=lambda x: (0 if "Confirmed" in x["status"] else 1, x["abs_distance"]))
-    confirmed_breakouts.sort(key=lambda x: x["abs_distance"])
-    pre_breakouts.sort(key=lambda x: x["abs_distance"])
-
-    asc_confirmed = [x for x in ascending if "Confirmed" in x.get("status", "")]
-    asc_pre = [x for x in ascending if "Watch" in x.get("status", "") or "Pre" in x.get("status", "")]
-    symm_confirmed = [x for x in symmetrical if "Confirmed" in x.get("status", "")]
-    symm_pre = [x for x in symmetrical if "Watch" in x.get("status", "") or "Pre" in x.get("status", "")]
+    ascending.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
+    symmetrical.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
 
     result = {
         "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
@@ -603,6 +438,77 @@ async def scan_triangles(index: str = "nifty500", timeframe: str = "daily", refr
     _LAST_SCAN_TIME[cache_key] = now_time
     return result
 
+
+@app.get("/api/scanner/pole_and_flag")
+async def scan_pole_and_flag(index: str = "nifty500", timeframe: str = "daily", refresh: str = "0"):
+    universe = get_universe(index)
+    force_refresh = (refresh == "1")
+    cache_key = f"poleflag_{index}_{timeframe}"
+    now_time = time.time()
+    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 180):
+        return _SCAN_CACHE[cache_key]
+
+    ensure_universe_cached(universe, force_refresh=force_refresh)
+
+    all_flags = []
+    confirmed = []
+    pre_breakouts = []
+
+    for sym in universe:
+        d_c, w_c = fetch_candles(sym)
+        c = w_c if timeframe == "weekly" else d_c
+        if not c or len(c) < 30:
+            continue
+        comp = get_company(sym)
+        flag = strategies.detect_pole_and_flag(sym, comp, c, timeframe=timeframe)
+        if flag:
+            all_flags.append(flag)
+            if flag["status"] in ["Pole & Flag Breakout", "Pole & Flag Retest"]:
+                confirmed.append(flag)
+            elif flag["status"] == "Pole & Flag Forming":
+                pre_breakouts.append(flag)
+
+    all_flags.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
+    confirmed.sort(key=lambda x: x["abs_distance"])
+    pre_breakouts.sort(key=lambda x: x["abs_distance"])
+
+    result = {
+        "last_updated": get_ist().strftime("%d-%b-%Y %I:%M %p IST"),
+        "timeframe": timeframe.capitalize(),
+        "total_scanned": len(universe),
+        "results": all_flags,
+        "confirmed_breakouts": confirmed,
+        "pre_breakouts": pre_breakouts,
+        "counts": {
+            "total": len(all_flags),
+            "confirmed": len(confirmed),
+            "pre_breakout": len(pre_breakouts),
+        }
+    }
+    _SCAN_CACHE[cache_key] = result
+    _LAST_SCAN_TIME[cache_key] = now_time
+    return result
+
+
+@app.get("/api/debug/{symbol}")
+async def debug_symbol(symbol: str, strategy: str = "ascending", timeframe: str = "daily"):
+    sym = symbol.upper()
+    d_c, w_c = fetch_candles(sym)
+    candles = w_c if timeframe == "weekly" else d_c
+    if not candles:
+        raise HTTPException(status_code=404, detail="Candle data not found")
+    comp = get_company(sym)
+    diag = strategies.get_strategy_debug(sym, comp, candles, strategy=strategy, timeframe=timeframe)
+    return {
+        "symbol": sym,
+        "company": comp,
+        "strategy": strategy,
+        "timeframe": timeframe.capitalize(),
+        "bars_analyzed": len(candles),
+        **diag
+    }
+
+
 @app.get("/api/chart/{symbol}")
 async def get_chart(symbol: str, tf: str = "daily"):
     sym = symbol.upper()
@@ -614,24 +520,23 @@ async def get_chart(symbol: str, tf: str = "daily"):
     highs = [c[2] for c in candles]
     lows = [c[3] for c in candles]
     ma44 = strategies.calculate_ma44(closes)
-    
+
     display_bars = candles[-120:] if len(candles) >= 120 else candles
     offset = len(candles) - len(display_bars)
 
     candle_data = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in display_bars]
     ma_line = [{"time": c[0], "value": ma44[offset + i]} for i, c in enumerate(display_bars) if ma44[offset + i] is not None]
-    
+
     current_ma = ma44[-1] if ma44 else None
     cmp_price = closes[-1] if closes else None
     dist_pct = round(((cmp_price - current_ma) / current_ma) * 100, 2) if current_ma else 0.0
     touch = strategies.is_touch(lows[-1], highs[-1], current_ma)
-    near_bel = strategies.is_near_below(cmp_price, current_ma, dist_pct, 3.0)
-    above_z = strategies.is_above_zone(cmp_price, current_ma, dist_pct, 2.0)
-    status_44ma = strategies.get_status(touch, above_z, near_bel, 2.0)
+    status_44ma = strategies.get_status(touch, cmp_price, current_ma, dist_pct) or "Outside Band"
 
     comp = get_company(sym)
     asc = strategies.detect_ascending_triangle(sym, comp, candles, timeframe=tf)
     symm = strategies.detect_symmetrical_triangle(sym, comp, candles, timeframe=tf)
+    poleflag = strategies.detect_pole_and_flag(sym, comp, candles, timeframe=tf)
 
     return {
         "symbol": sym,
@@ -645,7 +550,9 @@ async def get_chart(symbol: str, tf: str = "daily"):
         "distance_pct": dist_pct,
         "ascending_pattern": asc,
         "symmetrical_pattern": symm,
+        "pole_and_flag_pattern": poleflag,
     }
+
 
 if __name__ == "__main__":
     import uvicorn
