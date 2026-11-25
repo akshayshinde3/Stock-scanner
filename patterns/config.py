@@ -10,13 +10,16 @@ All tolerances, ratios, thresholds, and filter parameters for:
 """
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. 44 MA SCANNER CONSTANTS
+# 1. 44 MA SCANNER CONSTANTS (Chartink "swing-trade-by-pmpatil")
 # ═══════════════════════════════════════════════════════════════════════════
-# Fixed distance band: stock qualifies ONLY if DIST_MIN <= Distance % <= DIST_MAX
-DIST_MIN = -1.0  # -1.0%
-DIST_MAX = 3.0   # +3.0%
+# Fixed distance band: stock qualifies inside DIST_MIN <= Distance % <= DIST_MAX
+DIST_MIN = -1.0  # -1.0% (Near below support band)
+DIST_MAX = 3.0   # +3.0% (Clearance band: -1.0% to +3.0% only)
 MA_PERIOD = 44
-MA_RISING_BARS = 5
+MA_RISING_BARS = 1  # 44 MA rising: today's MA44 > yesterday's MA44 (strictly rising slope)
+MA44_PULLBACK_HIGH_SMA = True  # Chartink rule 3: Daily Low < Daily SMA(Daily High, 44)
+MA44_CLOSE_ABOVE_SMA = True   # Chartink rule 4: Daily Close > Daily SMA(Daily Close, 44)
+MA44_GREEN_CANDLE = True      # Chartink rule 5: Daily Close > Daily Open
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. SHARED GEOMETRY CONSTANTS

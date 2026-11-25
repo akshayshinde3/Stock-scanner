@@ -140,9 +140,11 @@ def run_historical_backtest(sample_size: int = 50):
         },
         "44 MA Scanner": {
             "Total Evaluated": 0,
-            "Outside [-1%, +3%] Band Fail": 0,
-            "MA44 Not Rising Fail": 0,
-            "Candle Not Green Fail": 0,
+            "MA44 Falling Fail": 0,
+            "Low >= SMA(High, 44) No Dip Fail": 0,
+            "Close <= SMA(Close, 44) Fail": 0,
+            "Red Candle Fail": 0,
+            "Outside Band Fail": 0,
             "Qualified Setups": 0,
         }
     }
@@ -249,43 +251,48 @@ def run_historical_backtest(sample_size: int = 50):
             else:
                 rejections["Pole & Flag"]["Pole Rise < 12% / 20% Fail"] += 1
 
-            # --- 44 MA Scanner (Daily) ---
+            # --- 44 MA Scanner (Daily - Chartink "swing-trade-by-pmpatil") ---
             rejections["44 MA Scanner"]["Total Evaluated"] += 1
-            closes_slice = [c[4] for c in history_slice]
-            ma44_series = calculate_ma44(closes_slice)
-            cur_ma = ma44_series[-1]
-            if cur_ma:
-                cur_close = closes_slice[-1]
-                dist_pct = round(((cur_close - cur_ma) / cur_ma) * 100, 2)
-                if is_in_44ma_band(dist_pct):
-                    # Check green candle & touch/near
-                    touch = is_touch(float(history_slice[-1][3]), float(history_slice[-1][2]), cur_ma)
-                    if touch or (cur_close >= cur_ma):
-                        rejections["44 MA Scanner"]["Qualified Setups"] += 1
-                        stop_px = round(cur_ma * 0.985, 2)
-                        risk = cur_close - stop_px
-                        if risk > 0:
-                            tgt_px = round(cur_close + 3.0 * risk, 2)
-                            outcome, r_mult, bars_held, exit_px = simulate_trade(
-                                future_slice, cur_close, stop_px, tgt_px, max_bars=30
-                            )
-                            trade_records.append({
-                                "Symbol": sym,
-                                "Strategy": "44 MA Touch & Near",
-                                "Timeframe": "Daily",
-                                "Signal_Date": history_slice[-1][0],
-                                "Status": "Above (0–3%)" if cur_close >= cur_ma else "Touching",
-                                "Entry": cur_close,
-                                "Stop": stop_px,
-                                "Target": tgt_px,
-                                "Planned_RR": 3.0,
-                                "Outcome": outcome,
-                                "Realized_R": r_mult,
-                                "Bars_Held": bars_held,
-                                "Exit_Price": exit_px,
-                            })
-                else:
-                    rejections["44 MA Scanner"]["Outside [-1%, +3%] Band Fail"] += 1
+            ma_res = strategies.analyze_44ma_timeframe(history_slice, strict_chartink=True)
+            if ma_res and ma_res.get("chartink_qualified"):
+                rejections["44 MA Scanner"]["Qualified Setups"] += 1
+                outcome, r_mult, bars_held, exit_px = simulate_trade(
+                    future_slice, ma_res["buy_price"], ma_res["stop_loss"], ma_res["target"], max_bars=30
+                )
+                trade_records.append({
+                    "Symbol": sym,
+                    "Strategy": "44 MA (Chartink PMPatil)",
+                    "Timeframe": "Daily",
+                    "Signal_Date": history_slice[-1][0],
+                    "Status": ma_res["status"],
+                    "Entry": ma_res["buy_price"],
+                    "Stop": ma_res["stop_loss"],
+                    "Target": ma_res["target"],
+                    "Planned_RR": 3.0,
+                    "Outcome": outcome,
+                    "Realized_R": r_mult,
+                    "Bars_Held": bars_held,
+                    "Exit_Price": exit_px,
+                })
+            else:
+                # Track specific rejection reason
+                closes_s = [c[4] for c in history_slice]
+                highs_s = [c[2] for c in history_slice]
+                lows_s = [c[3] for c in history_slice]
+                opens_s = [c[1] for c in history_slice]
+                ma_c_s = strategies.calculate_ma44(closes_s)
+                ma_h_s = strategies.calculate_ma44_high(highs_s)
+                if ma_c_s and ma_c_s[-1] and ma_h_s and ma_h_s[-1] and len(ma_c_s) >= 3:
+                    if not (ma_c_s[-1] > ma_c_s[-2] and ma_c_s[-1] > ma_c_s[-3]):
+                        rejections["44 MA Scanner"]["MA44 Falling Fail"] += 1
+                    elif not (lows_s[-1] < ma_h_s[-1]):
+                        rejections["44 MA Scanner"]["Low >= SMA(High, 44) No Dip Fail"] += 1
+                    elif not (closes_s[-1] > ma_c_s[-1]):
+                        rejections["44 MA Scanner"]["Close <= SMA(Close, 44) Fail"] += 1
+                    elif not (closes_s[-1] > opens_s[-1]):
+                        rejections["44 MA Scanner"]["Red Candle Fail"] += 1
+                    else:
+                        rejections["44 MA Scanner"]["Outside Band Fail"] += 1
 
         # ═════════════════════════════════════════════════════════════════
         # 2. WEEKLY WALK-FORWARD EVALUATION (~150 weekly bars)

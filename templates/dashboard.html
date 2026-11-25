@@ -68,7 +68,7 @@
             </span>
           </h1>
           <p class="text-xs text-gray-400">
-            Ascending Triangle • Symmetrical Triangle • Bull Pole & Flag • 44 MA (-1% to +3%)
+            Ascending Triangle • Symmetrical Triangle • Bull Pole & Flag • 44 MA (PMPatil Chartink)
           </p>
         </div>
       </div>
@@ -170,11 +170,11 @@
       <button data-section="ma44" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>📈 4. 44 MA Scanner</span>
+            <span>📈 4. 44 MA Rising</span>
           </span>
           <span id="badge-main-ma44" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
-        <div class="text-[11px] text-gray-400 mt-1">Strict -1% to +3% Band</div>
+        <div class="text-[11px] text-gray-400 mt-1">Rising MA • -1% to +3% Band</div>
       </button>
     </div>
 
@@ -300,7 +300,11 @@
         <div class="flex items-center flex-wrap gap-4">
           <span class="flex items-center gap-1.5">
             <span class="w-3.5 h-1 bg-red-500 rounded inline-block"></span>
-            <span class="font-semibold text-gray-300">44 MA</span>
+            <span class="font-semibold text-gray-300">44 MA Close</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="w-3.5 h-0.5 border-t border-dashed border-amber-400 inline-block"></span>
+            <span class="font-semibold text-amber-300">44 MA High (Dip Zone)</span>
           </span>
           <span class="flex items-center gap-1.5">
             <span class="w-3 h-0.5 bg-cyan-400 inline-block"></span>
@@ -381,8 +385,8 @@
       let chartCache = new Map();
       let currentStockForModal = null;
 
-      // 44 MA filter states
-      let ma44RisingFilter = false;
+      // 44 MA filter states (44 MA Rising Stocks -1% to +3% default)
+      let ma44RisingFilter = true;
       let ma44GreenFilter = false;
       let ma44StatusFilter = "";
 
@@ -430,8 +434,19 @@
           .catch(() => {});
       }
 
-      // Load all data
-      async function loadAllData(forceRefresh = false) {
+      const loadedKeys = new Set();
+      let isFetching = false;
+
+      // Smart on-demand data loader (loads active tab instantly in < 1 second)
+      async function loadDataForCurrentView(forceRefresh = false) {
+        const tf = (activeSection === "ma44") ? activeTimeframe : (activeTimeframe === "weekly" ? "weekly" : "daily");
+        const cacheKey = `${activeSection}_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`;
+
+        if (!forceRefresh && loadedKeys.has(cacheKey)) {
+          renderView();
+          return;
+        }
+
         const updateText = document.getElementById("lastUpdatedText");
         const refreshBtn = document.getElementById("btnRefresh");
         if (updateText) updateText.textContent = forceRefresh ? "Refreshing..." : "Scanning...";
@@ -440,42 +455,45 @@
           refreshBtn.textContent = "⟳ Refreshing...";
         }
 
+        // Show fast loading indicator in table
+        const tbody = document.getElementById("tableBody");
+        if (tbody && !loadedKeys.has(cacheKey)) {
+          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-blue-400 font-sans"><span class="animate-pulse">⚡ Scanning Nifty universe at high speed...</span></td></tr>`;
+        }
+
         const refreshParam = forceRefresh ? "&refresh=1" : "";
+        if (forceRefresh) loadedKeys.clear();
+
         try {
-          const [resTriDaily, resTriWeekly, resFlagDaily, resFlagWeekly, res44] = await Promise.all([
-            fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=daily${refreshParam}`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=weekly${refreshParam}`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=daily${refreshParam}`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=weekly${refreshParam}`).then(r => r.json()).catch(() => ({})),
-            fetch(`/api/scanner/44ma?index=${currentIndex}&rising_only=${ma44RisingFilter ? '1' : '0'}&green_only=${ma44GreenFilter ? '1' : '0'}${refreshParam}`).then(r => r.json()).catch(() => ({}))
-          ]);
-
-          // Ascending
-          store.ascending.daily.confirmed = resTriDaily.ascending_confirmed || [];
-          store.ascending.daily.forming = resTriDaily.ascending_pre || [];
-          store.ascending.weekly.confirmed = resTriWeekly.ascending_confirmed || [];
-          store.ascending.weekly.forming = resTriWeekly.ascending_pre || [];
-
-          // Symmetrical
-          store.symmetrical.daily.confirmed = resTriDaily.symmetrical_confirmed || [];
-          store.symmetrical.daily.forming = resTriDaily.symmetrical_pre || [];
-          store.symmetrical.weekly.confirmed = resTriWeekly.symmetrical_confirmed || [];
-          store.symmetrical.weekly.forming = resTriWeekly.symmetrical_pre || [];
-
-          // Pole and Flag
-          store.pole_and_flag.daily.confirmed = resFlagDaily.confirmed_breakouts || [];
-          store.pole_and_flag.daily.forming = resFlagDaily.pre_breakouts || [];
-          store.pole_and_flag.weekly.confirmed = resFlagWeekly.confirmed_breakouts || [];
-          store.pole_and_flag.weekly.forming = resFlagWeekly.pre_breakouts || [];
-
-          // 44 MA
-          if (res44 && res44.results) {
-            store.ma44.both = res44.results.both || [];
-            store.ma44.daily = res44.results.daily || [];
-            store.ma44.weekly = res44.results.weekly || [];
+          if (activeSection === "ascending" || activeSection === "symmetrical") {
+            const res = await fetch(`/api/scanner/triangles?index=${currentIndex}&timeframe=${tf}${refreshParam}`).then(r => r.json());
+            if (res) {
+              store.ascending[tf].confirmed = res.ascending_confirmed || [];
+              store.ascending[tf].forming = res.ascending_pre || [];
+              store.symmetrical[tf].confirmed = res.symmetrical_confirmed || [];
+              store.symmetrical[tf].forming = res.symmetrical_pre || [];
+              if (res.last_updated) updateText.textContent = res.last_updated;
+            }
+          } else if (activeSection === "pole_and_flag") {
+            const res = await fetch(`/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=${tf}${refreshParam}`).then(r => r.json());
+            if (res) {
+              store.pole_and_flag[tf].confirmed = res.confirmed_breakouts || [];
+              store.pole_and_flag[tf].forming = res.pre_breakouts || [];
+              if (res.last_updated) updateText.textContent = res.last_updated;
+            }
+          } else if (activeSection === "ma44") {
+            const res = await fetch(`/api/scanner/44ma?index=${currentIndex}&rising_only=${ma44RisingFilter ? '1' : '0'}&green_only=${ma44GreenFilter ? '1' : '0'}${refreshParam}`).then(r => r.json());
+            if (res && res.results) {
+              store.ma44.both = res.results.both || [];
+              store.ma44.daily = res.results.daily || [];
+              store.ma44.weekly = res.results.weekly || [];
+              if (res.last_updated) updateText.textContent = res.last_updated;
+            }
           }
 
-          // Update badges
+          loadedKeys.add(cacheKey);
+
+          // Update main badge counts
           document.getElementById("badge-main-asc").textContent = 
             (store.ascending.daily.confirmed.length + store.ascending.weekly.confirmed.length);
           document.getElementById("badge-main-symm").textContent = 
@@ -483,19 +501,23 @@
           document.getElementById("badge-main-flag").textContent = 
             (store.pole_and_flag.daily.confirmed.length + store.pole_and_flag.weekly.confirmed.length);
           document.getElementById("badge-main-ma44").textContent = 
-            (res44 && res44.counts ? res44.counts.total_qualifying : 0);
+            (store.ma44.both.length + store.ma44.daily.length + store.ma44.weekly.length);
 
-          updateText.textContent = resTriDaily.last_updated || new Date().toLocaleTimeString();
           renderView();
         } catch (e) {
           console.error("Load error:", e);
-          updateText.textContent = "Error";
+          if (updateText) updateText.textContent = "Error";
         } finally {
           if (refreshBtn) {
             refreshBtn.classList.remove("opacity-50", "pointer-events-none");
             refreshBtn.textContent = "⟳ Refresh";
           }
         }
+      }
+
+      // Alias for compatibility
+      function loadAllData(forceRefresh = false) {
+        return loadDataForCurrentView(forceRefresh);
       }
 
       function filterAndSort(list) {
@@ -553,15 +575,20 @@
               </button>
             </div>
 
-            <!-- Filters -->
-            <label class="flex items-center gap-1.5 text-xs text-gray-300 ml-2 cursor-pointer select-none">
-              <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
-              <span>MA Rising Only</span>
-            </label>
-            <label class="flex items-center gap-1.5 text-xs text-gray-300 ml-2 cursor-pointer select-none">
-              <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
-              <span>Green Candle Only</span>
-            </label>
+            <!-- Strategy Pill & Filters -->
+            <div class="flex items-center gap-2 ml-2">
+              <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-950/70 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shadow-sm">
+                <span>⚡ -1.0% to +3.0% Band</span>
+              </span>
+              <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
+                <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
+                <span>MA Rising Only</span>
+              </label>
+              <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
+                <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
+                <span>Green Candle (Close>Open)</span>
+              </label>
+            </div>
           `;
           return;
         }
@@ -599,7 +626,7 @@
 
       window.setTimeframe = function(tf) {
         activeTimeframe = tf;
-        renderView();
+        loadDataForCurrentView(false);
       };
 
       window.toggleFilter = function(f) {
@@ -640,7 +667,7 @@
           const list = filterAndSort(rawList);
           countText.textContent = list.length;
 
-          const touchCount = list.filter(x => x.status && x.status.includes("Touching")).length;
+          const touchCount = list.filter(x => x.status && (x.status.includes("Touching") || x.status.includes("Direct"))).length;
           const aboveCount = list.filter(x => x.status && x.status.includes("Above")).length;
           const belowCount = list.filter(x => x.status && x.status.includes("Near Below")).length;
 
@@ -673,13 +700,13 @@
               <div>
                 <div class="text-[11px] text-gray-400 font-medium">Fixed Band Range</div>
                 <div class="text-xl font-bold font-mono text-white">-1.0% to +3.0%</div>
-                <div class="text-[10px] text-emerald-400">Strictly Enforced</div>
+                <div class="text-[10px] text-emerald-400">Rising 44 MA Only</div>
               </div>
               <span class="text-2xl text-purple-400">🎯</span>
             </div>
           `;
 
-          bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">44 MA Scanner (${activeTimeframe.toUpperCase()}):</span> All stocks qualifying strictly inside the <b class="text-white font-mono">-1.0% to +3.0%</b> distance band. First match wins: Touching (Blue), Above (0–3%) (Green), Near Below (−1–0%) (Orange).`;
+          bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">44 MA Rising Scanner (${activeTimeframe.toUpperCase()}):</span> All stocks qualifying near rising 44 MA support strictly inside the <b class="text-white font-mono">-1.0% to +3.0%</b> distance band. First match wins: Touching (Blue), Above (0–3%) (Green), Near Below (−1–0%) (Orange).`;
 
           render44MaTable(list);
           return;
@@ -851,16 +878,16 @@
         `;
 
         if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-gray-500 font-sans">No stocks qualifying in the -1% to +3% band with active filters.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-gray-500 font-sans">No stocks qualifying near rising 44 MA in the -1% to +3% band with active filters.</td></tr>`;
           return;
         }
 
         tbody.innerHTML = list.map(item => {
           const isUp = (item.day_change_pct || 0) >= 0;
           let badgeClass = "bg-gray-800 text-gray-300 border-gray-700";
-          if (item.status === "Touching") badgeClass = "bg-blue-900/60 text-blue-300 border-blue-500/50 font-bold";
-          else if (item.status === "Above (0–3%)") badgeClass = "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 font-bold";
-          else if (item.status === "Near Below (−1–0%)") badgeClass = "bg-amber-900/50 text-amber-300 border-amber-500/40";
+          if (item.status === "Touching" || (item.status && item.status.includes("Touching"))) badgeClass = "bg-blue-900/60 text-blue-300 border-blue-500/50 font-bold";
+          else if (item.status && item.status.includes("Above")) badgeClass = "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 font-bold";
+          else if (item.status && item.status.includes("Near Below")) badgeClass = "bg-amber-900/50 text-amber-300 border-amber-500/40 font-semibold";
 
           return `
             <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')" onmouseenter="prefetchChart('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')">
@@ -870,8 +897,9 @@
               <td class="py-3 px-3 text-right text-red-400 font-semibold font-mono">₹${fmt(item.ma44)}</td>
               <td class="py-3 px-3 text-right font-bold ${item.distance_pct >= 0 ? 'text-emerald-400' : 'text-amber-400'}">${item.distance_pct > 0 ? '+' : ''}${Number(item.distance_pct).toFixed(2)}%</td>
               <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2.5 py-0.5 rounded text-[11px] font-semibold border ${badgeClass}">
-                  ${item.status}
+                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-semibold border ${badgeClass}">
+                  <span>${item.status}</span>
+                  ${item.chartink_qualified ? '<span class="text-[9px] px-1 py-0.2 rounded bg-indigo-900/70 text-indigo-300 font-mono" title="Satisfies all 5 Chartink PMPatil filters">PMPatil</span>' : ''}
                 </span>
               </td>
               <td class="py-3 px-3 text-right text-cyan-400 font-semibold font-mono">₹${fmt(item.buy_price)}</td>
@@ -943,7 +971,8 @@
           wickUpColor: "#10b981", wickDownColor: "#ef4444"
         });
 
-        const ma44Series = chart.addLineSeries({ color: "#ef4444", lineWidth: 2, title: "44 MA" });
+        const ma44Series = chart.addLineSeries({ color: "#ef4444", lineWidth: 2, title: "44 MA (Close)" });
+        const ma44HighSeries = chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "44 MA Band (High)" });
         const upperLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Upper Trendline" });
         const lowerLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Lower Trendline" });
 
@@ -964,6 +993,7 @@
 
         candleSeries.setData(data.candles);
         if (data.ma44_line && data.ma44_line.length > 0) ma44Series.setData(data.ma44_line);
+        if (data.ma44_high_line && data.ma44_high_line.length > 0) ma44HighSeries.setData(data.ma44_high_line);
 
         document.getElementById("modalCompany").textContent = data.company || "";
         document.getElementById("modalCmp").textContent = `₹${fmt(data.cmp)}`;
@@ -1095,7 +1125,7 @@
         const sec = btn.dataset.section;
         if (!sec || sec === activeSection) return;
         activeSection = sec;
-        renderView();
+        loadDataForCurrentView(false);
       });
 
       document.getElementById("searchBox").addEventListener("input", (e) => {

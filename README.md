@@ -10,21 +10,31 @@ Includes 4 core swing trading engines:
 
 ---
 
-## 1. 44 MA Strategy Definitions (Fixed Distance Band)
+## 1. 44 MA Rising Stocks (-1.0% to +3.0%)
 
-- **MA44**: 44-period simple moving average of Close calculated separately for Daily and Weekly.
-- **Distance %**: `(Close - MA44) / MA44 * 100`
-- **Fixed Qualification Band**: A stock qualifies **ONLY** if `-1.0 <= Distance % <= +3.0`.
-- **TOUCH**: `Low <= MA44 <= High` (A touch whose close falls outside the -1% to +3% band is strictly excluded).
-- **Status Badges** (First match wins):
-  1. **Touching** (Blue): `TOUCH == True` (and inside `-1.0% to +3.0%`).
+Scans for liquid stocks that are trading within **-1.0% to +3.0%** of an active, **rising 44-period Moving Average**:
+
+- **MA44 Rising**: `today's SMA(Close, 44) > yesterday's SMA(Close, 44)` (strictly upward sloping).
+- **Strict Qualification Band**: A stock qualifies **ONLY** if `-1.0 <= Distance % <= +3.0`.
+- **Status Badges**:
+  1. **Touching** (Blue): `Low <= MA44 <= High` (intraday touch of the rising 44 MA line inside -1% to +3%).
   2. **Above (0–3%)** (Green): `Close >= MA44` and `Distance % <= +3.0%`.
   3. **Near Below (−1–0%)** (Orange): `Close < MA44` and `Distance % >= -1.0%`.
+- **Chartink Filter Support (`swing-trade-by-pmpatil`)**:
+  - The screener tags stocks meeting all 5 Chartink rules:
+    1. `Today SMA44 > Yesterday SMA44`
+    2. `Today SMA44 > 2d Ago SMA44`
+    3. `Daily Low < 44 SMA of Highs`
+    4. `Daily Close > 44 SMA of Close`
+    5. `Daily Close > Daily Open (Green Candle)`
+  - Qualifying stocks receive a **`PMPatil`** tag.
 - **Timeframe Tabs**:
-  - **Both**: Qualifies on Daily AND Weekly simultaneously (Highest priority swing signal).
-  - **Daily**: Qualifies on Daily timeframe.
-  - **Weekly**: Qualifies on Weekly timeframe.
-- **Filters**: MA44 Rising Only (`today's MA44 > MA44 5 bars ago`) and Green Candle Only (`Close > Open`).
+  - **Both**: Qualifies on Daily AND Weekly simultaneously (Highest conviction multi-timeframe swing setup).
+  - **Daily**: Standard Daily swing setup.
+  - **Weekly**: Higher timeframe position setup.
+  - **Weekly**: Higher timeframe position setup.
+- **Interactive Visualizer**: In the chart modal, both the solid red **44 MA Close line** and the dashed amber **44 MA High band line** are plotted, so traders can visually inspect the intraday dip and rejection.
+- **Diagnostic Debugger**: The "Why Rejected?" panel checks all 5 rules individually with exact price and MA levels.
 
 ---
 

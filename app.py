@@ -320,7 +320,7 @@ def fetch_stock_candles_yf(symbol: str) -> tuple:
     mapped_sym = SYMBOL_MAP.get(sym_upper, sym_upper)
     ticker_sym = f"{mapped_sym}.NS"
     host = "query2.finance.yahoo.com" if (hash(sym_upper) % 2 == 0) else "query1.finance.yahoo.com"
-    url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=5y&interval=1d"
+    url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=2y&interval=1d"
 
     try:
         resp = _http_session.get(url, timeout=7)
@@ -509,8 +509,13 @@ def clear_scan_caches():
 @app.route("/api/scanner/44ma")
 def api_scanner_44ma():
     """
-    PART 5: 44 MA Scanner with fixed distance band -1.0% to +3.0% ONLY.
-    Excludes any stock outside this band.
+    44 MA Institutional Swing Scanner (Chartink "swing-trade-by-pmpatil"):
+      Rule 1: 1 day ago SMA(Close, 44) < Daily SMA(Close, 44)
+      Rule 2: 2 days ago SMA(Close, 44) < Daily SMA(Close, 44)
+      Rule 3: Daily Low < Daily SMA(High, 44)
+      Rule 4: Daily Close > Daily SMA(Close, 44)
+      Rule 5: Daily Close > Daily Open (Green candle)
+    Ultra-fast parallel evaluation across worker threads.
     """
     index_param = request.args.get("index", "nifty500").lower()
     universe = get_universe(index_param)
@@ -525,8 +530,9 @@ def api_scanner_44ma():
     except ValueError:
         min_weekly_vol = 100000
 
-    rising_only = request.args.get("rising_only") == "1"
-    green_only = request.args.get("green_only") == "1"
+    rising_only = request.args.get("rising_only", "1") == "1"
+    green_only = request.args.get("green_only", "0") == "1"
+    strict_chartink = request.args.get("strict_chartink", "0") == "1"
     force_refresh = request.args.get("refresh") == "1"
     status_filter = request.args.get("statuses", "")
     allowed_statuses = [s.strip().lower() for s in status_filter.split(",") if s.strip()] if status_filter else []
@@ -534,9 +540,9 @@ def api_scanner_44ma():
     if force_refresh:
         clear_scan_caches()
 
-    cache_key = f"{index_param}_{min_price}_{min_weekly_vol}_{rising_only}_{green_only}_{status_filter}"
+    cache_key = f"{index_param}_{min_price}_{min_weekly_vol}_{rising_only}_{green_only}_{strict_chartink}_{status_filter}"
     now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 180):
+    if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 300):
         return jsonify(_SCAN_44MA_CACHE[cache_key])
 
     ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -545,40 +551,40 @@ def api_scanner_44ma():
     daily_results = []
     weekly_results = []
 
-    for sym in universe:
+    def _eval_stock(sym):
         d_candles, w_candles = get_cached_candles(sym)
         if not d_candles:
-            continue
-
-        comp_name = get_company_name(sym)
-        stock_eval = strategies.evaluate_44ma_stock(
+            return None
+        return strategies.evaluate_44ma_stock(
             symbol=sym,
-            company_name=comp_name,
+            company_name=get_company_name(sym),
             daily_candles=d_candles,
             weekly_candles=w_candles,
             min_price=min_price,
             min_weekly_vol=min_weekly_vol,
             rising_only=rising_only,
             green_only=green_only,
+            strict_chartink=strict_chartink,
         )
 
-        if not stock_eval:
-            continue
-
-        if allowed_statuses:
-            stat = stock_eval["status"].lower()
-            if not any(a in stat for a in allowed_statuses):
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for stock_eval in executor.map(_eval_stock, universe):
+            if not stock_eval:
                 continue
 
-        tf = stock_eval["timeframe"]
-        if tf == "Both":
-            both_results.append(stock_eval)
-        elif tf == "Daily":
-            daily_results.append(stock_eval)
-        elif tf == "Weekly":
-            weekly_results.append(stock_eval)
+            if allowed_statuses:
+                stat = stock_eval["status"].lower()
+                if not any(a in stat for a in allowed_statuses):
+                    continue
 
-    # Sort each list by smallest abs(Distance %) first
+            tf = stock_eval["timeframe"]
+            if tf == "Both":
+                both_results.append(stock_eval)
+            elif tf == "Daily":
+                daily_results.append(stock_eval)
+            elif tf == "Weekly":
+                weekly_results.append(stock_eval)
+
     both_results.sort(key=lambda s: s["abs_distance"])
     daily_results.sort(key=lambda s: s["abs_distance"])
     weekly_results.sort(key=lambda s: s["abs_distance"])
@@ -587,6 +593,7 @@ def api_scanner_44ma():
     payload = {
         "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
         "universe": index_param.upper(),
+        "strategy": "44 MA Rising Stocks (-1.0% to +3.0%)",
         "dist_min": -1.0,
         "dist_max": 3.0,
         "total_scanned": len(universe),
@@ -612,6 +619,7 @@ def api_scanner_44ma():
 def api_scanner_triangles():
     """
     Ascending & Symmetrical Triangle Breakouts endpoint (Daily or Weekly).
+    Ultra-fast parallel evaluation across worker threads.
     """
     index_param = request.args.get("index", "nifty500").lower()
     universe = get_universe(index_param)
@@ -623,7 +631,7 @@ def api_scanner_triangles():
 
     cache_key = f"{index_param}_{tf}"
     now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 180):
+    if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 300):
         return jsonify(_SCAN_TRIANGLES_CACHE[cache_key])
 
     ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -637,35 +645,35 @@ def api_scanner_triangles():
     confirmed_breakouts = []
     pre_breakouts = []
 
-    for sym in universe:
+    def _eval_triangle(sym):
         d_candles, w_candles = get_cached_candles(sym)
         candles = w_candles if tf == "weekly" else d_candles
         if not candles or len(candles) < 25:
-            continue
-
+            return None, None
         comp_name = get_company_name(sym)
-
-        # 1. Ascending Triangle Check
         asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
-        if asc:
-            ascending_triangles.append(asc)
-            if asc["status"] in ["Confirmed Breakout", "Retest Entry"]:
-                asc_confirmed.append(asc)
-                confirmed_breakouts.append(asc)
-            elif asc["status"] == "Forming":
-                asc_pre.append(asc)
-                pre_breakouts.append(asc)
-
-        # 2. Symmetrical Triangle Check
         symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
-        if symm:
-            symmetrical_triangles.append(symm)
-            if symm["status"] in ["Confirmed Breakout", "Retest Entry"]:
-                symm_confirmed.append(symm)
-                confirmed_breakouts.append(symm)
-            elif symm["status"] == "Forming":
-                symm_pre.append(symm)
-                pre_breakouts.append(symm)
+        return asc, symm
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for asc, symm in executor.map(_eval_triangle, universe):
+            if asc:
+                ascending_triangles.append(asc)
+                if asc["status"] in ["Confirmed Breakout", "Retest Entry"]:
+                    asc_confirmed.append(asc)
+                    confirmed_breakouts.append(asc)
+                elif asc["status"] == "Forming":
+                    asc_pre.append(asc)
+                    pre_breakouts.append(asc)
+
+            if symm:
+                symmetrical_triangles.append(symm)
+                if symm["status"] in ["Confirmed Breakout", "Retest Entry"]:
+                    symm_confirmed.append(symm)
+                    confirmed_breakouts.append(symm)
+                elif symm["status"] == "Forming":
+                    symm_pre.append(symm)
+                    pre_breakouts.append(symm)
 
     ascending_triangles.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
     symmetrical_triangles.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
@@ -707,6 +715,7 @@ def api_scanner_triangles():
 def api_scanner_pole_and_flag():
     """
     PART 4: Bull Pole & Flag scanner endpoint (Daily & Weekly).
+    Ultra-fast parallel evaluation across worker threads.
     """
     index_param = request.args.get("index", "nifty500").lower()
     universe = get_universe(index_param)
@@ -718,7 +727,7 @@ def api_scanner_pole_and_flag():
 
     cache_key = f"{index_param}_{tf}"
     now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_POLEFLAG_CACHE and (now_time - _LAST_SCAN_TIME.get(f"poleflag_{cache_key}", 0) < 180):
+    if not force_refresh and cache_key in _SCAN_POLEFLAG_CACHE and (now_time - _LAST_SCAN_TIME.get(f"poleflag_{cache_key}", 0) < 300):
         return jsonify(_SCAN_POLEFLAG_CACHE[cache_key])
 
     ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -727,20 +736,22 @@ def api_scanner_pole_and_flag():
     confirmed = []
     pre_breakouts = []
 
-    for sym in universe:
+    def _eval_flag(sym):
         d_candles, w_candles = get_cached_candles(sym)
         candles = w_candles if tf == "weekly" else d_candles
         if not candles or len(candles) < 30:
-            continue
-
+            return None
         comp_name = get_company_name(sym)
-        flag = strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
-        if flag:
-            all_flags.append(flag)
-            if flag["status"] in ["Pole & Flag Breakout", "Pole & Flag Retest"]:
-                confirmed.append(flag)
-            elif flag["status"] == "Pole & Flag Forming":
-                pre_breakouts.append(flag)
+        return strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for flag in executor.map(_eval_flag, universe):
+            if flag:
+                all_flags.append(flag)
+                if flag["status"] in ["Pole & Flag Breakout", "Pole & Flag Retest"]:
+                    confirmed.append(flag)
+                elif flag["status"] == "Pole & Flag Forming":
+                    pre_breakouts.append(flag)
 
     all_flags.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
     confirmed.sort(key=lambda x: x["abs_distance"])
@@ -812,12 +823,14 @@ def api_chart(symbol: str):
     highs = [c[2] for c in candles]
     lows = [c[3] for c in candles]
     ma44_series = strategies.calculate_ma44(closes)
+    ma44_high_series = strategies.calculate_ma44_high(highs)
 
     display_bars = candles[-120:] if len(candles) >= 120 else candles
     offset = len(candles) - len(display_bars)
 
     candle_data = []
     ma_line_data = []
+    ma_high_line_data = []
 
     for i, c in enumerate(display_bars):
         c_idx = offset + i
@@ -835,12 +848,19 @@ def api_chart(symbol: str):
                 "time": c[0],
                 "value": ma_val
             })
+        ma_high_val = ma44_high_series[c_idx]
+        if ma_high_val is not None:
+            ma_high_line_data.append({
+                "time": c[0],
+                "value": ma_high_val
+            })
 
     current_ma = ma44_series[-1]
+    current_ma_high = ma44_high_series[-1]
     cmp_price = closes[-1]
     dist_pct = round(((cmp_price - current_ma) / current_ma) * 100, 2) if current_ma else 0.0
     touch = strategies.is_touch(lows[-1], highs[-1], current_ma)
-    status_44ma = strategies.get_status(touch, cmp_price, current_ma, dist_pct) or "Outside Band"
+    status_44ma = strategies.get_status(touch, cmp_price, current_ma, dist_pct, cur_low=lows[-1], ma44_high=current_ma_high) or "Outside Band"
 
     comp_name = get_company_name(sym)
     asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
@@ -853,7 +873,9 @@ def api_chart(symbol: str):
         "timeframe": tf,
         "candles": candle_data,
         "ma44_line": ma_line_data,
+        "ma44_high_line": ma_high_line_data,
         "current_ma44": current_ma,
+        "current_ma44_high": current_ma_high,
         "cmp": cmp_price,
         "status_44ma": status_44ma,
         "distance_pct": dist_pct,

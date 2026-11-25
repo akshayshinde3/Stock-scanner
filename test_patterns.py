@@ -27,7 +27,14 @@ from strategies import (
     is_in_44ma_band,
     get_status,
     calculate_ma44,
+    calculate_ma44_high,
+    is_ma44_rising_chartink,
+    is_pullback_into_44_band,
+    is_close_above_ma44,
+    is_green_candle,
+    analyze_44ma_timeframe,
     evaluate_44ma_stock,
+    get_44ma_debug,
 )
 
 
@@ -314,3 +321,81 @@ def test_44ma_strict_band():
     # Far Below (-2.5%) -> Excluded
     status_far_below = get_status(touch=False, close=97.5, ma44=100.0, dist_pct=-2.5)
     assert status_far_below is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 6. CHARTINK "swing-trade-by-pmpatil" 5-RULE COMPLIANCE TEST
+# ═══════════════════════════════════════════════════════════════════════════
+def test_chartink_pmpatil_44ma_strategy():
+    """
+    Verifies all 5 rules from chartink.com/screener/swing-trade-by-pmpatil:
+      Rule 1: 1 day ago SMA(Close, 44) < Daily SMA(Close, 44)
+      Rule 2: 2 days ago SMA(Close, 44) < Daily SMA(Close, 44)
+      Rule 3: Daily Low < Daily SMA(High, 44)
+      Rule 4: Daily Close > Daily SMA(Close, 44)
+      Rule 5: Daily Close > Daily Open (Green Candle)
+    """
+    # 1. Slope unit tests
+    # Rising MA: [..., 100.0, 100.10, 100.25]
+    r1, r2 = is_ma44_rising_chartink([99.8, 100.0, 100.10, 100.25])
+    assert r1 is True and r2 is True
+
+    # Falling MA today: [..., 100.0, 100.25, 100.10]
+    r1_f, r2_f = is_ma44_rising_chartink([99.8, 100.0, 100.25, 100.10])
+    assert r1_f is False
+
+    # 2. Pullback into 44 High SMA band: Low < SMA(High, 44)
+    assert is_pullback_into_44_band(cur_low=101.5, ma44_high=102.0) is True
+    assert is_pullback_into_44_band(cur_low=102.5, ma44_high=102.0) is False
+
+    # 3. Close above 44 Close SMA: Close > SMA(Close, 44)
+    assert is_close_above_ma44(cur_close=100.5, ma44_close=100.0) is True
+    assert is_close_above_ma44(cur_close=99.8, ma44_close=100.0) is False
+
+    # 4. Green candle: Close > Open
+    assert is_green_candle(open_price=100.0, close_price=101.2) is True
+    assert is_green_candle(open_price=101.2, close_price=100.0) is False
+
+    # 5. Full 60-bar synthetic uptrend + 44 MA pullback candle test
+    start_date = dt.date(2023, 1, 1)
+    candles = []
+    base_price = 80.0
+    for i in range(55):
+        d_str = (start_date + dt.timedelta(days=i)).isoformat()
+        p = base_price + i * 0.4  # rising steadily
+        candles.append(_generate_synthetic_candle(d_str, p, p + 1.0, p - 0.8, p + 0.3, 100000))
+
+    # Bar 55 (Day -2): Close around 102
+    candles.append(_generate_synthetic_candle("2023-03-01", 101.8, 103.0, 101.5, 102.2, 110000))
+    # Bar 56 (Day -1): Close around 102.5
+    candles.append(_generate_synthetic_candle("2023-03-02", 102.2, 103.2, 102.0, 102.6, 115000))
+
+    # Calculate current MAs to place the test candle precisely
+    closes = [c[4] for c in candles]
+    highs = [c[2] for c in candles]
+    ma_c = calculate_ma44(closes)[-1]
+    ma_h = calculate_ma44_high(highs)[-1]
+
+    # Bar 57 (Today): Pullback candle dipping below ma_h, closing above ma_c, green candle
+    today_open = ma_c + 0.5
+    today_low = ma_h - 0.4   # Low < SMA(High, 44)  -> Rule 3 passed!
+    today_close = ma_c + 1.0  # Close > SMA(Close, 44) -> Rule 4 passed!
+    today_high = ma_c + 1.8  # Close > Open -> Green candle (Rule 5 passed!)
+
+    candles.append(_generate_synthetic_candle("2023-03-03", today_open, today_high, today_low, today_close, 150000))
+
+    # Evaluate with analyze_44ma_timeframe
+    res = analyze_44ma_timeframe(candles, strict_chartink=True)
+    assert res is not None, "Chartink compliant candle failed to qualify"
+    assert res["chartink_qualified"] is True
+    assert res["ma44_rising"] is True
+    assert res["pullback_in_band"] is True
+    assert res["close_above_ma"] is True
+    assert res["green_candle"] is True
+    assert res["status"] in ["Touching", "Above (0–3%)", "Near Below (−1–0%)"]
+
+    # Verify diagnostic debug tool reports all rules passed
+    debug_info = get_44ma_debug("TEST_44MA", "Test 44MA Corp", candles, timeframe="daily")
+    assert debug_info["qualified"] is True
+    assert len(debug_info["reject_reasons"]) == 1
+    assert "passed" in debug_info["reject_reasons"][0].lower()
