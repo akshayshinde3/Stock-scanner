@@ -553,9 +553,16 @@ async def debug_symbol(symbol: str, strategy: str = "ascending", timeframe: str 
     }
 
 
+_FASTAPI_CHART_CACHE: Dict[str, dict] = {}
+
 @app.get("/api/chart/{symbol}")
-async def get_chart(symbol: str, tf: str = "daily"):
+async def get_chart(symbol: str, tf: str = "daily", strategy: str = ""):
     sym = symbol.upper()
+    strat = strategy.lower().strip()
+    cache_key = f"{sym}_{tf}_{strat}"
+    if cache_key in _FASTAPI_CHART_CACHE:
+        return _FASTAPI_CHART_CACHE[cache_key]
+
     d_c, w_c = fetch_candles(sym)
     candles = w_c if tf == "weekly" else d_c
     if not candles:
@@ -581,11 +588,24 @@ async def get_chart(symbol: str, tf: str = "daily"):
     status_44ma = strategies.get_status(touch, cmp_price, current_ma, dist_pct, cur_low=lows[-1], ma44_high=current_ma_high) or "Outside Band"
 
     comp = get_company(sym)
-    asc = strategies.detect_ascending_triangle(sym, comp, candles, timeframe=tf)
-    symm = strategies.detect_symmetrical_triangle(sym, comp, candles, timeframe=tf)
-    poleflag = strategies.detect_pole_and_flag(sym, comp, candles, timeframe=tf)
+    asc = None
+    symm = None
+    poleflag = None
 
-    return {
+    if strat in ["ascending", "asc"]:
+        asc = strategies.detect_ascending_triangle(sym, comp, candles, timeframe=tf)
+    elif strat in ["symmetrical", "symm"]:
+        symm = strategies.detect_symmetrical_triangle(sym, comp, candles, timeframe=tf)
+    elif strat in ["pole_and_flag", "flag"]:
+        poleflag = strategies.detect_pole_and_flag(sym, comp, candles, timeframe=tf)
+    elif strat in ["44ma", "ma44"]:
+        pass
+    else:
+        asc = strategies.detect_ascending_triangle(sym, comp, candles, timeframe=tf)
+        symm = strategies.detect_symmetrical_triangle(sym, comp, candles, timeframe=tf)
+        poleflag = strategies.detect_pole_and_flag(sym, comp, candles, timeframe=tf)
+
+    payload = {
         "symbol": sym,
         "company": comp,
         "timeframe": tf,
@@ -601,6 +621,10 @@ async def get_chart(symbol: str, tf: str = "daily"):
         "symmetrical_pattern": symm,
         "pole_and_flag_pattern": poleflag,
     }
+    if len(_FASTAPI_CHART_CACHE) > 300:
+        _FASTAPI_CHART_CACHE.pop(next(iter(_FASTAPI_CHART_CACHE)))
+    _FASTAPI_CHART_CACHE[cache_key] = payload
+    return payload
 
 
 if __name__ == "__main__":
