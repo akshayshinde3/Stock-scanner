@@ -11,7 +11,6 @@ Ultra-optimized implementation:
 """
 
 from typing import Optional, Dict, Any, List, Tuple
-import numpy as np
 from patterns.config import (
     FLAG_DAILY_POLE_MIN_RISE,
     FLAG_DAILY_POLE_MIN_BARS,
@@ -115,7 +114,7 @@ def detect_pole_and_flag(
     # If no swing high found, take the highest high in the range
     if not candidate_pole_tops:
         slice_highs = highs[earliest_top_idx : latest_top_idx + 1]
-        best_i = earliest_top_idx + int(np.argmax(slice_highs))
+        best_i = earliest_top_idx + max(range(len(slice_highs)), key=slice_highs.__getitem__)
         candidate_pole_tops.append(best_i)
 
     best_setup = None
@@ -131,14 +130,15 @@ def detect_pole_and_flag(
             continue
 
         base_search_slice = lows[earliest_base_idx : latest_base_idx + 1]
-        pole_base_idx = earliest_base_idx + int(np.argmin(base_search_slice))
+        pole_base_idx = earliest_base_idx + min(range(len(base_search_slice)), key=base_search_slice.__getitem__)
         pole_base_low = lows[pole_base_idx]
         pole_base_close = closes[pole_base_idx]
 
         # 1. Pole rise
         pole_rise = (pole_top_close - pole_base_close) / pole_base_close
         if pole_rise < pole_min_rise:
-            diag_reasons.append(f"Pole rise {pole_rise*100:.1f}% below required {pole_min_rise*100:.0f}%.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Pole rise {pole_rise*100:.1f}% below required {pole_min_rise*100:.0f}%.")
             continue
 
         # 2. Green candles ratio in pole
@@ -146,17 +146,19 @@ def detect_pole_and_flag(
         pole_o = opens[pole_base_idx : pole_top_idx + 1]
         green_count = sum(1 for c, o in zip(pole_c, pole_o) if c > o)
         if (green_count / len(pole_c)) < FLAG_POLE_GREEN_RATIO:
-            diag_reasons.append(f"Pole green bars {(green_count/len(pole_c))*100:.0f}% below required 60%.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Pole green bars {(green_count/len(pole_c))*100:.0f}% below required 60%.")
             continue
 
         # 3. Pole volume surge
         pole_vols = volumes[pole_base_idx : pole_top_idx + 1]
-        avg_pole_vol = float(np.mean(pole_vols))
+        avg_pole_vol = sum(pole_vols) / len(pole_vols)
         pre_vols = volumes[max(0, pole_base_idx - 20) : pole_base_idx]
-        avg_pre_vol = float(np.mean(pre_vols)) if pre_vols else 1.0
+        avg_pre_vol = (sum(pre_vols) / len(pre_vols)) if pre_vols else 1.0
 
         if avg_pole_vol < (FLAG_POLE_VOL_MULT * avg_pre_vol):
-            diag_reasons.append(f"Pole volume surge {avg_pole_vol/avg_pre_vol:.2f}x below required 1.30x.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Pole volume surge {avg_pole_vol/avg_pre_vol:.2f}x below required 1.30x.")
             continue
 
         # 4. Flag consolidation
@@ -176,17 +178,20 @@ def detect_pole_and_flag(
         # Retracement <= 50%
         retrace = (pole_top_high - min_flag_low) / pole_height if pole_height > 0 else 1.0
         if retrace > FLAG_MAX_RETRACE:
-            diag_reasons.append(f"Flag retraced {retrace*100:.1f}% of pole (max 50%).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Flag retraced {retrace*100:.1f}% of pole (max 50%).")
             continue
 
         if any(c < pole_base_low for c in flag_closes):
-            diag_reasons.append("Close fell below pole base low.")
+            if collect_diagnostics:
+                diag_reasons.append("Close fell below pole base low.")
             continue
 
         # 5. Flag volume contraction
-        avg_flag_vol = float(np.mean(flag_vols))
+        avg_flag_vol = sum(flag_vols) / len(flag_vols)
         if avg_flag_vol >= (FLAG_VOL_CONTRACTION_MAX * avg_pole_vol):
-            diag_reasons.append(f"Flag volume was {(avg_flag_vol/avg_pole_vol)*100:.1f}% of pole volume (must be < 80%).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Flag volume was {(avg_flag_vol/avg_pole_vol)*100:.1f}% of pole volume (must be < 80%).")
             continue
 
         # 6. Channel lines
@@ -197,7 +202,7 @@ def detect_pole_and_flag(
         if len(sl_flag) < 2:
             sl_flag = [(0, flag_lows[0]), (flag_len - 1, min(flag_lows[-3:]))]
 
-        avg_flag_price = float(np.mean(flag_closes))
+        avg_flag_price = sum(flag_closes) / flag_len
         upper_slope, upper_intercept, upper_r2, _ = fit_line_through_pivots(sh_flag)
         lower_slope, lower_intercept, lower_r2, _ = fit_line_through_pivots(sl_flag)
 
@@ -205,23 +210,30 @@ def detect_pole_and_flag(
         norm_lower_slope = lower_slope / avg_flag_price
 
         if not (FLAG_SLOPE_NORM_MIN <= norm_upper_slope <= FLAG_SLOPE_NORM_MAX):
-            diag_reasons.append(f"Upper slope {norm_upper_slope*100:+.3f}% outside -0.4% to +0.1%.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Upper slope {norm_upper_slope*100:+.3f}% outside -0.4% to +0.1%.")
             continue
         if not (FLAG_SLOPE_NORM_MIN <= norm_lower_slope <= FLAG_SLOPE_NORM_MAX):
-            diag_reasons.append(f"Lower slope {norm_lower_slope*100:+.3f}% outside -0.4% to +0.1%.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Lower slope {norm_lower_slope*100:+.3f}% outside -0.4% to +0.1%.")
             continue
 
         if upper_r2 < FLAG_MIN_R2 and lower_r2 < FLAG_MIN_R2:
-            diag_reasons.append(f"Flag line fit R² below {FLAG_MIN_R2}.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Flag line fit R² below {FLAG_MIN_R2}.")
             continue
 
         if abs(norm_upper_slope - norm_lower_slope) > FLAG_MAX_SLOPE_DIFF_NORM:
-            diag_reasons.append(f"Flag slopes diverge by {abs(norm_upper_slope-norm_lower_slope)*100:.3f}% > 0.15%.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Flag slopes diverge by {abs(norm_upper_slope-norm_lower_slope)*100:.3f}% > 0.15%.")
             continue
 
         # 7. Status & Breakout
         cur_vol = volumes[last_idx]
-        v_20 = float(np.mean(volumes[last_idx - 20 : last_idx])) if last_idx >= 20 else avg_pre_vol
+        if last_idx >= 20:
+            v_20 = sum(volumes[last_idx - 20 : last_idx]) / 20.0
+        else:
+            v_20 = avg_pre_vol
         flag_last_x = flag_len - 1
         upper_line_now = upper_slope * flag_last_x + upper_intercept
         lower_line_now = lower_slope * flag_last_x + lower_intercept
@@ -233,12 +245,13 @@ def detect_pole_and_flag(
         breakout_date = None
 
         # Confirmed Breakout in last 2 bars
-        for b_offset in [1, 2]:
+        b_start_v = max(0, last_idx - 20)
+        b_v20 = sum(volumes[b_start_v:last_idx]) / max(1, last_idx - b_start_v)
+        for b_offset in (1, 2):
             b_idx = flag_len - b_offset
             b_close = flag_closes[b_idx]
             b_vol = flag_vols[b_idx]
             b_upper = upper_slope * b_idx + upper_intercept
-            b_v20 = float(np.mean(volumes[max(0, last_idx - 20) : last_idx]))
 
             if b_close > (b_upper * (1.0 + FLAG_BREAKOUT_PRICE_BUFFER)):
                 if b_vol >= (FLAG_BREAKOUT_VOL_MULT * b_v20):
@@ -279,8 +292,9 @@ def detect_pole_and_flag(
                 stop_loss = round(min_flag_low - (0.5 * cur_atr), 2)
 
         if not status:
-            dist_pct = ((upper_line_now - cmp_price) / upper_line_now) * 100
-            diag_reasons.append(f"Price is {dist_pct:.1f}% below upper flag line (must be within 2% or breakout).")
+            if collect_diagnostics:
+                dist_pct = ((upper_line_now - cmp_price) / upper_line_now) * 100
+                diag_reasons.append(f"Price is {dist_pct:.1f}% below upper flag line (must be within 2% or breakout).")
             continue
 
         target = round(entry_price + pole_height, 2)
@@ -290,7 +304,8 @@ def detect_pole_and_flag(
 
         rr = round((target - entry_price) / risk, 2)
         if rr < FLAG_MIN_RR:
-            diag_reasons.append(f"R:R 1:{rr:.2f} below 1:{FLAG_MIN_RR}.")
+            if collect_diagnostics:
+                diag_reasons.append(f"R:R 1:{rr:.2f} below 1:{FLAG_MIN_RR}.")
             continue
 
         conf = 75

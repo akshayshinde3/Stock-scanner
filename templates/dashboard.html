@@ -3,68 +3,315 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Indian Stock Screener — Swing Breakouts & 44 MA</title>
-  
-  <!-- Tailwind CSS via CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Google Fonts: Inter & JetBrains Mono -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <title>Indian Stock Screener — Swing Breakouts &amp; 44 MA</title>
 
   <!-- Lightweight Charts (TradingView) -->
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
   <style>
-    html {
-      scroll-behavior: smooth;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; border-width: 0; border-style: solid; border-color: #1f2937; }
+    button, input, select { font: inherit; color: inherit; background: transparent; }
+    a { color: inherit; text-decoration: none; }
+    table { border-collapse: collapse; }
+    ul { list-style-position: outside; }
+
     body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
       background-color: #0b0f19;
       color: #e5e7eb;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       -webkit-font-smoothing: antialiased;
       overflow-y: scroll;
     }
-    table {
-      border-collapse: collapse;
-      contain: paint;
+    ::selection { background-color: #2563eb; color: #fff; }
+
+    .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+    .sparkline-svg { overflow: visible; display: inline-block; vertical-align: middle; }
+    .sparkline-path { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* Zero-jank plain row hover (no per-row GPU layer thrashing) */
+    #tableBody tr:hover, #watchTableBody tr:hover { background-color: rgba(31, 41, 55, 0.52); }
+
+    /* Utility CSS (pre-compiled statically — zero runtime Tailwind JS overhead) */
+    .hidden { display: none !important; }
+    .flex { display: flex; }
+    .inline-flex { display: inline-flex; }
+    .inline-block { display: inline-block; }
+    .grid { display: grid; }
+    .flex-col { flex-direction: column; }
+    .flex-wrap { flex-wrap: wrap; }
+    .flex-1 { flex: 1 1 0%; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .justify-center { justify-content: center; }
+    .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .sticky { position: sticky; }
+    .fixed { position: fixed; }
+    .relative { position: relative; }
+    .top-0 { top: 0; }
+    .inset-0 { inset: 0; }
+    .z-30 { z-index: 30; }
+    .z-50 { z-index: 50; }
+
+    .w-full { width: 100%; }
+    .w-10 { width: 2.5rem; }
+    .h-10 { height: 2.5rem; }
+    .w-3\.5 { width: 0.875rem; }
+    .w-2 { width: 0.5rem; }
+    .h-2 { height: 0.5rem; }
+    .h-1 { height: 0.25rem; }
+    .h-0\.5 { height: 0.125rem; }
+    .h-\[450px\] { height: 450px; }
+    .max-w-7xl { max-width: 80rem; }
+    .max-w-5xl { max-width: 64rem; }
+    .max-w-xl { max-width: 36rem; }
+    .max-w-\[130px\] { max-width: 130px; }
+    .max-w-\[200px\] { max-width: 200px; }
+    .max-h-\[95vh\] { max-height: 95vh; }
+    .max-h-72 { max-height: 18rem; }
+
+    .mx-auto { margin-left: auto; margin-right: auto; }
+    .mt-auto { margin-top: auto; }
+    .mt-0\.5 { margin-top: 0.125rem; }
+    .mt-1 { margin-top: 0.25rem; }
+    .mt-2 { margin-top: 0.5rem; }
+    .mt-3 { margin-top: 0.75rem; }
+    .ml-2 { margin-left: 0.5rem; }
+    .pb-3 { padding-bottom: 0.75rem; }
+    .pl-5 { padding-left: 1.25rem; }
+    .p-0\.5 { padding: 0.125rem; }
+    .p-1 { padding: 0.25rem; }
+    .p-2 { padding: 0.5rem; }
+    .p-2\.5 { padding: 0.625rem; }
+    .p-3 { padding: 0.75rem; }
+    .p-4 { padding: 1rem; }
+    .p-5 { padding: 1.25rem; }
+    .px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
+    .px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
+    .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+    .px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
+    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
+    .py-0\.2 { padding-top: 1px; padding-bottom: 1px; }
+    .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
+    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .py-3\.5 { padding-top: 0.875rem; padding-bottom: 0.875rem; }
+    .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
+    .py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
+    .py-12 { padding-top: 3rem; padding-bottom: 3rem; }
+
+    .gap-1 { gap: 0.25rem; }
+    .gap-1\.5 { gap: 0.375rem; }
+    .gap-2 { gap: 0.5rem; }
+    .gap-2\.5 { gap: 0.625rem; }
+    .gap-3 { gap: 0.75rem; }
+    .gap-4 { gap: 1rem; }
+    .space-x-1\.5 > :not([hidden]) ~ :not([hidden]) { margin-left: 0.375rem; }
+    .space-x-3 > :not([hidden]) ~ :not([hidden]) { margin-left: 0.75rem; }
+    .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem; }
+    .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
+    .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem; }
+    .divide-y > :not([hidden]) ~ :not([hidden]) { border-top-width: 1px; }
+    .divide-gray-800\/60 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(31, 41, 55, 0.6); }
+
+    .overflow-hidden { overflow: hidden; }
+    .overflow-x-auto { overflow-x: auto; }
+    .overflow-y-auto { overflow-y: auto; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .select-none { user-select: none; }
+    .cursor-pointer { cursor: pointer; }
+    .pointer-events-none { pointer-events: none; }
+    .list-disc { list-style-type: disc; }
+
+    .font-sans { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .text-left { text-align: left; }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-\[9px\] { font-size: 9px; line-height: 1.2; }
+    .text-\[10px\] { font-size: 10px; line-height: 1.3; }
+    .text-\[11px\] { font-size: 11px; line-height: 1.35; }
+    .text-xs { font-size: 0.75rem; line-height: 1rem; }
+    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+    .text-base { font-size: 1rem; line-height: 1.5rem; }
+    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+    .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+    .text-2xl { font-size: 1.5rem; line-height: 2rem; }
+    .text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
+    .font-medium { font-weight: 500; }
+    .font-semibold { font-weight: 600; }
+    .font-bold { font-weight: 700; }
+    .uppercase { text-transform: uppercase; }
+    .tracking-wider { letter-spacing: 0.05em; }
+    .tracking-tight { letter-spacing: -0.025em; }
+    .leading-none { line-height: 1; }
+
+    .border { border-width: 1px; }
+    .border-b { border-bottom-width: 1px; }
+    .border-t { border-top-width: 1px; }
+    .border-dashed { border-style: dashed; }
+    .rounded { border-radius: 0.25rem; }
+    .rounded-md { border-radius: 0.375rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-xl { border-radius: 0.75rem; }
+    .rounded-2xl { border-radius: 1rem; }
+    .rounded-full { border-radius: 9999px; }
+
+    .bg-transparent { background-color: transparent; }
+    .bg-\[\#0b0f19\] { background-color: #0b0f19; }
+    .bg-\[\#0f172a\] { background-color: #0f172a; }
+    .bg-\[\#101726\] { background-color: #101726; }
+    .bg-\[\#111827\]\/80 { background-color: rgba(17, 24, 39, 0.8); }
+    .bg-black\/85 { background-color: rgba(0, 0, 0, 0.85); }
+    .bg-gray-950 { background-color: #030712; }
+    .bg-gray-950\/60 { background-color: rgba(3, 7, 18, 0.6); }
+    .bg-gray-950\/70 { background-color: rgba(3, 7, 18, 0.7); }
+    .bg-gray-950\/80 { background-color: rgba(3, 7, 18, 0.8); }
+    .bg-gray-900 { background-color: #111827; }
+    .bg-gray-900\/40 { background-color: rgba(17, 24, 39, 0.4); }
+    .bg-gray-900\/60 { background-color: rgba(17, 24, 39, 0.6); }
+    .bg-gray-900\/70 { background-color: rgba(17, 24, 39, 0.7); }
+    .bg-gray-900\/80 { background-color: rgba(17, 24, 39, 0.8); }
+    .bg-gray-800 { background-color: #1f2937; }
+    .hover\:bg-gray-800:hover { background-color: #1f2937; }
+    .hover\:bg-gray-700:hover { background-color: #374151; }
+
+    .bg-blue-950\/50 { background-color: rgba(23, 37, 84, 0.5); }
+    .bg-blue-950\/60 { background-color: rgba(23, 37, 84, 0.6); }
+    .bg-blue-950\/70 { background-color: rgba(23, 37, 84, 0.7); }
+    .bg-blue-900\/40 { background-color: rgba(30, 58, 138, 0.4); }
+    .bg-blue-900\/60 { background-color: rgba(30, 58, 138, 0.6); }
+    .bg-blue-600 { background-color: #2563eb; }
+    .hover\:bg-blue-500:hover { background-color: #3b82f6; }
+    .bg-blue-600\/20 { background-color: rgba(37, 99, 235, 0.2); }
+    .hover\:bg-blue-600\/40:hover { background-color: rgba(37, 99, 235, 0.4); }
+    .bg-blue-500\/10 { background-color: rgba(59, 130, 246, 0.1); }
+
+    .bg-emerald-950 { background-color: #022c22; }
+    .bg-emerald-950\/50 { background-color: rgba(2, 44, 34, 0.5); }
+    .bg-emerald-950\/60 { background-color: rgba(2, 44, 34, 0.6); }
+    .bg-emerald-900\/60 { background-color: rgba(6, 78, 59, 0.6); }
+    .bg-emerald-600 { background-color: #059669; }
+    .bg-emerald-600\/20 { background-color: rgba(5, 150, 105, 0.2); }
+    .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.1); }
+    .bg-emerald-400 { background-color: #34d399; }
+
+    .bg-amber-950 { background-color: #451a03; }
+    .bg-amber-950\/50 { background-color: rgba(69, 26, 3, 0.5); }
+    .bg-amber-950\/60 { background-color: rgba(69, 26, 3, 0.6); }
+    .bg-amber-950\/70 { background-color: rgba(69, 26, 3, 0.7); }
+    .hover\:bg-amber-900:hover { background-color: #78350f; }
+    .bg-amber-900\/50 { background-color: rgba(120, 53, 15, 0.5); }
+    .bg-amber-600\/20 { background-color: rgba(217, 119, 6, 0.2); }
+
+    .bg-indigo-950 { background-color: #1e1b4b; }
+    .bg-indigo-950\/70 { background-color: rgba(30, 27, 75, 0.7); }
+    .hover\:bg-indigo-900:hover { background-color: #312e81; }
+    .bg-indigo-900\/70 { background-color: rgba(49, 46, 129, 0.7); }
+    .bg-purple-950 { background-color: #3b0764; }
+    .bg-purple-950\/60 { background-color: rgba(59, 7, 100, 0.6); }
+    .hover\:bg-rose-950\/60:hover { background-color: rgba(76, 5, 25, 0.6); }
+    .bg-red-500 { background-color: #ef4444; }
+    .bg-cyan-400 { background-color: #22d3ee; }
+    .bg-yellow-500\/20 { background-color: rgba(234, 179, 8, 0.2); }
+    .bg-gradient-to-r { background-image: linear-gradient(to right, #3b82f6, #818cf8, #34d399); }
+
+    .text-white { color: #ffffff; }
+    .hover\:text-white:hover { color: #ffffff; }
+    .text-gray-100 { color: #f3f4f6; }
+    .text-gray-200 { color: #e5e7eb; }
+    .text-gray-300 { color: #d1d5db; }
+    .text-gray-400 { color: #9ca3af; }
+    .text-gray-500 { color: #6b7280; }
+    .text-gray-600 { color: #4b5563; }
+    .placeholder-gray-500::placeholder { color: #6b7280; }
+    .text-blue-200 { color: #bfdbfe; }
+    .text-blue-300 { color: #93c5fd; }
+    .text-blue-400 { color: #60a5fa; }
+    .hover\:text-blue-400:hover { color: #60a5fa; }
+    .text-emerald-300 { color: #6ee7b7; }
+    .text-emerald-400 { color: #34d399; }
+    .text-amber-300 { color: #fcd34d; }
+    .text-amber-400 { color: #fbbf24; }
+    .text-cyan-400 { color: #22d3ee; }
+    .text-rose-300 { color: #fda4af; }
+    .text-rose-400 { color: #fb7185; }
+    .hover\:text-rose-300:hover { color: #fda4af; }
+    .text-red-400 { color: #f87171; }
+    .text-yellow-300 { color: #fde047; }
+    .text-yellow-400 { color: #facc15; }
+    .text-indigo-300 { color: #a5b4fc; }
+    .text-purple-300 { color: #d8b4fe; }
+    .text-purple-400 { color: #c084fc; }
+    .hover\:underline:hover { text-decoration: underline; }
+
+    .border-gray-800 { border-color: #1f2937; }
+    .border-gray-800\/80 { border-color: rgba(31, 41, 55, 0.8); }
+    .border-gray-700 { border-color: #374151; }
+    .border-gray-700\/70 { border-color: rgba(55, 65, 81, 0.7); }
+    .hover\:border-gray-700:hover { border-color: #374151; }
+    .border-blue-500\/30 { border-color: rgba(59, 130, 246, 0.3); }
+    .border-blue-500\/40 { border-color: rgba(59, 130, 246, 0.4); }
+    .border-blue-500\/50 { border-color: rgba(59, 130, 246, 0.5); }
+    .border-blue-500\/60 { border-color: rgba(59, 130, 246, 0.6); }
+    .focus\:border-blue-500:focus { border-color: #3b82f6; }
+    .focus\:outline-none:focus { outline: none; }
+    .border-emerald-500\/30 { border-color: rgba(16, 185, 129, 0.3); }
+    .border-emerald-500\/40 { border-color: rgba(16, 185, 129, 0.4); }
+    .border-emerald-500\/50 { border-color: rgba(16, 185, 129, 0.5); }
+    .border-amber-500\/40 { border-color: rgba(245, 158, 11, 0.4); }
+    .border-amber-400 { border-color: #fbbf24; }
+    .border-indigo-500\/40 { border-color: rgba(99, 102, 241, 0.4); }
+    .border-purple-500\/40 { border-color: rgba(168, 85, 247, 0.4); }
+    .hover\:border-rose-500\/40:hover { border-color: rgba(244, 63, 94, 0.4); }
+    .border-yellow-500\/40 { border-color: rgba(234, 179, 8, 0.4); }
+
+    .ring-1 { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3); }
+    .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.25); }
+    .shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.35); }
+    .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.45); }
+    .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.65); }
+    .shadow-inner { box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.25); }
+
+    .opacity-0 { opacity: 0; }
+    .opacity-50 { opacity: 0.5; }
+    .opacity-100 { opacity: 1; }
+    .transition-opacity { transition: opacity 0.2s ease-in-out; }
+    input[type="checkbox"] { accent-color: #2563eb; cursor: pointer; }
+    #scanProgressBar { transition: opacity 0.2s ease-in-out; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    .animate-pulse { animation: pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+    @media (min-width: 640px) {
+      .sm\:flex { display: flex; }
+      .sm\:inline-block { display: inline-block; }
+      .sm\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .sm\:w-64 { width: 16rem; }
+      .sm\:px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+      .sm\:p-4 { padding: 1rem; }
+      .sm\:text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+      .sm\:text-base { font-size: 1rem; line-height: 1.5rem; }
+      .sm\:text-xl { font-size: 1.25rem; line-height: 1.75rem; }
     }
-    tbody tr {
-      transform: translateZ(0);
-      will-change: background-color;
-      transition: background-color 0.12s ease-out;
-    }
-    .custom-scrollbar::-webkit-scrollbar {
-      width: 5px;
-      height: 5px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-track {
-      background: #0f172a;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #334155;
-      border-radius: 3px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #475569;
-    }
-    .sparkline-svg {
-      overflow: visible;
-    }
-    .sparkline-path {
-      fill: none;
-      stroke-width: 1.8;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-    #scanProgressBar {
-      transition: opacity 0.25s ease-in-out;
+    @media (min-width: 768px) {
+      .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
   </style>
 </head>
-<body class="min-h-screen flex flex-col bg-[#0b0f19] text-gray-200 antialiased selection:bg-blue-600 selection:text-white">
+<body class="min-h-screen flex flex-col bg-[#0b0f19] text-gray-200">
 
   <!-- Header -->
   <header class="border-b border-gray-800 bg-[#0f172a] px-4 sm:px-6 py-3 sticky top-0 z-30 shadow-md">
@@ -84,7 +331,7 @@
             </span>
           </h1>
           <p class="text-xs text-gray-400">
-            Ascending Triangle • Symmetrical Triangle • Bull Pole & Flag • 44 MA (PMPatil Chartink)
+            Ascending Triangle • Symmetrical Triangle • Bull Pole &amp; Flag • 44 MA (PMPatil Chartink)
           </p>
         </div>
       </div>
@@ -102,19 +349,19 @@
           </select>
         </div>
 
-        <button id="btnOpenDebugger" class="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900 text-xs font-medium text-indigo-300 border border-indigo-500/40 transition cursor-pointer">
+        <button id="btnOpenDebugger" class="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900 text-xs font-medium text-indigo-300 border border-indigo-500/40 cursor-pointer">
           🔍 Why Rejected?
         </button>
 
-        <button id="btnExportCsv" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 transition cursor-pointer">
+        <button id="btnExportCsv" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 cursor-pointer">
           ⬇ Export CSV
         </button>
 
-        <button id="btnRefresh" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm transition cursor-pointer">
+        <button id="btnRefresh" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm cursor-pointer">
           ⟳ Refresh
         </button>
 
-        <a href="/logout" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-rose-950/60 text-xs font-medium text-gray-300 hover:text-rose-300 border border-gray-700 hover:border-rose-500/40 transition flex items-center gap-1.5 cursor-pointer">
+        <a href="/logout" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-rose-950/60 text-xs font-medium text-gray-300 hover:text-rose-300 border border-gray-700 hover:border-rose-500/40 flex items-center gap-1.5 cursor-pointer">
           <span>🔒</span>
           <span>Logout</span>
         </a>
@@ -127,7 +374,7 @@
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-3">
         <span class="flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span>4 Institutional Strategies</span>
         </span>
         <span>•</span>
@@ -142,18 +389,14 @@
   </div>
 
   <!-- Top Slim Progress Bar for non-blocking scans (prevents table collapsing) -->
-  <div id="scanProgressBar" class="h-0.5 bg-gradient-to-r from-blue-500 via-indigo-400 to-emerald-400 w-full opacity-0 pointer-events-none transition-opacity duration-300"></div>
+  <div id="scanProgressBar" class="h-0.5 bg-gradient-to-r w-full opacity-0 pointer-events-none transition-opacity duration-300"></div>
 
   <!-- Main Full-Width Layout -->
   <main class="max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 flex-1 flex flex-col gap-4">
-    
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <!-- 4 MAIN STRATEGY TABS                                                    -->
-    <!-- 1. Ascending Triangle | 2. Symmetrical Triangle | 3. Pole & Flag | 4. 44 MA -->
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- 4 MAIN STRATEGY TABS -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5" id="mainHeadingsContainer">
-      <!-- 1. Ascending Triangle -->
-      <button data-section="ascending" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-blue-950/60 border-blue-500/50 shadow-md">
+      <button data-section="ascending" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-blue-950/60 border-blue-500/50 shadow-md">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
             <span>📐 1. Ascending Triangle</span>
@@ -163,8 +406,7 @@
         <div class="text-[11px] text-gray-400 mt-1">Flat Resistance • 1:3 R:R</div>
       </button>
 
-      <!-- 2. Symmetrical Triangle -->
-      <button data-section="symmetrical" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+      <button data-section="symmetrical" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
             <span>📐 2. Symmetrical Triangle</span>
@@ -174,19 +416,17 @@
         <div class="text-[11px] text-gray-400 mt-1">Coil Vol Dry-up • 1:2.5 R:R</div>
       </button>
 
-      <!-- 3. Pole & Flag -->
-      <button data-section="pole_and_flag" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+      <button data-section="pole_and_flag" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>🚩 3. Pole & Flag</span>
+            <span>🚩 3. Pole &amp; Flag</span>
           </span>
           <span id="badge-main-flag" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
         </div>
         <div class="text-[11px] text-gray-400 mt-1">Momentum Flag • 1:2.0 R:R</div>
       </button>
 
-      <!-- 4. 44 MA Scanner -->
-      <button data-section="ma44" class="main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
+      <button data-section="ma44" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
         <div class="flex items-center justify-between">
           <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
             <span>📈 4. 44 MA Rising</span>
@@ -197,13 +437,9 @@
       </button>
     </div>
 
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
-    <!-- CHILD NAVIGATION BAR (Timeframe + Signals vs Watchlist)                 -->
-    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- CHILD NAVIGATION BAR -->
     <div id="childNavigationBar" class="flex flex-wrap items-center justify-between gap-3 bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
-      <div class="flex flex-wrap items-center gap-2" id="childTabsContainer">
-        <!-- Injected dynamically: Timeframe pills and Signal vs Watchlist toggles -->
-      </div>
+      <div class="flex flex-wrap items-center gap-2" id="childTabsContainer"></div>
 
       <!-- Live Search Box -->
       <div class="relative w-full sm:w-64">
@@ -211,21 +447,17 @@
           id="searchBox"
           type="text"
           placeholder="Search symbol or company..."
-          class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+          class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
         />
       </div>
     </div>
 
     <!-- Strategy Summary Metrics Cards -->
-    <div id="statsCardsContainer" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      <!-- Injected via JavaScript -->
-    </div>
+    <div id="statsCardsContainer" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
 
     <!-- Strategy Info Banner -->
     <div id="strategyBanner" class="flex items-center justify-between text-xs text-gray-400 bg-gray-900/60 p-2.5 rounded-lg border border-gray-800">
-      <span id="strategyDescription" class="font-medium text-gray-300">
-        Strategy Description
-      </span>
+      <span id="strategyDescription" class="font-medium text-gray-300">Strategy Description</span>
       <span class="font-mono text-gray-400">
         Showing <b id="matchCountText" class="text-white">0</b> setups
       </span>
@@ -249,12 +481,12 @@
           </span>
           <span id="watchlistCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-amber-950 text-amber-300 border border-amber-500/40">0</span>
         </div>
-        <button id="btnToggleWatchlist" class="text-xs text-gray-400 hover:text-white flex items-center gap-1">
-          <span id="watchlistToggleIcon">▲ Forming Watchlist (Direct View)</span>
+        <button id="btnToggleWatchlist" onclick="toggleWatchlistSection()" class="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer">
+          <span id="watchlistToggleIcon">▲ Collapse Watchlist</span>
         </button>
       </div>
 
-      <div id="watchlistContent" class="mt-3 overflow-x-auto rounded-lg border border-gray-800/80 bg-gray-950/60">
+      <div id="watchlistContent" class="mt-3 overflow-x-auto rounded-lg border border-gray-800/80 bg-gray-950/60 custom-scrollbar">
         <table class="w-full text-left text-xs border-collapse">
           <thead id="watchTableHead"></thead>
           <tbody id="watchTableBody" class="divide-y divide-gray-800/60 font-mono"></tbody>
@@ -265,9 +497,9 @@
   </main>
 
   <!-- Interactive Lightweight Chart Modal -->
-  <div id="chartModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-sm p-3 sm:p-4">
+  <div id="chartModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 p-3 sm:p-4">
     <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
-      
+
       <!-- Modal Header -->
       <div class="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between bg-gray-950">
         <div class="flex items-center flex-wrap gap-3">
@@ -280,12 +512,12 @@
         </div>
 
         <div class="flex items-center gap-3">
-          <button id="btnInspectRejection" class="px-2.5 py-1 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/40 text-xs font-semibold hover:bg-indigo-900 transition">
+          <button id="btnInspectRejection" class="px-2.5 py-1 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/40 text-xs font-semibold hover:bg-indigo-900 cursor-pointer">
             Diagnostics 🔍
           </button>
           <div class="flex rounded-lg bg-gray-800 p-0.5 border border-gray-700 text-xs font-medium">
-            <button id="btnModalTfDaily" class="px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition">Daily</button>
-            <button id="btnModalTfWeekly" class="px-3 py-1 rounded-md text-gray-400 hover:text-white transition">Weekly</button>
+            <button id="btnModalTfDaily" class="px-3 py-1 rounded-md bg-blue-600 text-white font-bold cursor-pointer">Daily</button>
+            <button id="btnModalTfWeekly" class="px-3 py-1 rounded-md text-gray-400 hover:text-white cursor-pointer">Weekly</button>
           </div>
           <button id="btnCloseModal" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none cursor-pointer">
             ✕
@@ -305,7 +537,7 @@
           <span>R:R: <b id="planRR" class="text-yellow-400">—</b></span>
         </div>
         <div id="planNotes" class="text-gray-400 text-[11px]">
-          Fitted lines & confirmed touch pivots shown
+          Fitted lines &amp; confirmed touch pivots shown
         </div>
       </div>
 
@@ -326,7 +558,7 @@
             <span class="font-semibold text-amber-300">44 MA High (Dip Zone)</span>
           </span>
           <span class="flex items-center gap-1.5">
-            <span class="w-3 h-0.5 bg-cyan-400 inline-block"></span>
+            <span class="w-3.5 h-0.5 bg-cyan-400 inline-block"></span>
             <span>Pattern Trendlines</span>
           </span>
           <span class="flex items-center gap-1.5">
@@ -344,14 +576,14 @@
   </div>
 
   <!-- "Why Rejected" Debug Modal -->
-  <div id="debugModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+  <div id="debugModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 p-4">
     <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl p-5">
       <div class="flex items-center justify-between pb-3 border-b border-gray-800">
         <div class="flex items-center gap-2">
           <span class="text-lg">🔍</span>
           <h2 class="text-sm sm:text-base font-bold text-white">Rule Filter Diagnostics</h2>
         </div>
-        <button id="btnCloseDebugModal" class="text-gray-400 hover:text-white text-lg">✕</button>
+        <button id="btnCloseDebugModal" class="text-gray-400 hover:text-white text-lg cursor-pointer">✕</button>
       </div>
 
       <div class="py-4 space-y-3 text-xs">
@@ -360,20 +592,20 @@
             id="debugSymbolInput"
             type="text"
             placeholder="Enter symbol (e.g. RELIANCE, TCS)..."
-            class="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase font-mono"
+            class="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase font-mono focus:outline-none focus:border-blue-500"
           />
           <select id="debugStrategySelect" class="bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white">
             <option value="ascending">Ascending Triangle</option>
             <option value="symmetrical">Symmetrical Triangle</option>
-            <option value="pole_and_flag">Pole & Flag</option>
+            <option value="pole_and_flag">Pole &amp; Flag</option>
             <option value="44ma">44 MA Scanner</option>
           </select>
-          <button id="btnRunDebug" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 font-bold text-white rounded-lg">
+          <button id="btnRunDebug" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 font-bold text-white rounded-lg cursor-pointer">
             Diagnose
           </button>
         </div>
 
-        <div id="debugResultsContainer" class="p-3 bg-gray-950 rounded-xl border border-gray-800 max-h-72 overflow-y-auto font-mono text-gray-300">
+        <div id="debugResultsContainer" class="p-3 bg-gray-950 rounded-xl border border-gray-800 max-h-72 overflow-y-auto font-mono text-gray-300 custom-scrollbar">
           Enter a symbol and strategy to inspect rule compliance and rejection reasons.
         </div>
       </div>
@@ -384,18 +616,14 @@
   <footer class="border-t border-gray-800 bg-[#0b0f19] py-3 px-5 text-center text-xs text-gray-500 mt-auto">
     <p>For educational purposes only. Not investment advice.</p>
     <p class="mt-0.5 text-[11px] text-gray-600">
-      Built for Indian Technical Swing Traders • 44 MA & Geometric Trendline Engines
+      Built for Indian Technical Swing Traders • 44 MA &amp; Geometric Trendline Engines
     </p>
   </footer>
 
-  <!-- ═════════════════════════════════════════════════════════════════════════ -->
-  <!-- Application Logic                                                       -->
-  <!-- ═════════════════════════════════════════════════════════════════════════ -->
+  <!-- Application Logic -->
   <script>
     (function () {
-      // Main Sections: 'ascending', 'symmetrical', 'pole_and_flag', 'ma44'
       let activeSection = "ascending";
-      // Sub-timeframe: 'daily' or 'weekly' (or 'both' for ma44)
       let activeTimeframe = "daily";
       let showWatchlist = true;
 
@@ -404,12 +632,9 @@
       let chartCache = new Map();
       let currentStockForModal = null;
 
-      // 44 MA filter states (44 MA Rising Stocks -1% to +3% default)
       let ma44RisingFilter = true;
       let ma44GreenFilter = false;
-      let ma44StatusFilter = "";
 
-      // Store
       const store = {
         ascending: { daily: { confirmed: [], forming: [] }, weekly: { confirmed: [], forming: [] } },
         symmetrical: { daily: { confirmed: [], forming: [] }, weekly: { confirmed: [], forming: [] } },
@@ -425,38 +650,29 @@
 
       function generateSparklineSvg(points, isUp) {
         if (!points || points.length < 2) return `<span class="text-gray-600">—</span>`;
-        const min = Math.min(...points);
-        const max = Math.max(...points);
+        let min = points[0], max = points[0];
+        for (let i = 1; i < points.length; i++) {
+          if (points[i] < min) min = points[i];
+          if (points[i] > max) max = points[i];
+        }
         const range = max - min || 1;
         const width = 76;
         const height = 20;
         let pathData = "";
+        const denom = points.length - 1;
         for (let i = 0; i < points.length; i++) {
-          const x = (i / (points.length - 1)) * width;
+          const x = (i / denom) * width;
           const y = height - ((points[i] - min) / range) * (height - 4) - 2;
-          pathData += (i === 0 ? "M" : " L") + ` ${x.toFixed(1)} ${y.toFixed(1)}`;
+          pathData += (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
         }
-        return `
-          <svg width="${width}" height="${height}" class="sparkline-svg inline-block">
-            <path d="${pathData}" class="sparkline-path" stroke="${isUp ? '#10b981' : '#ef4444'}" />
-          </svg>
-        `;
-      }
-
-      function prefetchChart(sym, tf = "daily") {
-        if (!sym) return;
-        const key = `${sym.toUpperCase()}_${tf}`;
-        if (chartCache.has(key)) return;
-        fetch(`/api/chart/${sym}?tf=${tf}`)
-          .then(res => res.json())
-          .then(data => { if (data && data.candles) chartCache.set(key, data); })
-          .catch(() => {});
+        return `<svg width="76" height="20" class="sparkline-svg"><path d="${pathData}" class="sparkline-path" stroke="${isUp ? '#10b981' : '#ef4444'}"/></svg>`;
       }
 
       const loadedKeys = new Set();
-      let isFetching = false;
-
       let renderRafId = null;
+      let tableRenderToken = 0;
+      let preloadVersion = 0;
+
       function scheduleRenderView() {
         if (renderRafId) cancelAnimationFrame(renderRafId);
         renderRafId = requestAnimationFrame(() => {
@@ -465,7 +681,17 @@
         });
       }
 
-      // Smart on-demand data loader (loads active tab instantly in < 1 second)
+      function updateMainBadges() {
+        document.getElementById("badge-main-asc").textContent =
+          store.ascending.daily.confirmed.length + store.ascending.weekly.confirmed.length;
+        document.getElementById("badge-main-symm").textContent =
+          store.symmetrical.daily.confirmed.length + store.symmetrical.weekly.confirmed.length;
+        document.getElementById("badge-main-flag").textContent =
+          store.pole_and_flag.daily.confirmed.length + store.pole_and_flag.weekly.confirmed.length;
+        document.getElementById("badge-main-ma44").textContent =
+          store.ma44.both.length + store.ma44.daily.length + store.ma44.weekly.length;
+      }
+
       async function loadDataForCurrentView(forceRefresh = false) {
         const tf = (activeSection === "ma44") ? activeTimeframe : (activeTimeframe === "weekly" ? "weekly" : "daily");
         const cacheKey = `${activeSection}_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`;
@@ -489,18 +715,20 @@
           refreshBtn.textContent = "⟳ Refreshing...";
         }
 
-        // Show fast loading indicator without layout collapse
         const tbody = document.getElementById("tableBody");
         if (tbody && !loadedKeys.has(cacheKey)) {
           if (!tbody.firstElementChild || tbody.children.length <= 1) {
             tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-blue-400 font-sans"><span class="animate-pulse">⚡ Scanning Nifty universe at high speed...</span></td></tr>`;
           } else {
-            tbody.style.opacity = "0.5";
+            tbody.style.opacity = "0.55";
           }
         }
 
         const refreshParam = forceRefresh ? "&refresh=1" : "";
-        if (forceRefresh) loadedKeys.clear();
+        if (forceRefresh) {
+          loadedKeys.clear();
+          chartCache.clear();
+        }
 
         try {
           if (activeSection === "ascending" || activeSection === "symmetrical") {
@@ -510,14 +738,17 @@
               store.ascending[tf].forming = res.ascending_pre || [];
               store.symmetrical[tf].confirmed = res.symmetrical_confirmed || [];
               store.symmetrical[tf].forming = res.symmetrical_pre || [];
-              if (res.last_updated) updateText.textContent = res.last_updated;
+              loadedKeys.add(`ascending_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
+              loadedKeys.add(`symmetrical_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
+              if (res.last_updated && updateText) updateText.textContent = res.last_updated;
             }
           } else if (activeSection === "pole_and_flag") {
             const res = await fetch(`/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=${tf}${refreshParam}`).then(r => r.json());
             if (res) {
               store.pole_and_flag[tf].confirmed = res.confirmed_breakouts || [];
               store.pole_and_flag[tf].forming = res.pre_breakouts || [];
-              if (res.last_updated) updateText.textContent = res.last_updated;
+              loadedKeys.add(cacheKey);
+              if (res.last_updated && updateText) updateText.textContent = res.last_updated;
             }
           } else if (activeSection === "ma44") {
             const res = await fetch(`/api/scanner/44ma?index=${currentIndex}&rising_only=${ma44RisingFilter ? '1' : '0'}&green_only=${ma44GreenFilter ? '1' : '0'}${refreshParam}`).then(r => r.json());
@@ -525,33 +756,23 @@
               store.ma44.both = res.results.both || [];
               store.ma44.daily = res.results.daily || [];
               store.ma44.weekly = res.results.weekly || [];
-              if (res.last_updated) updateText.textContent = res.last_updated;
+              loadedKeys.add(`ma44_daily_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
+              loadedKeys.add(`ma44_weekly_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
+              loadedKeys.add(`ma44_both_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
+              if (res.last_updated && updateText) updateText.textContent = res.last_updated;
             }
           }
 
-          loadedKeys.add(cacheKey);
-
-          // Update main badge counts
-          document.getElementById("badge-main-asc").textContent = 
-            (store.ascending.daily.confirmed.length + store.ascending.weekly.confirmed.length);
-          document.getElementById("badge-main-symm").textContent = 
-            (store.symmetrical.daily.confirmed.length + store.symmetrical.weekly.confirmed.length);
-          document.getElementById("badge-main-flag").textContent = 
-            (store.pole_and_flag.daily.confirmed.length + store.pole_and_flag.weekly.confirmed.length);
-          document.getElementById("badge-main-ma44").textContent = 
-            (store.ma44.both.length + store.ma44.daily.length + store.ma44.weekly.length);
-
+          updateMainBadges();
           scheduleRenderView();
         } catch (e) {
           console.error("Load error:", e);
           if (updateText) updateText.textContent = "Error";
         } finally {
-          const topBar = document.getElementById("scanProgressBar");
           if (topBar) {
             topBar.classList.remove("opacity-100");
             topBar.classList.add("opacity-0");
           }
-          const tbody = document.getElementById("tableBody");
           if (tbody) tbody.style.opacity = "1";
           if (refreshBtn) {
             refreshBtn.classList.remove("opacity-50", "pointer-events-none");
@@ -560,66 +781,72 @@
         }
       }
 
-      // Smart loader with background prefetching of all other tabs
       async function loadAllData(forceRefresh = false) {
+        const myPreloadVer = ++preloadVersion;
         await loadDataForCurrentView(forceRefresh);
-        // Pre-fetch remaining strategy tabs quietly so user tab switching is 100% INSTANT (< 1ms)
-        preloadRemainingTabs(forceRefresh);
+        // Gently preload remaining tabs sequentially in background without saturating Render 0.1 CPU
+        setTimeout(() => {
+          if (myPreloadVer === preloadVersion) {
+            preloadRemainingTabs(myPreloadVer);
+          }
+        }, 500);
       }
 
-      async function preloadRemainingTabs(forceRefresh = false) {
-        const refreshParam = forceRefresh ? "&refresh=1" : "";
-        const urls = [
-          { sec: "ascending", tf: "weekly", url: `/api/scanner/triangles?index=${currentIndex}&timeframe=weekly${refreshParam}` },
-          { sec: "pole_and_flag", tf: "daily", url: `/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=daily${refreshParam}` },
-          { sec: "pole_and_flag", tf: "weekly", url: `/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=weekly${refreshParam}` },
-          { sec: "ma44", tf: "daily", url: `/api/scanner/44ma?index=${currentIndex}&rising_only=${ma44RisingFilter ? '1' : '0'}&green_only=${ma44GreenFilter ? '1' : '0'}${refreshParam}` },
+      async function preloadRemainingTabs(ver) {
+        const suffix = `${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`;
+        const jobs = [
+          { key: `ma44_daily_${suffix}`, url: `/api/scanner/44ma?index=${currentIndex}&rising_only=${ma44RisingFilter ? '1' : '0'}&green_only=${ma44GreenFilter ? '1' : '0'}`, type: "ma44" },
+          { key: `pole_and_flag_daily_${suffix}`, url: `/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=daily`, type: "flag", tf: "daily" },
+          { key: `ascending_weekly_${suffix}`, url: `/api/scanner/triangles?index=${currentIndex}&timeframe=weekly`, type: "tri", tf: "weekly" },
+          { key: `pole_and_flag_weekly_${suffix}`, url: `/api/scanner/pole_and_flag?index=${currentIndex}&timeframe=weekly`, type: "flag", tf: "weekly" },
+          { key: `ascending_daily_${suffix}`, url: `/api/scanner/triangles?index=${currentIndex}&timeframe=daily`, type: "tri", tf: "daily" },
         ];
 
-        for (const item of urls) {
+        for (const job of jobs) {
+          if (ver !== preloadVersion) return;
+          if (loadedKeys.has(job.key)) continue;
           try {
-            const res = await fetch(item.url).then(r => r.json());
-            if (!res) continue;
-            if (item.url.includes("scanner/triangles")) {
-              store.ascending[item.tf].confirmed = res.ascending_confirmed || [];
-              store.ascending[item.tf].forming = res.ascending_pre || [];
-              store.symmetrical[item.tf].confirmed = res.symmetrical_confirmed || [];
-              store.symmetrical[item.tf].forming = res.symmetrical_pre || [];
-              loadedKeys.add(`ascending_${item.tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
-              loadedKeys.add(`symmetrical_${item.tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
-            } else if (item.url.includes("scanner/pole_and_flag")) {
-              store.pole_and_flag[item.tf].confirmed = res.confirmed_breakouts || [];
-              store.pole_and_flag[item.tf].forming = res.pre_breakouts || [];
-              loadedKeys.add(`pole_and_flag_${item.tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
-            } else if (item.url.includes("scanner/44ma")) {
+            const res = await fetch(job.url).then(r => r.json());
+            if (!res || ver !== preloadVersion) continue;
+            if (job.type === "tri") {
+              store.ascending[job.tf].confirmed = res.ascending_confirmed || [];
+              store.ascending[job.tf].forming = res.ascending_pre || [];
+              store.symmetrical[job.tf].confirmed = res.symmetrical_confirmed || [];
+              store.symmetrical[job.tf].forming = res.symmetrical_pre || [];
+              loadedKeys.add(`ascending_${job.tf}_${suffix}`);
+              loadedKeys.add(`symmetrical_${job.tf}_${suffix}`);
+            } else if (job.type === "flag") {
+              store.pole_and_flag[job.tf].confirmed = res.confirmed_breakouts || [];
+              store.pole_and_flag[job.tf].forming = res.pre_breakouts || [];
+              loadedKeys.add(job.key);
+            } else if (job.type === "ma44" && res.results) {
               store.ma44.both = res.results.both || [];
               store.ma44.daily = res.results.daily || [];
               store.ma44.weekly = res.results.weekly || [];
-              loadedKeys.add(`ma44_daily_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
-              loadedKeys.add(`ma44_weekly_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
-              loadedKeys.add(`ma44_both_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
+              loadedKeys.add(`ma44_daily_${suffix}`);
+              loadedKeys.add(`ma44_weekly_${suffix}`);
+              loadedKeys.add(`ma44_both_${suffix}`);
             }
-            // Update badges quietly
-            const bAsc = document.getElementById("badge-main-asc");
-            if (bAsc) bAsc.textContent = (store.ascending.daily.confirmed.length + store.ascending.weekly.confirmed.length);
-            const bSym = document.getElementById("badge-main-symm");
-            if (bSym) bSym.textContent = (store.symmetrical.daily.confirmed.length + store.symmetrical.weekly.confirmed.length);
-            const bFlag = document.getElementById("badge-main-flag");
-            if (bFlag) bFlag.textContent = (store.pole_and_flag.daily.confirmed.length + store.pole_and_flag.weekly.confirmed.length);
-            const bMa = document.getElementById("badge-main-ma44");
-            if (bMa) bMa.textContent = (store.ma44.both.length + store.ma44.daily.length + store.ma44.weekly.length);
+            updateMainBadges();
+            if ((activeSection === "ascending" || activeSection === "symmetrical") && job.type === "tri" && activeTimeframe === job.tf) {
+              scheduleRenderView();
+            } else if (activeSection === "pole_and_flag" && job.type === "flag" && activeTimeframe === job.tf) {
+              scheduleRenderView();
+            } else if (activeSection === "ma44" && job.type === "ma44") {
+              scheduleRenderView();
+            }
           } catch (e) {
-            // Ignore background prefetch errors
+            // Ignore quiet background prefetch failures
           }
         }
       }
 
       function filterAndSort(list) {
-        let items = [...list];
+        let items = list.slice();
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
-          items = items.filter(it => 
-            it.symbol.toLowerCase().includes(q) || 
+          items = items.filter(it =>
+            it.symbol.toLowerCase().includes(q) ||
             (it.company && it.company.toLowerCase().includes(q))
           );
         }
@@ -642,12 +869,13 @@
       function syncMainHeadingStyles() {
         document.querySelectorAll(".main-heading-btn").forEach(btn => {
           const sec = btn.dataset.section;
+          const titleSpan = btn.querySelector("span.text-xs, span.text-sm");
           if (sec === activeSection) {
-            btn.className = "main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-blue-950/60 border-blue-500/60 shadow-lg ring-1 ring-blue-500/30";
-            btn.querySelector("span.text-xs, span.text-sm").className = "text-xs sm:text-sm font-bold text-white flex items-center gap-1.5";
+            btn.className = "main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-blue-950/60 border-blue-500/60 shadow-lg ring-1";
+            if (titleSpan) titleSpan.className = "text-xs sm:text-sm font-bold text-white flex items-center gap-1.5";
           } else {
-            btn.className = "main-heading-btn p-3 rounded-xl border transition text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700";
-            btn.querySelector("span.text-xs, span.text-sm").className = "text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5";
+            btn.className = "main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700";
+            if (titleSpan) titleSpan.className = "text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5";
           }
         });
       }
@@ -658,59 +886,53 @@
         if (activeSection === "ma44") {
           container.innerHTML = `
             <div class="flex items-center gap-1.5 bg-gray-950 p-1 rounded-lg border border-gray-800">
-              <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'both' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('both')">
+              <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'both' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('both')">
                 Both Daily + Weekly (${store.ma44.both.length})
               </button>
-              <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
+              <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
                 Daily (${store.ma44.daily.length})
               </button>
-              <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
+              <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
                 Weekly (${store.ma44.weekly.length})
               </button>
             </div>
-
-            <!-- Strategy Pill & Filters -->
             <div class="flex items-center gap-2 ml-2">
               <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-950/70 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shadow-sm">
                 <span>⚡ -1.0% to +3.0% Band</span>
               </span>
               <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
-                <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
+                <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" class="rounded bg-gray-950 border-gray-700" />
                 <span>MA Rising Only</span>
               </label>
               <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
-                <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" class="rounded bg-gray-950 border-gray-700 text-blue-600" />
-                <span>Green Candle (Close>Open)</span>
+                <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" class="rounded bg-gray-950 border-gray-700" />
+                <span>Green Candle (Close&gt;Open)</span>
               </label>
             </div>
           `;
           return;
         }
 
-        // Pattern tabs (ascending, symmetrical, pole_and_flag)
         const secData = store[activeSection];
         const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
         const confirmedList = secData[tf].confirmed;
         const formingList = secData[tf].forming;
 
         container.innerHTML = `
-          <!-- Timeframe Switcher -->
           <div class="flex items-center gap-1 bg-gray-950 p-1 rounded-lg border border-gray-800">
-            <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
+            <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
               📅 Daily (${secData.daily.confirmed.length})
             </button>
-            <button class="px-3 py-1 rounded text-xs font-bold transition cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
+            <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
               📆 Weekly (${secData.weekly.confirmed.length})
             </button>
           </div>
-
           <div class="flex items-center gap-2 ml-2">
             <span class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 text-white flex items-center gap-1.5 shadow-sm">
-              <span>🚀 Confirmed Breakout & Retest</span>
+              <span>🚀 Confirmed Breakout &amp; Retest</span>
               <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-500/40">${confirmedList.length}</span>
             </span>
-
-            <button onclick="toggleWatchlistSection()" class="px-3 py-1 rounded-lg text-xs font-bold bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 transition flex items-center gap-1.5 cursor-pointer">
+            <button onclick="toggleWatchlistSection()" class="px-3 py-1 rounded-lg text-xs font-bold bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 cursor-pointer">
               <span>⏳ Forming Watchlist</span>
               <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-amber-950 text-amber-300">${formingList.length}</span>
             </button>
@@ -742,7 +964,29 @@
         }
       };
 
+      function injectRowsSmoothly(tbody, rowHtmlList, token) {
+        const FIRST_BATCH = 65;
+        if (rowHtmlList.length <= FIRST_BATCH) {
+          tbody.innerHTML = rowHtmlList.join("");
+          return;
+        }
+        tbody.innerHTML = rowHtmlList.slice(0, FIRST_BATCH).join("");
+        let idx = FIRST_BATCH;
+        function appendNextChunk() {
+          if (token !== tableRenderToken) return;
+          const end = Math.min(idx + 80, rowHtmlList.length);
+          const fragHtml = rowHtmlList.slice(idx, end).join("");
+          tbody.insertAdjacentHTML("beforeend", fragHtml);
+          idx = end;
+          if (idx < rowHtmlList.length) {
+            requestAnimationFrame(appendNextChunk);
+          }
+        }
+        requestAnimationFrame(appendNextChunk);
+      }
+
       function renderView() {
+        const myToken = ++tableRenderToken;
         syncMainHeadingStyles();
         renderChildBar();
 
@@ -751,9 +995,6 @@
         const countText = document.getElementById("matchCountText");
         const watchlistWrap = document.getElementById("watchlistContainer");
 
-        // ═════════════════════════════════════════════════════════════════════
-        // 44 MA SECTION
-        // ═════════════════════════════════════════════════════════════════════
         if (activeSection === "ma44") {
           watchlistWrap.classList.add("hidden");
           const tfKey = (activeTimeframe === "both" || activeTimeframe === "weekly") ? activeTimeframe : "daily";
@@ -761,16 +1002,20 @@
           const list = filterAndSort(rawList);
           countText.textContent = list.length;
 
-          const touchCount = list.filter(x => x.status && (x.status.includes("Touching") || x.status.includes("Direct"))).length;
-          const aboveCount = list.filter(x => x.status && x.status.includes("Above")).length;
-          const belowCount = list.filter(x => x.status && x.status.includes("Near Below")).length;
+          let touchCount = 0, aboveCount = 0, belowCount = 0;
+          for (let i = 0; i < list.length; i++) {
+            const st = list[i].status || "";
+            if (st.includes("Touching") || st.includes("Direct")) touchCount++;
+            else if (st.includes("Above")) aboveCount++;
+            else if (st.includes("Near Below")) belowCount++;
+          }
 
           statsContainer.innerHTML = `
             <div class="bg-blue-950/50 border border-blue-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
               <div>
                 <div class="text-[11px] text-blue-400 font-medium">Touching 44 MA</div>
                 <div class="text-2xl font-bold font-mono text-blue-300">${touchCount}</div>
-                <div class="text-[10px] text-gray-400">Low &le; MA44 &le; High</div>
+                <div class="text-[10px] text-gray-400">Low ≤ MA44 ≤ High</div>
               </div>
               <span class="text-3xl text-blue-400">📍</span>
             </div>
@@ -802,14 +1047,17 @@
 
           bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">44 MA Rising Scanner (${activeTimeframe.toUpperCase()}):</span> All stocks qualifying near rising 44 MA support strictly inside the <b class="text-white font-mono">-1.0% to +3.0%</b> distance band. First match wins: Touching (Blue), Above (0–3%) (Green), Near Below (−1–0%) (Orange).`;
 
-          render44MaTable(list);
+          render44MaTable(list, myToken);
           return;
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        // BREAKOUT PATTERN SECTIONS (Ascending, Symmetrical, Pole & Flag)
-        // ═════════════════════════════════════════════════════════════════════
         watchlistWrap.classList.remove("hidden");
+        const wlContent = document.getElementById("watchlistContent");
+        if (wlContent) {
+          if (showWatchlist) wlContent.classList.remove("hidden");
+          else wlContent.classList.add("hidden");
+        }
+
         const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
         const secData = store[activeSection];
         const confirmedRaw = secData[tf].confirmed || [];
@@ -836,7 +1084,7 @@
             <div>
               <div class="text-[11px] text-emerald-400 font-medium">${titleName} Confirmed</div>
               <div class="text-2xl font-bold font-mono text-emerald-300">${confirmedRaw.length}</div>
-              <div class="text-[10px] text-gray-400">${tf.toUpperCase()} Breakout & Retest</div>
+              <div class="text-[10px] text-gray-400">${tf.toUpperCase()} Breakout &amp; Retest</div>
             </div>
             <span class="text-3xl text-emerald-400">🚀</span>
           </div>
@@ -860,7 +1108,7 @@
             <div>
               <div class="text-[11px] text-yellow-400 font-medium">Swing Quality</div>
               <div class="text-xl font-bold font-mono text-yellow-400">High Conviction</div>
-              <div class="text-[10px] text-gray-400">Volume & Geometry Confirmed</div>
+              <div class="text-[10px] text-gray-400">Volume &amp; Geometry Confirmed</div>
             </div>
             <span class="text-2xl text-yellow-400">🏆</span>
           </div>
@@ -868,11 +1116,11 @@
 
         bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${titleName} (${tf.toUpperCase()}):</span> Showing institutional breakouts and retest setups meeting strict geometry, confirmed swing touches, volume surge, and minimum R:R rules.`;
 
-        renderPatternTable(confirmedList, "tableHead", "tableBody", false);
-        renderPatternTable(formingList, "watchTableHead", "watchTableBody", true);
+        renderPatternTable(confirmedList, "tableHead", "tableBody", false, myToken);
+        renderPatternTable(formingList, "watchTableHead", "watchTableBody", true, myToken);
       }
 
-      function renderPatternTable(list, headId, bodyId, isWatchlist) {
+      function renderPatternTable(list, headId, bodyId, isWatchlist, token) {
         const thead = document.getElementById(headId);
         const tbody = document.getElementById(bodyId);
 
@@ -899,7 +1147,8 @@
           return;
         }
 
-        tbody.innerHTML = list.map(item => {
+        const tfArg = activeTimeframe === "weekly" ? "weekly" : "daily";
+        const rows = list.map(item => {
           const isUp = (item.cmp >= (item.buy_price || 0));
           const isBestSwing = (item.confidence >= 80 && item.rr_ratio >= 3.0);
           const statusBadge = isWatchlist
@@ -907,7 +1156,7 @@
             : (item.status.includes('Retest') ? 'bg-purple-950/60 text-purple-300 border-purple-500/40' : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 font-bold');
 
           return `
-            <tr class="hover:bg-gray-800/50 cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe}')">
+            <tr class="cursor-pointer" onclick="openChartModal('${item.symbol}', '${tfArg}')">
               <td class="py-3 px-4 font-bold text-white hover:text-blue-400">
                 <div class="flex items-center gap-1.5">
                   <span>${item.symbol}</span>
@@ -916,9 +1165,7 @@
               </td>
               <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
               <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border bg-gray-800 text-gray-300 border-gray-700">
-                  ${item.pattern}
-                </span>
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border bg-gray-800 text-gray-300 border-gray-700">${item.pattern}</span>
               </td>
               <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
               <td class="py-3 px-3 text-right text-cyan-400 font-mono font-semibold">₹${fmt(item.buy_price)}</td>
@@ -926,30 +1173,25 @@
               <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
               <td class="py-3 px-3 text-center font-bold text-yellow-400 font-mono">${item.risk_reward}</td>
               <td class="py-3 px-3 text-center">
-                <span class="px-2 py-0.5 rounded text-[11px] font-mono ${item.confidence >= 80 ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-800 text-gray-300'}">
-                  ${item.confidence}%
-                </span>
+                <span class="px-2 py-0.5 rounded text-[11px] font-mono ${item.confidence >= 80 ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-800 text-gray-300'}">${item.confidence}%</span>
               </td>
               <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${statusBadge}">
-                  ${item.status}
-                </span>
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${statusBadge}">${item.status}</span>
               </td>
-              <td class="py-3 px-3 text-center font-mono text-gray-400 text-[11px]">
-                ${item.breakout_date || item.pattern_end_date || 'Recent'}
-              </td>
+              <td class="py-3 px-3 text-center font-mono text-gray-400 text-[11px]">${item.breakout_date || item.pattern_end_date || 'Recent'}</td>
               <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
               <td class="py-3 px-4 text-center font-sans">
-                <button class="px-2.5 py-1 rounded text-xs font-semibold border transition ${isWatchlist ? 'bg-amber-600/20 text-amber-300 border-amber-500/40' : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'}">
+                <button class="px-2.5 py-1 rounded text-xs font-semibold border ${isWatchlist ? 'bg-amber-600/20 text-amber-300 border-amber-500/40' : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'}">
                   <span>Draw Chart 📐</span>
                 </button>
               </td>
             </tr>
           `;
-        }).join("");
+        });
+        injectRowsSmoothly(tbody, rows, token);
       }
 
-      function render44MaTable(list) {
+      function render44MaTable(list, token) {
         const thead = document.getElementById("tableHead");
         const tbody = document.getElementById("tableBody");
 
@@ -976,7 +1218,8 @@
           return;
         }
 
-        tbody.innerHTML = list.map(item => {
+        const tfArg = activeTimeframe === "weekly" ? "weekly" : "daily";
+        const rows = list.map(item => {
           const isUp = (item.day_change_pct || 0) >= 0;
           let badgeClass = "bg-gray-800 text-gray-300 border-gray-700";
           if (item.status === "Touching" || (item.status && item.status.includes("Touching"))) badgeClass = "bg-blue-900/60 text-blue-300 border-blue-500/50 font-bold";
@@ -984,7 +1227,7 @@
           else if (item.status && item.status.includes("Near Below")) badgeClass = "bg-amber-900/50 text-amber-300 border-amber-500/40 font-semibold";
 
           return `
-            <tr class="hover:bg-gray-800/50 cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')">
+            <tr class="cursor-pointer" onclick="openChartModal('${item.symbol}', '${tfArg}')">
               <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
               <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
               <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
@@ -1001,9 +1244,7 @@
               <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
               <td class="py-3 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}">${isUp ? '+' : ''}${item.day_change_pct}%</td>
               <td class="py-3 px-3 text-center font-sans">
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.timeframe === 'Both' ? 'bg-purple-950 text-purple-300 border border-purple-500/40' : 'bg-gray-800 text-gray-300'}">
-                  ${item.timeframe}
-                </span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.timeframe === 'Both' ? 'bg-purple-950 text-purple-300 border border-purple-500/40' : 'bg-gray-800 text-gray-300'}">${item.timeframe}</span>
               </td>
               <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
               <td class="py-3 px-4 text-center font-sans">
@@ -1013,7 +1254,8 @@
               </td>
             </tr>
           `;
-        }).join("");
+        });
+        injectRowsSmoothly(tbody, rows, token);
       }
 
       window.changeSort = function (field) {
@@ -1025,12 +1267,11 @@
         scheduleRenderView();
       };
 
-      // Modal Chart
       window.openChartModal = async function(symbol, tf = null) {
         currentStockForModal = symbol;
         const reqTf = tf || (activeTimeframe === "weekly" ? "weekly" : "daily");
-        document.getElementById("btnModalTfDaily").className = reqTf === "daily" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition" : "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
-        document.getElementById("btnModalTfWeekly").className = reqTf === "weekly" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold transition" : "px-3 py-1 rounded-md text-gray-400 hover:text-white transition";
+        document.getElementById("btnModalTfDaily").className = reqTf === "daily" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold cursor-pointer" : "px-3 py-1 rounded-md text-gray-400 hover:text-white cursor-pointer";
+        document.getElementById("btnModalTfWeekly").className = reqTf === "weekly" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold cursor-pointer" : "px-3 py-1 rounded-md text-gray-400 hover:text-white cursor-pointer";
 
         const modal = document.getElementById("chartModal");
         modal.classList.remove("hidden");
@@ -1039,11 +1280,10 @@
         document.getElementById("modalSymbol").textContent = symbol;
         document.getElementById("modalTvLink").href = `https://in.tradingview.com/chart/?symbol=NSE:${symbol}`;
 
-        // Instant pre-population from memory store for 0ms lag
         const secData = store[activeSection];
         let found = null;
         if (secData && secData[reqTf]) {
-          found = (secData[reqTf].confirmed || []).find(x => x.symbol === symbol) 
+          found = (secData[reqTf].confirmed || []).find(x => x.symbol === symbol)
                || (secData[reqTf].forming || []).find(x => x.symbol === symbol);
         }
         if (!found && store.ma44) {
@@ -1067,13 +1307,36 @@
 
       async function renderChartCanvas(symbol, tf) {
         const container = document.getElementById("chartContainer");
-        container.innerHTML = "";
+        const modal = document.getElementById("chartModal");
+        const requestedSection = activeSection;
 
         if (chartInstance) {
           chartInstance.remove();
           chartInstance = null;
         }
 
+        const key = `${symbol.toUpperCase()}_${tf}_${requestedSection}`;
+        let data = chartCache.get(key);
+        if (!data) {
+          container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-gray-400 font-sans">Loading interactive chart...</div>`;
+          try {
+            const res = await fetch(`/api/chart/${symbol}?tf=${tf}&strategy=${requestedSection}`);
+            data = await res.json();
+            if (data && data.candles) chartCache.set(key, data);
+          } catch (e) {
+            container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-rose-400 font-sans">Failed to load chart.</div>`;
+            return;
+          }
+        }
+
+        // Guard if user switched stock or closed modal while fetching
+        if (currentStockForModal !== symbol || modal.classList.contains("hidden")) return;
+        if (!data || !data.candles || data.candles.length === 0) {
+          container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-gray-500 font-sans">No candle data available.</div>`;
+          return;
+        }
+
+        container.innerHTML = "";
         const chart = LightweightCharts.createChart(container, {
           width: container.clientWidth,
           height: 450,
@@ -1088,26 +1351,10 @@
           upColor: "#10b981", downColor: "#ef4444", borderVisible: false,
           wickUpColor: "#10b981", wickDownColor: "#ef4444"
         });
-
         const ma44Series = chart.addLineSeries({ color: "#ef4444", lineWidth: 2, title: "44 MA (Close)" });
         const ma44HighSeries = chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "44 MA Band (High)" });
         const upperLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Upper Trendline" });
         const lowerLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Lower Trendline" });
-
-        const key = `${symbol.toUpperCase()}_${tf}_${activeSection}`;
-        let data = chartCache.get(key);
-        if (!data) {
-          try {
-            const res = await fetch(`/api/chart/${symbol}?tf=${tf}&strategy=${activeSection}`);
-            data = await res.json();
-            chartCache.set(key, data);
-          } catch (e) {
-            console.error("Failed chart fetch:", e);
-            return;
-          }
-        }
-
-        if (!data || !data.candles || data.candles.length === 0) return;
 
         candleSeries.setData(data.candles);
         if (data.ma44_line && data.ma44_line.length > 0) ma44Series.setData(data.ma44_line);
@@ -1116,12 +1363,10 @@
         document.getElementById("modalCompany").textContent = data.company || "";
         document.getElementById("modalCmp").textContent = `₹${fmt(data.cmp)}`;
 
-        // Match pattern
         let pat = null;
-        if (activeSection === "ascending") pat = data.ascending_pattern;
-        else if (activeSection === "symmetrical") pat = data.symmetrical_pattern;
-        else if (activeSection === "pole_and_flag") pat = data.pole_and_flag_pattern;
-
+        if (requestedSection === "ascending") pat = data.ascending_pattern;
+        else if (requestedSection === "symmetrical") pat = data.symmetrical_pattern;
+        else if (requestedSection === "pole_and_flag") pat = data.pole_and_flag_pattern;
         if (!pat) pat = data.ascending_pattern || data.symmetrical_pattern || data.pole_and_flag_pattern;
 
         const statusLabel = pat ? `${pat.pattern} • ${pat.status}` : (data.status_44ma || "44 MA Active");
@@ -1143,11 +1388,9 @@
           document.getElementById("planRR").textContent = "—";
         }
 
-        // Draw trendlines
         if (pat && pat.upper_line_points && pat.upper_line_points.length > 0) upperLineSeries.setData(pat.upper_line_points);
         if (pat && pat.lower_line_points && pat.lower_line_points.length > 0) lowerLineSeries.setData(pat.lower_line_points);
 
-        // Draw only genuine confirmed touch pivots as markers
         const markers = [];
         if (pat && pat.upper_touches) {
           pat.upper_touches.forEach(tp => {
@@ -1179,7 +1422,6 @@
         }
       }
 
-      // Debug Modal Logic
       function openDebugger(sym = "") {
         document.getElementById("debugModal").classList.remove("hidden");
         document.getElementById("debugModal").classList.add("flex");
@@ -1236,7 +1478,6 @@
         }
       }
 
-      // Event listeners
       document.getElementById("mainHeadingsContainer").addEventListener("click", (e) => {
         const btn = e.target.closest(".main-heading-btn");
         if (!btn) return;
@@ -1292,14 +1533,18 @@
       });
       document.getElementById("btnRunDebug").addEventListener("click", runDiagnostics);
 
+      let resizeTimer = null;
       window.addEventListener("resize", () => {
-        if (chartInstance) {
-          const container = document.getElementById("chartContainer");
-          chartInstance.applyOptions({ width: container.clientWidth });
-        }
+        if (!chartInstance) return;
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (chartInstance) {
+            const container = document.getElementById("chartContainer");
+            chartInstance.applyOptions({ width: container.clientWidth });
+          }
+        }, 60);
       });
 
-      // Initial load
       loadAllData();
     })();
   </script>

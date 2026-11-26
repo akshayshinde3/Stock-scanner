@@ -27,13 +27,10 @@ import gzip
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import urllib.request
 import datetime as dt
 from typing import Dict, List, Optional, Tuple, Any
-import pandas as pd
 import requests
-import yfinance as yf
-from flask import Flask, jsonify, request, render_template, send_file, Response, session, redirect, url_for
+from flask import Flask, jsonify, request, render_template, Response, session, redirect, url_for
 
 import strategies
 from patterns.geometry import resample_to_weekly
@@ -42,7 +39,7 @@ from patterns.geometry import resample_to_weekly
 # Flask Application Setup & Security Configuration
 # ═══════════════════════════════════════════════════════════════════════════
 app = Flask(__name__, template_folder="templates")
-app.config["JSON_SORT_KEYS"] = False
+app.json.sort_keys = False
 app.secret_key = os.environ.get("APP_SECRET_KEY", "trading_scanner_super_secure_key_2026_x7k9")
 app.config["PERMANENT_SESSION_LIFETIME"] = dt.timedelta(days=30)
 
@@ -207,10 +204,12 @@ _weekly_cache: Dict[str, list] = {}
 _last_cache_update_time: Optional[dt.datetime] = None
 _cache_lock = threading.Lock()
 _batch_lock = threading.Lock()
+_bg_fetch_lock = threading.Lock()
+_bg_fetch_active = False
 _failed_symbols: set = set()
 
 _http_session = requests.Session()
-_adapter = requests.adapters.HTTPAdapter(pool_connections=35, pool_maxsize=35, max_retries=2)
+_adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=1)
 _http_session.mount("https://", _adapter)
 _http_session.mount("http://", _adapter)
 _http_session.headers.update({
@@ -255,19 +254,17 @@ def load_disk_cache():
 
 def _do_save_disk_cache():
     try:
-        data = {
-            "date": dt.date.today().isoformat(),
-            "daily": {},
-            "weekly": {}
-        }
         with _cache_lock:
-            data["daily"] = dict(_daily_cache)
-            data["weekly"] = dict(_weekly_cache)
+            data = {
+                "date": dt.date.today().isoformat(),
+                "daily": dict(_daily_cache),
+                "weekly": dict(_weekly_cache),
+            }
 
         target_path = CACHE_GZ_FILE if os.path.isdir(PERSISTENT_DIR) else FALLBACK_GZ_FILE
         tmp_path = target_path + ".tmp"
         try:
-            with gzip.open(tmp_path, "wt", encoding="utf-8") as f:
+            with gzip.open(tmp_path, "wt", compresslevel=1, encoding="utf-8") as f:
                 json.dump(data, f)
             if os.path.exists(target_path):
                 os.replace(tmp_path, target_path)
@@ -304,7 +301,7 @@ def is_after_4pm_ist() -> bool:
 def fetch_stock_candles_yf(symbol: str) -> tuple:
     """
     Fetches daily and weekly candles for an NSE stock via Yahoo Finance direct v8 API.
-    Uses range=5y so weekly aggregation has 200+ bars for full 44 MA warmup.
+    Uses range=2y for fast download and sub-second weekly resampling.
     """
     sym_upper = symbol.upper()
     mapped_sym = SYMBOL_MAP.get(sym_upper, sym_upper)
@@ -313,7 +310,7 @@ def fetch_stock_candles_yf(symbol: str) -> tuple:
     url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=2y&interval=1d"
 
     try:
-        resp = _http_session.get(url, timeout=7)
+        resp = _http_session.get(url, timeout=4)
         if resp.status_code == 200:
             data = resp.json()
             res_list = data.get("chart", {}).get("result")
@@ -351,11 +348,16 @@ def fetch_stock_candles_yf(symbol: str) -> tuple:
     return None, None
 
 
-def get_cached_candles(symbol: str, force_refresh: bool = False) -> tuple:
+def get_cached_candles(symbol: str, force_refresh: bool = False, fetch_if_missing: bool = True) -> tuple:
     sym = symbol.upper()
-    with _cache_lock:
-        if not force_refresh and sym in _daily_cache and sym in _weekly_cache:
-            return _daily_cache[sym], _weekly_cache[sym]
+    if not force_refresh:
+        d = _daily_cache.get(sym)
+        w = _weekly_cache.get(sym)
+        if d is not None and w is not None:
+            return d, w
+
+    if not fetch_if_missing:
+        return None, None
 
     if sym in _failed_symbols and not force_refresh:
         return None, None
@@ -370,11 +372,13 @@ def get_cached_candles(symbol: str, force_refresh: bool = False) -> tuple:
     return d_candles, w_candles
 
 
-def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 16) -> None:
+def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 8) -> None:
     """
     Ensures the given universe is cached.
-    Non-blocking for normal scans: immediately returns cached data while updating missing symbols in background.
+    Non-blocking for normal scans: spawns at most ONE background worker for missing symbols.
     """
+    global _bg_fetch_active
+
     if force_refresh:
         with _batch_lock:
             _failed_symbols.clear()
@@ -389,29 +393,41 @@ def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max
     if not symbols_to_fetch:
         return
 
-    # Non-blocking background fetch for normal scans so user never waits more than 1-2 seconds
+    # Non-blocking background fetch: at most one background batch at a time
     if not force_refresh:
+        with _bg_fetch_lock:
+            if _bg_fetch_active:
+                return
+            _bg_fetch_active = True
+
         def _bg_fetch_worker(to_fetch):
-            with _batch_lock:
-                def _fetch_one(s: str):
-                    d, w = fetch_stock_candles_yf(s)
-                    return s, d, w
-                new_c = 0
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    for fut in as_completed({executor.submit(_fetch_one, s): s for s in to_fetch}):
-                        try:
-                            s, d, w = fut.result()
-                            if d and w:
-                                with _cache_lock:
-                                    _daily_cache[s] = d
-                                    _weekly_cache[s] = w
-                                new_c += 1
-                            else:
-                                _failed_symbols.add(s)
-                        except Exception:
-                            pass
-                if new_c > 0:
-                    save_disk_cache()
+            global _bg_fetch_active
+            try:
+                with _batch_lock:
+                    def _fetch_one(s: str):
+                        d, w = fetch_stock_candles_yf(s)
+                        return s, d, w
+                    new_c = 0
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        for fut in as_completed({executor.submit(_fetch_one, s): s for s in to_fetch}):
+                            try:
+                                s, d, w = fut.result()
+                                if d and w:
+                                    with _cache_lock:
+                                        _daily_cache[s] = d
+                                        _weekly_cache[s] = w
+                                    new_c += 1
+                                else:
+                                    _failed_symbols.add(s)
+                            except Exception:
+                                pass
+                    if new_c > 0:
+                        clear_scan_caches()
+                        save_disk_cache()
+            finally:
+                with _bg_fetch_lock:
+                    _bg_fetch_active = False
+
         threading.Thread(target=_bg_fetch_worker, args=(symbols_to_fetch,), daemon=True).start()
         return
 
@@ -452,9 +468,6 @@ def background_cache_warmup():
     warm_all_scanners()
 
 
-threading.Thread(target=background_cache_warmup, daemon=True).start()
-
-
 def _background_scan_loop():
     while True:
         time.sleep(600)  # Refresh scan cache every 10 minutes in background
@@ -462,9 +475,6 @@ def _background_scan_loop():
             warm_all_scanners()
         except Exception:
             pass
-
-
-threading.Thread(target=_background_scan_loop, daemon=True).start()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -527,12 +537,23 @@ def api_universe():
     })
 
 
-# In-memory scanner results cache
+# In-memory scanner results cache + per-key compute locks (prevents duplicate concurrent scans)
 _SCAN_44MA_CACHE: Dict[str, dict] = {}
 _SCAN_TRIANGLES_CACHE: Dict[str, dict] = {}
 _SCAN_POLEFLAG_CACHE: Dict[str, dict] = {}
 _LAST_SCAN_TIME: Dict[str, float] = {}
 _CHART_CACHE: Dict[str, dict] = {}
+_compute_locks: Dict[str, threading.Lock] = {}
+_compute_locks_mutex = threading.Lock()
+
+
+def _get_compute_lock(key: str) -> threading.Lock:
+    with _compute_locks_mutex:
+        lk = _compute_locks.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _compute_locks[key] = lk
+        return lk
 
 
 def clear_scan_caches():
@@ -541,6 +562,41 @@ def clear_scan_caches():
     _SCAN_POLEFLAG_CACHE.clear()
     _LAST_SCAN_TIME.clear()
     _CHART_CACHE.clear()
+
+
+@app.after_request
+def compress_response(response: Response) -> Response:
+    if (
+        response.status_code < 200
+        or response.status_code >= 300
+        or response.direct_passthrough
+        or "Content-Encoding" in response.headers
+    ):
+        return response
+
+    accept_enc = request.headers.get("Accept-Encoding", "")
+    if "gzip" not in accept_enc.lower():
+        return response
+
+    ctype = response.content_type or ""
+    if "application/json" not in ctype and "text/html" not in ctype:
+        return response
+
+    data = response.get_data()
+    if len(data) < 1024:
+        return response
+
+    compressed = gzip.compress(data, compresslevel=4)
+    response.set_data(compressed)
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Length"] = str(len(compressed))
+    vary = response.headers.get("Vary")
+    if vary:
+        if "Accept-Encoding" not in vary:
+            response.headers["Vary"] = f"{vary}, Accept-Encoding"
+    else:
+        response.headers["Vary"] = "Accept-Encoding"
+    return response
 
 
 def run_scan_44ma(
@@ -559,32 +615,34 @@ def run_scan_44ma(
     if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 900):
         return _SCAN_44MA_CACHE[cache_key]
 
-    universe = get_universe(index_param)
-    ensure_universe_cached(universe, force_refresh=force_refresh)
+    with _get_compute_lock(f"44ma_{cache_key}"):
+        now_time = time.time()
+        if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 900):
+            return _SCAN_44MA_CACHE[cache_key]
 
-    both_results = []
-    daily_results = []
-    weekly_results = []
+        universe = get_universe(index_param)
+        ensure_universe_cached(universe, force_refresh=force_refresh)
 
-    def _eval_stock(sym):
-        d_candles, w_candles = get_cached_candles(sym)
-        if not d_candles:
-            return None
-        return strategies.evaluate_44ma_stock(
-            symbol=sym,
-            company_name=get_company_name(sym),
-            daily_candles=d_candles,
-            weekly_candles=w_candles,
-            min_price=min_price,
-            min_weekly_vol=min_weekly_vol,
-            rising_only=rising_only,
-            green_only=green_only,
-            strict_chartink=strict_chartink,
-        )
+        both_results = []
+        daily_results = []
+        weekly_results = []
 
-    # 4 workers optimal for 0.1 CPU to prevent CFS cgroup throttling on Render
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for stock_eval in executor.map(_eval_stock, universe):
+        # Pure in-memory tight loop (zero ThreadPool/GIL overhead, zero blocking network I/O)
+        for sym in universe:
+            d_candles, w_candles = get_cached_candles(sym, fetch_if_missing=False)
+            if not d_candles:
+                continue
+            stock_eval = strategies.evaluate_44ma_stock(
+                symbol=sym,
+                company_name=get_company_name(sym),
+                daily_candles=d_candles,
+                weekly_candles=w_candles,
+                min_price=min_price,
+                min_weekly_vol=min_weekly_vol,
+                rising_only=rising_only,
+                green_only=green_only,
+                strict_chartink=strict_chartink,
+            )
             if not stock_eval:
                 continue
 
@@ -601,34 +659,34 @@ def run_scan_44ma(
             elif tf == "Weekly":
                 weekly_results.append(stock_eval)
 
-    both_results.sort(key=lambda s: s["abs_distance"])
-    daily_results.sort(key=lambda s: s["abs_distance"])
-    weekly_results.sort(key=lambda s: s["abs_distance"])
+        both_results.sort(key=lambda s: s["abs_distance"])
+        daily_results.sort(key=lambda s: s["abs_distance"])
+        weekly_results.sort(key=lambda s: s["abs_distance"])
 
-    now_ist = get_current_ist_time()
-    payload = {
-        "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
-        "universe": index_param.upper(),
-        "strategy": "44 MA Rising Stocks (-1.0% to +3.0%)",
-        "dist_min": -1.0,
-        "dist_max": 3.0,
-        "total_scanned": len(universe),
-        "counts": {
-            "both": len(both_results),
-            "daily": len(daily_results),
-            "weekly": len(weekly_results),
-            "total_qualifying": len(both_results) + len(daily_results) + len(weekly_results),
-        },
-        "results": {
-            "both": both_results,
-            "daily": daily_results,
-            "weekly": weekly_results,
+        now_ist = get_current_ist_time()
+        payload = {
+            "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
+            "universe": index_param.upper(),
+            "strategy": "44 MA Rising Stocks (-1.0% to +3.0%)",
+            "dist_min": -1.0,
+            "dist_max": 3.0,
+            "total_scanned": len(universe),
+            "counts": {
+                "both": len(both_results),
+                "daily": len(daily_results),
+                "weekly": len(weekly_results),
+                "total_qualifying": len(both_results) + len(daily_results) + len(weekly_results),
+            },
+            "results": {
+                "both": both_results,
+                "daily": daily_results,
+                "weekly": weekly_results,
+            }
         }
-    }
 
-    _SCAN_44MA_CACHE[cache_key] = payload
-    _LAST_SCAN_TIME[f"44ma_{cache_key}"] = now_time
-    return payload
+        _SCAN_44MA_CACHE[cache_key] = payload
+        _LAST_SCAN_TIME[f"44ma_{cache_key}"] = time.time()
+        return payload
 
 
 def run_scan_triangles(
@@ -641,34 +699,37 @@ def run_scan_triangles(
     if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 900):
         return _SCAN_TRIANGLES_CACHE[cache_key]
 
-    universe = get_universe(index_param)
-    ensure_universe_cached(universe, force_refresh=force_refresh)
+    with _get_compute_lock(f"triangles_{cache_key}"):
+        now_time = time.time()
+        if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 900):
+            return _SCAN_TRIANGLES_CACHE[cache_key]
 
-    ascending_triangles = []
-    symmetrical_triangles = []
-    asc_confirmed = []
-    asc_pre = []
-    symm_confirmed = []
-    symm_pre = []
-    confirmed_breakouts = []
-    pre_breakouts = []
+        universe = get_universe(index_param)
+        ensure_universe_cached(universe, force_refresh=force_refresh)
 
-    def _eval_triangle(sym):
-        d_candles, w_candles = get_cached_candles(sym)
-        candles = w_candles if tf == "weekly" else d_candles
-        if not candles or len(candles) < 25:
-            return None, None
-        comp_name = get_company_name(sym)
-        asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
-        symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
-        return asc, symm
+        ascending_triangles = []
+        symmetrical_triangles = []
+        asc_confirmed = []
+        asc_pre = []
+        symm_confirmed = []
+        symm_pre = []
+        confirmed_breakouts = []
+        pre_breakouts = []
 
-    # 4 workers optimal for 0.1 CPU
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for asc, symm in executor.map(_eval_triangle, universe):
+        is_weekly = (tf == "weekly")
+        # Pure in-memory tight loop (zero ThreadPool/GIL overhead, zero blocking network I/O)
+        for sym in universe:
+            d_candles, w_candles = get_cached_candles(sym, fetch_if_missing=False)
+            candles = w_candles if is_weekly else d_candles
+            if not candles or len(candles) < 25:
+                continue
+            comp_name = get_company_name(sym)
+            asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
+            symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
+
             if asc:
                 ascending_triangles.append(asc)
-                if asc["status"] in ["Confirmed Breakout", "Retest Entry"]:
+                if asc["status"] in ("Confirmed Breakout", "Retest Entry"):
                     asc_confirmed.append(asc)
                     confirmed_breakouts.append(asc)
                 elif asc["status"] == "Forming":
@@ -677,47 +738,47 @@ def run_scan_triangles(
 
             if symm:
                 symmetrical_triangles.append(symm)
-                if symm["status"] in ["Confirmed Breakout", "Retest Entry"]:
+                if symm["status"] in ("Confirmed Breakout", "Retest Entry"):
                     symm_confirmed.append(symm)
                     confirmed_breakouts.append(symm)
                 elif symm["status"] == "Forming":
                     symm_pre.append(symm)
                     pre_breakouts.append(symm)
 
-    ascending_triangles.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
-    symmetrical_triangles.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
-    confirmed_breakouts.sort(key=lambda x: x["abs_distance"])
-    pre_breakouts.sort(key=lambda x: x["abs_distance"])
+        ascending_triangles.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
+        symmetrical_triangles.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
+        confirmed_breakouts.sort(key=lambda x: x["abs_distance"])
+        pre_breakouts.sort(key=lambda x: x["abs_distance"])
 
-    now_ist = get_current_ist_time()
-    payload = {
-        "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
-        "timeframe": tf.capitalize(),
-        "total_scanned": len(universe),
-        "ascending": ascending_triangles,
-        "symmetrical": symmetrical_triangles,
-        "ascending_confirmed": asc_confirmed,
-        "ascending_pre": asc_pre,
-        "symmetrical_confirmed": symm_confirmed,
-        "symmetrical_pre": symm_pre,
-        "confirmed_breakouts": confirmed_breakouts,
-        "pre_breakouts": pre_breakouts,
-        "counts": {
-            "ascending": len(ascending_triangles),
-            "symmetrical": len(symmetrical_triangles),
-            "ascending_confirmed": len(asc_confirmed),
-            "ascending_pre": len(asc_pre),
-            "symmetrical_confirmed": len(symm_confirmed),
-            "symmetrical_pre": len(symm_pre),
-            "confirmed_breakouts": len(confirmed_breakouts),
-            "pre_breakouts": len(pre_breakouts),
-            "total_patterns": len(ascending_triangles) + len(symmetrical_triangles),
+        now_ist = get_current_ist_time()
+        payload = {
+            "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
+            "timeframe": tf.capitalize(),
+            "total_scanned": len(universe),
+            "ascending": ascending_triangles,
+            "symmetrical": symmetrical_triangles,
+            "ascending_confirmed": asc_confirmed,
+            "ascending_pre": asc_pre,
+            "symmetrical_confirmed": symm_confirmed,
+            "symmetrical_pre": symm_pre,
+            "confirmed_breakouts": confirmed_breakouts,
+            "pre_breakouts": pre_breakouts,
+            "counts": {
+                "ascending": len(ascending_triangles),
+                "symmetrical": len(symmetrical_triangles),
+                "ascending_confirmed": len(asc_confirmed),
+                "ascending_pre": len(asc_pre),
+                "symmetrical_confirmed": len(symm_confirmed),
+                "symmetrical_pre": len(symm_pre),
+                "confirmed_breakouts": len(confirmed_breakouts),
+                "pre_breakouts": len(pre_breakouts),
+                "total_patterns": len(ascending_triangles) + len(symmetrical_triangles),
+            }
         }
-    }
 
-    _SCAN_TRIANGLES_CACHE[cache_key] = payload
-    _LAST_SCAN_TIME[f"triangles_{cache_key}"] = now_time
-    return payload
+        _SCAN_TRIANGLES_CACHE[cache_key] = payload
+        _LAST_SCAN_TIME[f"triangles_{cache_key}"] = time.time()
+        return payload
 
 
 def run_scan_pole_and_flag(
@@ -730,65 +791,68 @@ def run_scan_pole_and_flag(
     if not force_refresh and cache_key in _SCAN_POLEFLAG_CACHE and (now_time - _LAST_SCAN_TIME.get(f"poleflag_{cache_key}", 0) < 900):
         return _SCAN_POLEFLAG_CACHE[cache_key]
 
-    universe = get_universe(index_param)
-    ensure_universe_cached(universe, force_refresh=force_refresh)
+    with _get_compute_lock(f"poleflag_{cache_key}"):
+        now_time = time.time()
+        if not force_refresh and cache_key in _SCAN_POLEFLAG_CACHE and (now_time - _LAST_SCAN_TIME.get(f"poleflag_{cache_key}", 0) < 900):
+            return _SCAN_POLEFLAG_CACHE[cache_key]
 
-    all_flags = []
-    confirmed = []
-    pre_breakouts = []
+        universe = get_universe(index_param)
+        ensure_universe_cached(universe, force_refresh=force_refresh)
 
-    def _eval_flag(sym):
-        d_candles, w_candles = get_cached_candles(sym)
-        candles = w_candles if tf == "weekly" else d_candles
-        if not candles or len(candles) < 30:
-            return None
-        comp_name = get_company_name(sym)
-        return strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
+        all_flags = []
+        confirmed = []
+        pre_breakouts = []
 
-    # 4 workers optimal for 0.1 CPU
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        for flag in executor.map(_eval_flag, universe):
+        is_weekly = (tf == "weekly")
+        # Pure in-memory tight loop (zero ThreadPool/GIL overhead, zero blocking network I/O)
+        for sym in universe:
+            d_candles, w_candles = get_cached_candles(sym, fetch_if_missing=False)
+            candles = w_candles if is_weekly else d_candles
+            if not candles or len(candles) < 30:
+                continue
+            comp_name = get_company_name(sym)
+            flag = strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
             if flag:
                 all_flags.append(flag)
-                if flag["status"] in ["Pole & Flag Breakout", "Pole & Flag Retest"]:
+                if flag["status"] in ("Pole & Flag Breakout", "Pole & Flag Retest"):
                     confirmed.append(flag)
                 elif flag["status"] == "Pole & Flag Forming":
                     pre_breakouts.append(flag)
 
-    all_flags.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
-    confirmed.sort(key=lambda x: x["abs_distance"])
-    pre_breakouts.sort(key=lambda x: x["abs_distance"])
+        all_flags.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
+        confirmed.sort(key=lambda x: x["abs_distance"])
+        pre_breakouts.sort(key=lambda x: x["abs_distance"])
 
-    now_ist = get_current_ist_time()
-    payload = {
-        "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
-        "timeframe": tf.capitalize(),
-        "total_scanned": len(universe),
-        "results": all_flags,
-        "confirmed_breakouts": confirmed,
-        "pre_breakouts": pre_breakouts,
-        "counts": {
-            "total": len(all_flags),
-            "confirmed": len(confirmed),
-            "pre_breakout": len(pre_breakouts),
+        now_ist = get_current_ist_time()
+        payload = {
+            "last_updated": now_ist.strftime("%d-%b-%Y %I:%M %p IST"),
+            "timeframe": tf.capitalize(),
+            "total_scanned": len(universe),
+            "results": all_flags,
+            "confirmed_breakouts": confirmed,
+            "pre_breakouts": pre_breakouts,
+            "counts": {
+                "total": len(all_flags),
+                "confirmed": len(confirmed),
+                "pre_breakout": len(pre_breakouts),
+            }
         }
-    }
 
-    _SCAN_POLEFLAG_CACHE[cache_key] = payload
-    _LAST_SCAN_TIME[f"poleflag_{cache_key}"] = now_time
-    return payload
+        _SCAN_POLEFLAG_CACHE[cache_key] = payload
+        _LAST_SCAN_TIME[f"poleflag_{cache_key}"] = time.time()
+        return payload
 
 
 def warm_all_scanners():
     """
     Pre-computes and caches all strategy scans in the background.
-    Guarantees user requests for any tab return INSTANTLY in < 5ms.
+    Starts with default landing view ('ascending' daily) so first paint is instant.
     """
     try:
-        run_scan_44ma("nifty500")
         run_scan_triangles("nifty500", "daily")
-        run_scan_triangles("nifty500", "weekly")
+        run_scan_44ma("nifty500")
         run_scan_pole_and_flag("nifty500", "daily")
+        run_scan_triangles("nifty500", "weekly")
         run_scan_pole_and_flag("nifty500", "weekly")
         print("All strategy scans pre-computed and cached in memory!")
     except Exception as e:
@@ -880,13 +944,23 @@ def api_debug_symbol(symbol: str):
     })
 
 
+def _find_cached_pattern(scan_dict: Optional[dict], list_key: str, sym: str) -> Optional[dict]:
+    if not scan_dict:
+        return None
+    for item in scan_dict.get(list_key, ()):
+        if item.get("symbol") == sym:
+            return item
+    return None
+
+
 @app.route("/api/chart/<symbol>")
 def api_chart(symbol: str):
     """
     Interactive TradingView Lightweight Chart endpoint.
-    Optimized for Render Free Tier (0.1 CPU):
+    Optimized for Render Free Tier (0.1 CPU, 512 MB RAM):
       - LRU memory cache (< 1ms on cache hits)
-      - Targeted strategy detector run (skips running unused heavy pattern detectors)
+      - Reuses already-computed pattern from scan cache before running geometry
+      - Slices only recent bars needed for 120-bar display + 44 MA warmup
     """
     sym = symbol.upper()
     tf = request.args.get("tf", "daily").lower()
@@ -901,23 +975,27 @@ def api_chart(symbol: str):
     if not candles:
         return jsonify({"error": f"No candle data for {sym}"}), 404
 
-    closes = [c[4] for c in candles]
-    highs = [c[2] for c in candles]
-    lows = [c[3] for c in candles]
+    # Only slice the 120 display bars + 44 MA warmup needed instead of computing MA over all bars
+    ma_slice = candles[-170:] if len(candles) > 170 else candles
+    closes = [c[4] for c in ma_slice]
+    highs = [c[2] for c in ma_slice]
+    lows = [c[3] for c in ma_slice]
     ma44_series = strategies.calculate_ma44(closes)
     ma44_high_series = strategies.calculate_ma44_high(highs)
 
-    display_bars = candles[-120:] if len(candles) >= 120 else candles
-    offset = len(candles) - len(display_bars)
+    display_len = min(len(ma_slice), 120)
+    offset = len(ma_slice) - display_len
 
     candle_data = []
     ma_line_data = []
     ma_high_line_data = []
 
-    for i, c in enumerate(display_bars):
+    for i in range(display_len):
         c_idx = offset + i
+        c = ma_slice[c_idx]
+        t_val = c[0]
         candle_data.append({
-            "time": c[0],
+            "time": t_val,
             "open": c[1],
             "high": c[2],
             "low": c[3],
@@ -926,10 +1004,10 @@ def api_chart(symbol: str):
         })
         ma_val = ma44_series[c_idx]
         if ma_val is not None:
-            ma_line_data.append({"time": c[0], "value": ma_val})
+            ma_line_data.append({"time": t_val, "value": ma_val})
         ma_high_val = ma44_high_series[c_idx]
         if ma_high_val is not None:
-            ma_high_line_data.append({"time": c[0], "value": ma_high_val})
+            ma_high_line_data.append({"time": t_val, "value": ma_high_val})
 
     current_ma = ma44_series[-1]
     current_ma_high = ma44_high_series[-1]
@@ -940,23 +1018,32 @@ def api_chart(symbol: str):
 
     comp_name = get_company_name(sym)
 
-    # Strategy-targeted geometry fit to save CPU time on Render Free
+    # Check warm scan cache first before doing extra geometry calculation
     asc = None
     symm = None
     poleflag = None
 
-    if strategy in ["ascending", "asc"]:
-        asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
-    elif strategy in ["symmetrical", "symm"]:
-        symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
-    elif strategy in ["pole_and_flag", "flag"]:
-        poleflag = strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
-    elif strategy in ["44ma", "ma44"]:
-        pass # Zero extra geometry compute needed!
+    tri_cached = _SCAN_TRIANGLES_CACHE.get(f"nifty500_{tf}")
+    flag_cached = _SCAN_POLEFLAG_CACHE.get(f"nifty500_{tf}")
+
+    if strategy in ("ascending", "asc"):
+        asc = _find_cached_pattern(tri_cached, "ascending", sym)
+        if asc is None:
+            asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
+    elif strategy in ("symmetrical", "symm"):
+        symm = _find_cached_pattern(tri_cached, "symmetrical", sym)
+        if symm is None:
+            symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
+    elif strategy in ("pole_and_flag", "flag"):
+        poleflag = _find_cached_pattern(flag_cached, "results", sym)
+        if poleflag is None:
+            poleflag = strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
+    elif strategy in ("44ma", "ma44"):
+        pass
     else:
-        asc = strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
-        symm = strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
-        poleflag = strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
+        asc = _find_cached_pattern(tri_cached, "ascending", sym) or strategies.detect_ascending_triangle(sym, comp_name, candles, timeframe=tf)
+        symm = _find_cached_pattern(tri_cached, "symmetrical", sym) or strategies.detect_symmetrical_triangle(sym, comp_name, candles, timeframe=tf)
+        poleflag = _find_cached_pattern(flag_cached, "results", sym) or strategies.detect_pole_and_flag(sym, comp_name, candles, timeframe=tf)
 
     payload = {
         "symbol": sym,
@@ -975,7 +1062,7 @@ def api_chart(symbol: str):
         "pole_and_flag_pattern": poleflag,
     }
 
-    if len(_CHART_CACHE) > 300:
+    if len(_CHART_CACHE) >= 150:
         _CHART_CACHE.pop(next(iter(_CHART_CACHE)))
     _CHART_CACHE[cache_key] = payload
 
@@ -998,7 +1085,7 @@ def api_export_csv():
         tf_str = "weekly" if is_weekly else "daily"
         writer.writerow(["Symbol", "Company", "Pattern", "Timeframe", "CMP", "Entry Price", "Stop Loss", "Target", "R:R", "Status", "Pole Rise %", "Pole Height"])
         for sym in universe:
-            d_c, w_c = get_cached_candles(sym)
+            d_c, w_c = get_cached_candles(sym, fetch_if_missing=False)
             c = w_c if is_weekly else d_c
             if not c or len(c) < 30:
                 continue
@@ -1021,7 +1108,7 @@ def api_export_csv():
         is_symm = "symmetrical" in tab or "symm" in tab
 
         for sym in universe:
-            d_c, w_c = get_cached_candles(sym)
+            d_c, w_c = get_cached_candles(sym, fetch_if_missing=False)
             c = w_c if is_weekly else d_c
             if not c or len(c) < 30:
                 continue
@@ -1052,7 +1139,7 @@ def api_export_csv():
     # 44 MA export (-1% to +3% band)
     writer.writerow(["Symbol", "Company", "CMP", "44 MA", "Distance %", "Status", "Day Change %", "Volume", "Timeframe"])
     for sym in universe:
-        d_candles, w_candles = get_cached_candles(sym)
+        d_candles, w_candles = get_cached_candles(sym, fetch_if_missing=False)
         if not d_candles:
             continue
         eval_res = strategies.evaluate_44ma_stock(
@@ -1073,6 +1160,11 @@ def api_export_csv():
 
     filename = f"44MA_Scanner_{index_param}_{tab}_{dt.date.today().strftime('%Y%m%d')}.csv"
     return Response(output.getvalue(), mimetype="text/csv", headers={"Content-Disposition": f"attachment;filename={filename}"})
+
+
+# Start background warmup & periodic refresh ONLY after all functions and caches are defined
+threading.Thread(target=background_cache_warmup, daemon=True).start()
+threading.Thread(target=_background_scan_loop, daemon=True).start()
 
 
 if __name__ == "__main__":

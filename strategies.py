@@ -33,8 +33,6 @@ Institutional Strategy Suite for Indian Equities (NSE / Nifty 500, 100, 50):
 """
 
 from typing import Optional, List, Dict, Any, Tuple
-import pandas as pd
-import numpy as np
 
 from patterns.config import (
     DIST_MIN,

@@ -14,7 +14,6 @@ Strict institutional implementation:
 """
 
 from typing import Optional, Dict, Any, List, Tuple
-import numpy as np
 from patterns.config import (
     ASC_MIN_DAILY_BARS,
     ASC_MAX_DAILY_BARS,
@@ -129,51 +128,44 @@ def detect_ascending_triangle(
     best_setup = None
 
     for start_idx in candidate_starts:
-        pattern_window = eval_candles[start_idx:]
-        pat_len = len(pattern_window)
+        pat_len = eval_slice_len - start_idx
         if pat_len < min_bars or pat_len > max_bars:
             continue
 
-        window_highs = [float(c[2]) for c in pattern_window]
-        window_lows = [float(c[3]) for c in pattern_window]
-        window_closes = [float(c[4]) for c in pattern_window]
-        window_volumes = [float(c[5]) for c in pattern_window]
-        avg_price = float(np.mean(window_closes))
-
-        # 1. Prior trend verification
+        # 1. Prior trend verification (checked BEFORE slicing pattern window lists)
         global_start = total_candles - eval_slice_len + start_idx
         prior_trend_valid = False
+        start_close = eval_closes[start_idx]
 
         if not is_weekly:
             if global_start >= ASC_PRIOR_LOOKBACK_DAILY:
-                close_40_ago = float(candles[global_start - ASC_PRIOR_LOOKBACK_DAILY][4])
-                if close_40_ago > float(candles[global_start][4]):
+                if float(candles[global_start - ASC_PRIOR_LOOKBACK_DAILY][4]) > start_close:
                     prior_trend_valid = True
 
             if not prior_trend_valid and global_start >= 20:
                 lookback_pre = min(global_start, ASC_PRIOR_RALLY_LOOKBACK_DAILY)
-                pre_lows = [float(c[3]) for c in candles[global_start - lookback_pre : global_start]]
-                if pre_lows:
-                    min_pre = min(pre_lows)
-                    if (float(candles[global_start][4]) - min_pre) / min_pre >= ASC_PRIOR_RALLY_MIN_DAILY:
-                        prior_trend_valid = True
+                min_pre = min(float(c[3]) for c in candles[global_start - lookback_pre : global_start])
+                if (start_close - min_pre) / min_pre >= ASC_PRIOR_RALLY_MIN_DAILY:
+                    prior_trend_valid = True
         else:
             if global_start >= 15:
-                close_prior = float(candles[global_start - 15][4])
-                if close_prior > float(candles[global_start][4]):
+                if float(candles[global_start - 15][4]) > start_close:
                     prior_trend_valid = True
 
             if not prior_trend_valid and global_start >= 10:
                 lookback_pre = min(global_start, ASC_PRIOR_RALLY_LOOKBACK_WEEKLY)
-                pre_lows = [float(c[3]) for c in candles[global_start - lookback_pre : global_start]]
-                if pre_lows:
-                    min_pre = min(pre_lows)
-                    if (float(candles[global_start][4]) - min_pre) / min_pre >= ASC_PRIOR_RALLY_MIN_WEEKLY:
-                        prior_trend_valid = True
+                min_pre = min(float(c[3]) for c in candles[global_start - lookback_pre : global_start])
+                if (start_close - min_pre) / min_pre >= ASC_PRIOR_RALLY_MIN_WEEKLY:
+                    prior_trend_valid = True
 
         if not prior_trend_valid:
-            diag_reasons.append("Prior trend failed: Pattern does not follow a prior base (higher 40 bars ago) or a preceding 10% rise.")
+            if collect_diagnostics:
+                diag_reasons.append("Prior trend failed: Pattern does not follow a prior base (higher 40 bars ago) or a preceding 10% rise.")
             continue
+
+        window_highs = eval_highs[start_idx:]
+        window_lows = eval_lows[start_idx:]
+        window_closes = eval_closes[start_idx:]
 
         # 2. Confirmed pivots inside pattern
         sh_in_pat, sl_in_pat = confirmed_pivots(
@@ -181,8 +173,11 @@ def detect_ascending_triangle(
         )
 
         if len(sh_in_pat) < 2 or len(sl_in_pat) < 2:
-            diag_reasons.append(f"Insufficient pivots in candidate pattern window: {len(sh_in_pat)} highs, {len(sl_in_pat)} lows.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Insufficient pivots in candidate pattern window: {len(sh_in_pat)} highs, {len(sl_in_pat)} lows.")
             continue
+
+        avg_price = sum(window_closes) / pat_len
 
         # 3. Flat resistance
         res_slope, res_intercept, res_r2, res_valid = fit_line_through_pivots(
@@ -191,15 +186,17 @@ def detect_ascending_triangle(
         norm_res_slope = res_slope / avg_price
 
         if abs(norm_res_slope) > ASC_RES_MAX_SLOPE_NORM:
-            diag_reasons.append(f"Resistance not flat: slope is {norm_res_slope*100:+.3f}% per bar (max allowed ±{ASC_RES_MAX_SLOPE_NORM*100:.3f}%).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Resistance not flat: slope is {norm_res_slope*100:+.3f}% per bar (max allowed ±{ASC_RES_MAX_SLOPE_NORM*100:.3f}%).")
             continue
 
         res_touches = touches_on_line(sh_in_pat, res_slope, res_intercept, tolerance)
         if len(res_touches) < 2:
-            diag_reasons.append(f"Resistance touches: {len(res_touches)} touches within tolerance (minimum 2 required).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Resistance touches: {len(res_touches)} touches within tolerance (minimum 2 required).")
             continue
 
-        res_level = float(np.mean([p[1] for p in res_touches]))
+        res_level = sum(p[1] for p in res_touches) / len(res_touches)
 
         # 4. Rising support
         sup_slope, sup_intercept, sup_r2, sup_valid = fit_line_through_pivots(
@@ -208,44 +205,53 @@ def detect_ascending_triangle(
         norm_sup_slope = sup_slope / avg_price
 
         if norm_sup_slope < ASC_SUP_MIN_SLOPE_NORM:
-            diag_reasons.append(f"Support line not rising: slope is {norm_sup_slope*100:+.3f}% per bar (minimum +{ASC_SUP_MIN_SLOPE_NORM*100:.3f}% required).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Support line not rising: slope is {norm_sup_slope*100:+.3f}% per bar (minimum +{ASC_SUP_MIN_SLOPE_NORM*100:.3f}% required).")
             continue
 
         if sup_r2 < ASC_SUP_MIN_R2:
-            diag_reasons.append(f"Support line fit quality R² = {sup_r2:.2f} (below required 0.60 threshold).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Support line fit quality R² = {sup_r2:.2f} (below required 0.60 threshold).")
             continue
 
         if not sup_valid:
-            diag_reasons.append("Close violation: One or more bars in the consolidation closed below the rising support line by more than ATR tolerance.")
+            if collect_diagnostics:
+                diag_reasons.append("Close violation: One or more bars in the consolidation closed below the rising support line by more than ATR tolerance.")
             continue
 
         sup_touches = touches_on_line(sl_in_pat, sup_slope, sup_intercept, tolerance)
         if len(sup_touches) < 2:
-            diag_reasons.append(f"Support line touches: {len(sup_touches)} touches within tolerance (minimum 2 required).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Support line touches: {len(sup_touches)} touches within tolerance (minimum 2 required).")
             continue
 
         # 5. Triangle Height
         lowest_sl = min(p[1] for p in sl_in_pat)
         triangle_height = res_level - lowest_sl
         if (triangle_height / res_level) < ASC_MIN_HEIGHT_PCT:
-            diag_reasons.append(f"Pattern height is {(triangle_height/res_level)*100:.1f}% of price (minimum 3.0% required).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Pattern height is {(triangle_height/res_level)*100:.1f}% of price (minimum 3.0% required).")
             continue
 
         # 6. Apex convergence
         if sup_slope <= 0:
-            diag_reasons.append("Lines do not converge: support slope is flat or negative.")
+            if collect_diagnostics:
+                diag_reasons.append("Lines do not converge: support slope is flat or negative.")
             continue
 
         x_apex = (res_level - sup_intercept) / sup_slope
         bars_to_apex = x_apex - (pat_len - 1)
         if not (ASC_APEX_MIN_BARS <= bars_to_apex <= ASC_APEX_MAX_BARS):
-            diag_reasons.append(f"Apex distance {bars_to_apex:.1f} bars away (must be between {ASC_APEX_MIN_BARS} and {ASC_APEX_MAX_BARS} bars).")
+            if collect_diagnostics:
+                diag_reasons.append(f"Apex distance {bars_to_apex:.1f} bars away (must be between {ASC_APEX_MIN_BARS} and {ASC_APEX_MAX_BARS} bars).")
             continue
 
         # 7. Status classification
+        pattern_window = eval_candles[start_idx:]
+        window_volumes = eval_volumes[start_idx:]
         cur_close = window_closes[-1]
         cur_vol = window_volumes[-1]
-        v_20 = float(np.mean(window_volumes[-21:-1])) if len(window_volumes) >= 21 else float(np.mean(window_volumes))
+        v_20 = (sum(window_volumes[-21:-1]) / 20.0) if pat_len >= 21 else (sum(window_volumes) / pat_len)
 
         status = None
         entry_type = None
@@ -256,11 +262,15 @@ def detect_ascending_triangle(
         # Check Confirmed Breakout
         is_breakout = False
         breakout_bar_offset = None
-        for b_offset in [1, 2]:
+        for b_offset in (1, 2):
             b_idx = pat_len - b_offset
             b_close = window_closes[b_idx]
             b_vol = window_volumes[b_idx]
-            b_v20 = float(np.mean(window_volumes[max(0, b_idx - 20) : b_idx])) if b_idx > 0 else v_20
+            if b_idx > 0:
+                b_start = max(0, b_idx - 20)
+                b_v20 = sum(window_volumes[b_start:b_idx]) / (b_idx - b_start)
+            else:
+                b_v20 = v_20
 
             if b_close > (res_level * (1.0 + ASC_BREAKOUT_PRICE_BUFFER)):
                 if b_vol >= (ASC_BREAKOUT_VOL_MULT * b_v20):
@@ -309,20 +319,23 @@ def detect_ascending_triangle(
                 stop_loss = round(last_sl_price - (ASC_STOP_ATR_MULT * cur_atr), 2)
 
         if not status:
-            dist_from_res = ((res_level - cur_close) / res_level) * 100
-            diag_reasons.append(f"Price action status: Current price ₹{cur_close:.2f} is {dist_from_res:.1f}% below resistance ₹{res_level:.2f} (must be within 1.5% for Forming or closed above with 1.5x volume for Breakout).")
+            if collect_diagnostics:
+                dist_from_res = ((res_level - cur_close) / res_level) * 100
+                diag_reasons.append(f"Price action status: Current price ₹{cur_close:.2f} is {dist_from_res:.1f}% below resistance ₹{res_level:.2f} (must be within 1.5% for Forming or closed above with 1.5x volume for Breakout).")
             continue
 
         # 8. Target & R:R
         target = round(entry_price + triangle_height, 2)
         risk = entry_price - stop_loss
         if risk <= 0:
-            diag_reasons.append(f"Risk calculation invalid: entry ₹{entry_price} <= stop ₹{stop_loss}.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Risk calculation invalid: entry ₹{entry_price} <= stop ₹{stop_loss}.")
             continue
 
         rr = round((target - entry_price) / risk, 2)
         if rr < ASC_MIN_RR:
-            diag_reasons.append(f"Risk:Reward ratio 1:{rr:.2f} is below strict 1:{ASC_MIN_RR} minimum threshold.")
+            if collect_diagnostics:
+                diag_reasons.append(f"Risk:Reward ratio 1:{rr:.2f} is below strict 1:{ASC_MIN_RR} minimum threshold.")
             continue
 
         # Confidence

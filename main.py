@@ -14,15 +14,11 @@ import gzip
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import urllib.request
 import datetime as dt
 from typing import Optional, List, Dict, Any
-import pandas as pd
 import requests
-import yfinance as yf
 from fastapi import FastAPI, Query, HTTPException, Response
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import strategies
 from patterns.geometry import resample_to_weekly
@@ -205,13 +201,13 @@ def load_disk_cache():
 load_disk_cache()
 
 
-def fetch_candles(sym: str) -> tuple:
+def fetch_candles(sym: str, fetch_if_missing: bool = True) -> tuple:
     sym_upper = sym.upper()
     with _cache_lock:
         if sym_upper in _d_cache and sym_upper in _w_cache:
             return _d_cache[sym_upper], _w_cache[sym_upper]
 
-    if sym_upper in _failed_symbols:
+    if not fetch_if_missing or sym_upper in _failed_symbols:
         return None, None
 
     mapped_sym = SYMBOL_MAP.get(sym_upper, sym_upper)
@@ -220,7 +216,7 @@ def fetch_candles(sym: str) -> tuple:
     url = f"https://{host}/v8/finance/chart/{ticker_sym}?range=2y&interval=1d"
 
     try:
-        resp = _http_session.get(url, timeout=7)
+        resp = _http_session.get(url, timeout=4)
         if resp.status_code == 200:
             data = resp.json()
             res_list = data.get("chart", {}).get("result")
@@ -346,11 +342,11 @@ async def scan_44ma(
 
     both, daily, weekly = [], [], []
 
-    def _eval_44(sym):
-        d_c, w_c = fetch_candles(sym)
+    for sym in universe:
+        d_c, w_c = fetch_candles(sym, fetch_if_missing=False)
         if not d_c:
-            return None
-        return strategies.evaluate_44ma_stock(
+            continue
+        res = strategies.evaluate_44ma_stock(
             symbol=sym,
             company_name=get_company(sym),
             daily_candles=d_c,
@@ -361,19 +357,16 @@ async def scan_44ma(
             green_only=(green_only == "1"),
             strict_chartink=(strict_chartink == "1"),
         )
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        for res in executor.map(_eval_44, universe):
-            if not res:
-                continue
-            if allowed_stats and not any(a in res["status"].lower() for a in allowed_stats):
-                continue
-            if res["timeframe"] == "Both":
-                both.append(res)
-            elif res["timeframe"] == "Daily":
-                daily.append(res)
-            elif res["timeframe"] == "Weekly":
-                weekly.append(res)
+        if not res:
+            continue
+        if allowed_stats and not any(a in res["status"].lower() for a in allowed_stats):
+            continue
+        if res["timeframe"] == "Both":
+            both.append(res)
+        elif res["timeframe"] == "Daily":
+            daily.append(res)
+        elif res["timeframe"] == "Weekly":
+            weekly.append(res)
 
     both.sort(key=lambda x: x["abs_distance"])
     daily.sort(key=lambda x: x["abs_distance"])
@@ -409,7 +402,7 @@ async def scan_triangles(index: str = "nifty500", timeframe: str = "daily", refr
     force_refresh = (refresh == "1")
     cache_key = f"triangles_{index}_{timeframe}"
     now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 180):
+    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 900):
         return _SCAN_CACHE[cache_key]
 
     ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -419,35 +412,32 @@ async def scan_triangles(index: str = "nifty500", timeframe: str = "daily", refr
     symm_confirmed, symm_pre = [], []
     confirmed_breakouts, pre_breakouts = [], []
 
-    def _eval_tri(sym):
-        d_c, w_c = fetch_candles(sym)
-        c = w_c if timeframe == "weekly" else d_c
+    is_weekly = (timeframe == "weekly")
+    for sym in universe:
+        d_c, w_c = fetch_candles(sym, fetch_if_missing=False)
+        c = w_c if is_weekly else d_c
         if not c or len(c) < 25:
-            return None, None
+            continue
         comp = get_company(sym)
         asc = strategies.detect_ascending_triangle(sym, comp, c, timeframe=timeframe)
         symm = strategies.detect_symmetrical_triangle(sym, comp, c, timeframe=timeframe)
-        return asc, symm
+        if asc:
+            ascending.append(asc)
+            if asc["status"] in ("Confirmed Breakout", "Retest Entry"):
+                asc_confirmed.append(asc)
+                confirmed_breakouts.append(asc)
+            elif asc["status"] == "Forming":
+                asc_pre.append(asc)
+                pre_breakouts.append(asc)
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        for asc, symm in executor.map(_eval_tri, universe):
-            if asc:
-                ascending.append(asc)
-                if asc["status"] in ["Confirmed Breakout", "Retest Entry"]:
-                    asc_confirmed.append(asc)
-                    confirmed_breakouts.append(asc)
-                elif asc["status"] == "Forming":
-                    asc_pre.append(asc)
-                    pre_breakouts.append(asc)
-
-            if symm:
-                symmetrical.append(symm)
-                if symm["status"] in ["Confirmed Breakout", "Retest Entry"]:
-                    symm_confirmed.append(symm)
-                    confirmed_breakouts.append(symm)
-                elif symm["status"] == "Forming":
-                    symm_pre.append(symm)
-                    pre_breakouts.append(symm)
+        if symm:
+            symmetrical.append(symm)
+            if symm["status"] in ("Confirmed Breakout", "Retest Entry"):
+                symm_confirmed.append(symm)
+                confirmed_breakouts.append(symm)
+            elif symm["status"] == "Forming":
+                symm_pre.append(symm)
+                pre_breakouts.append(symm)
 
     ascending.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
     symmetrical.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
@@ -486,7 +476,7 @@ async def scan_pole_and_flag(index: str = "nifty500", timeframe: str = "daily", 
     force_refresh = (refresh == "1")
     cache_key = f"poleflag_{index}_{timeframe}"
     now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 180):
+    if not force_refresh and cache_key in _SCAN_CACHE and (now_time - _LAST_SCAN_TIME.get(cache_key, 0) < 900):
         return _SCAN_CACHE[cache_key]
 
     ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -495,22 +485,20 @@ async def scan_pole_and_flag(index: str = "nifty500", timeframe: str = "daily", 
     confirmed = []
     pre_breakouts = []
 
-    def _eval_flag(sym):
-        d_c, w_c = fetch_candles(sym)
-        c = w_c if timeframe == "weekly" else d_c
+    is_weekly = (timeframe == "weekly")
+    for sym in universe:
+        d_c, w_c = fetch_candles(sym, fetch_if_missing=False)
+        c = w_c if is_weekly else d_c
         if not c or len(c) < 30:
-            return None
+            continue
         comp = get_company(sym)
-        return strategies.detect_pole_and_flag(sym, comp, c, timeframe=timeframe)
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        for flag in executor.map(_eval_flag, universe):
-            if flag:
-                all_flags.append(flag)
-                if flag["status"] in ["Pole & Flag Breakout", "Pole & Flag Retest"]:
-                    confirmed.append(flag)
-                elif flag["status"] == "Pole & Flag Forming":
-                    pre_breakouts.append(flag)
+        flag = strategies.detect_pole_and_flag(sym, comp, c, timeframe=timeframe)
+        if flag:
+            all_flags.append(flag)
+            if flag["status"] in ("Pole & Flag Breakout", "Pole & Flag Retest"):
+                confirmed.append(flag)
+            elif flag["status"] == "Pole & Flag Forming":
+                pre_breakouts.append(flag)
 
     all_flags.sort(key=lambda x: (0 if "Breakout" in x["status"] or "Retest" in x["status"] else 1, x["abs_distance"]))
     confirmed.sort(key=lambda x: x["abs_distance"])
