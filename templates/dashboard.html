@@ -17,11 +17,24 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
   <style>
+    html {
+      scroll-behavior: smooth;
+    }
     body {
       background-color: #0b0f19;
       color: #e5e7eb;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       -webkit-font-smoothing: antialiased;
+      overflow-y: scroll;
+    }
+    table {
+      border-collapse: collapse;
+      contain: paint;
+    }
+    tbody tr {
+      transform: translateZ(0);
+      will-change: background-color;
+      transition: background-color 0.12s ease-out;
     }
     .custom-scrollbar::-webkit-scrollbar {
       width: 5px;
@@ -45,6 +58,9 @@
       stroke-width: 1.8;
       stroke-linecap: round;
       stroke-linejoin: round;
+    }
+    #scanProgressBar {
+      transition: opacity 0.25s ease-in-out;
     }
   </style>
 </head>
@@ -124,6 +140,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Top Slim Progress Bar for non-blocking scans (prevents table collapsing) -->
+  <div id="scanProgressBar" class="h-0.5 bg-gradient-to-r from-blue-500 via-indigo-400 to-emerald-400 w-full opacity-0 pointer-events-none transition-opacity duration-300"></div>
 
   <!-- Main Full-Width Layout -->
   <main class="max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 flex-1 flex flex-col gap-4">
@@ -437,28 +456,47 @@
       const loadedKeys = new Set();
       let isFetching = false;
 
+      let renderRafId = null;
+      function scheduleRenderView() {
+        if (renderRafId) cancelAnimationFrame(renderRafId);
+        renderRafId = requestAnimationFrame(() => {
+          renderView();
+          renderRafId = null;
+        });
+      }
+
       // Smart on-demand data loader (loads active tab instantly in < 1 second)
       async function loadDataForCurrentView(forceRefresh = false) {
         const tf = (activeSection === "ma44") ? activeTimeframe : (activeTimeframe === "weekly" ? "weekly" : "daily");
         const cacheKey = `${activeSection}_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`;
 
         if (!forceRefresh && loadedKeys.has(cacheKey)) {
-          renderView();
+          scheduleRenderView();
           return;
         }
 
         const updateText = document.getElementById("lastUpdatedText");
         const refreshBtn = document.getElementById("btnRefresh");
+        const topBar = document.getElementById("scanProgressBar");
+        if (topBar) {
+          topBar.classList.remove("opacity-0");
+          topBar.classList.add("opacity-100");
+        }
+
         if (updateText) updateText.textContent = forceRefresh ? "Refreshing..." : "Scanning...";
         if (refreshBtn && forceRefresh) {
           refreshBtn.classList.add("opacity-50", "pointer-events-none");
           refreshBtn.textContent = "⟳ Refreshing...";
         }
 
-        // Show fast loading indicator in table
+        // Show fast loading indicator without layout collapse
         const tbody = document.getElementById("tableBody");
         if (tbody && !loadedKeys.has(cacheKey)) {
-          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-blue-400 font-sans"><span class="animate-pulse">⚡ Scanning Nifty universe at high speed...</span></td></tr>`;
+          if (!tbody.firstElementChild || tbody.children.length <= 1) {
+            tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-blue-400 font-sans"><span class="animate-pulse">⚡ Scanning Nifty universe at high speed...</span></td></tr>`;
+          } else {
+            tbody.style.opacity = "0.5";
+          }
         }
 
         const refreshParam = forceRefresh ? "&refresh=1" : "";
@@ -503,11 +541,18 @@
           document.getElementById("badge-main-ma44").textContent = 
             (store.ma44.both.length + store.ma44.daily.length + store.ma44.weekly.length);
 
-          renderView();
+          scheduleRenderView();
         } catch (e) {
           console.error("Load error:", e);
           if (updateText) updateText.textContent = "Error";
         } finally {
+          const topBar = document.getElementById("scanProgressBar");
+          if (topBar) {
+            topBar.classList.remove("opacity-100");
+            topBar.classList.add("opacity-0");
+          }
+          const tbody = document.getElementById("tableBody");
+          if (tbody) tbody.style.opacity = "1";
           if (refreshBtn) {
             refreshBtn.classList.remove("opacity-50", "pointer-events-none");
             refreshBtn.textContent = "⟳ Refresh";
@@ -813,7 +858,7 @@
             : (item.status.includes('Retest') ? 'bg-purple-950/60 text-purple-300 border-purple-500/40' : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 font-bold');
 
           return `
-            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe}')" onmouseenter="prefetchChart('${item.symbol}', '${activeTimeframe}')">
+            <tr class="hover:bg-gray-800/50 cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe}')">
               <td class="py-3 px-4 font-bold text-white hover:text-blue-400">
                 <div class="flex items-center gap-1.5">
                   <span>${item.symbol}</span>
@@ -890,7 +935,7 @@
           else if (item.status && item.status.includes("Near Below")) badgeClass = "bg-amber-900/50 text-amber-300 border-amber-500/40 font-semibold";
 
           return `
-            <tr class="hover:bg-gray-800/50 transition cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')" onmouseenter="prefetchChart('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')">
+            <tr class="hover:bg-gray-800/50 cursor-pointer" onclick="openChartModal('${item.symbol}', '${activeTimeframe === 'weekly' ? 'weekly' : 'daily'}')">
               <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
               <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
               <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
@@ -928,7 +973,7 @@
           sortField = field;
           sortAsc = true;
         }
-        renderView();
+        scheduleRenderView();
       };
 
       // Modal Chart
@@ -1128,9 +1173,13 @@
         loadDataForCurrentView(false);
       });
 
+      let searchDebounceTimer = null;
       document.getElementById("searchBox").addEventListener("input", (e) => {
         searchQuery = e.target.value;
-        renderView();
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+          scheduleRenderView();
+        }, 120);
       });
 
       document.getElementById("indexSelector").addEventListener("change", (e) => {

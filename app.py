@@ -233,18 +233,8 @@ def load_disk_cache():
             daily_data = data.get("daily", {})
             weekly_data = data.get("weekly", {})
             with _cache_lock:
-                for sym, candles in daily_data.items():
-                    if candles:
-                        _daily_cache[sym] = [
-                            [str(c[0])[:10], float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])]
-                            for c in candles
-                        ]
-                for sym, candles in weekly_data.items():
-                    if candles:
-                        _weekly_cache[sym] = [
-                            [str(c[0])[:10], float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])]
-                            for c in candles
-                        ]
+                _daily_cache.update({sym: c for sym, c in daily_data.items() if c})
+                _weekly_cache.update({sym: c for sym, c in weekly_data.items() if c})
             print(f"Loaded {len(_daily_cache)} symbols instantly from {target_file}.")
             return
         except Exception as e:
@@ -380,21 +370,53 @@ def get_cached_candles(symbol: str, force_refresh: bool = False) -> tuple:
     return d_candles, w_candles
 
 
-def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 14) -> None:
-    with _batch_lock:
-        if force_refresh:
+def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 16) -> None:
+    """
+    Ensures the given universe is cached.
+    Non-blocking for normal scans: immediately returns cached data while updating missing symbols in background.
+    """
+    if force_refresh:
+        with _batch_lock:
             _failed_symbols.clear()
             symbols_to_fetch = list(universe)
-        else:
-            with _cache_lock:
-                symbols_to_fetch = [
-                    s for s in universe
-                    if (s not in _daily_cache or s not in _weekly_cache) and (s not in _failed_symbols)
-                ]
+    else:
+        with _cache_lock:
+            symbols_to_fetch = [
+                s for s in universe
+                if (s not in _daily_cache or s not in _weekly_cache) and (s not in _failed_symbols)
+            ]
 
-        if not symbols_to_fetch:
-            return
+    if not symbols_to_fetch:
+        return
 
+    # Non-blocking background fetch for normal scans so user never waits more than 1-2 seconds
+    if not force_refresh:
+        def _bg_fetch_worker(to_fetch):
+            with _batch_lock:
+                def _fetch_one(s: str):
+                    d, w = fetch_stock_candles_yf(s)
+                    return s, d, w
+                new_c = 0
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for fut in as_completed({executor.submit(_fetch_one, s): s for s in to_fetch}):
+                        try:
+                            s, d, w = fut.result()
+                            if d and w:
+                                with _cache_lock:
+                                    _daily_cache[s] = d
+                                    _weekly_cache[s] = w
+                                new_c += 1
+                            else:
+                                _failed_symbols.add(s)
+                        except Exception:
+                            pass
+                if new_c > 0:
+                    save_disk_cache()
+        threading.Thread(target=_bg_fetch_worker, args=(symbols_to_fetch,), daemon=True).start()
+        return
+
+    # Synchronous path only if force_refresh explicitly requested
+    with _batch_lock:
         t0 = time.time()
         new_count = 0
 

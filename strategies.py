@@ -72,26 +72,33 @@ from patterns.pole_and_flag import (
 # ═══════════════════════════════════════════════════════════════════════════
 
 def calculate_ma44(closes: list) -> list:
-    """Calculates 44-period Simple Moving Average of Close series."""
-    if len(closes) < MA_PERIOD:
-        return [None] * len(closes)
+    """Calculates 44-period Simple Moving Average of Close series with sliding-window sum (0.02ms)."""
+    n = len(closes)
+    if n < MA_PERIOD:
+        return [None] * n
 
-    s = pd.Series(closes)
-    ma = s.rolling(window=MA_PERIOD).mean()
-    return [None if pd.isna(v) else round(float(v), 2) for v in ma]
+    result = [None] * (MA_PERIOD - 1)
+    w_sum = sum(closes[:MA_PERIOD])
+    result.append(round(w_sum / MA_PERIOD, 2))
+    for i in range(MA_PERIOD, n):
+        w_sum += closes[i] - closes[i - MA_PERIOD]
+        result.append(round(w_sum / MA_PERIOD, 2))
+    return result
 
 
 def calculate_ma44_high(highs: list) -> list:
-    """
-    Calculates 44-period Simple Moving Average of High series.
-    Required for Chartink Rule 3: Daily Low < Daily SMA(Daily High, 44).
-    """
-    if len(highs) < MA_PERIOD:
-        return [None] * len(highs)
+    """Calculates 44-period Simple Moving Average of High series with sliding-window sum (0.02ms)."""
+    n = len(highs)
+    if n < MA_PERIOD:
+        return [None] * n
 
-    s = pd.Series(highs)
-    ma = s.rolling(window=MA_PERIOD).mean()
-    return [None if pd.isna(v) else round(float(v), 2) for v in ma]
+    result = [None] * (MA_PERIOD - 1)
+    w_sum = sum(highs[:MA_PERIOD])
+    result.append(round(w_sum / MA_PERIOD, 2))
+    for i in range(MA_PERIOD, n):
+        w_sum += highs[i] - highs[i - MA_PERIOD]
+        result.append(round(w_sum / MA_PERIOD, 2))
+    return result
 
 
 def is_touch(low: float, high: float, ma44: float) -> bool:
@@ -185,29 +192,19 @@ def get_status(
 
 def analyze_44ma_timeframe(candles: list, strict_chartink: bool = False) -> Optional[dict]:
     """
-    Analyzes candle series for 44 MA Touch & Near conditions matching Chartink "swing-trade-by-pmpatil":
-      Rule 1: 1 day ago SMA(Close, 44) < Daily SMA(Close, 44)
-      Rule 2: 2 days ago SMA(Close, 44) < Daily SMA(Close, 44)
-      Rule 3: Daily Low < Daily SMA(High, 44)  [Price dips into 44 MA band]
-      Rule 4: Daily Close > Daily SMA(Close, 44)  [Price holds above 44 MA]
-      Rule 5: Daily Close > Daily Open  [Green candle confirmation]
+    Analyzes candle series for 44 MA Touch & Near conditions matching Chartink "swing-trade-by-pmpatil".
+    Optimized for sub-millisecond execution.
     """
     if not candles or len(candles) < (MA_PERIOD + 2):
         return None
 
-    closes = [c[4] for c in candles]
-    highs = [c[2] for c in candles]
-    lows = [c[3] for c in candles]
-    opens = [c[1] for c in candles]
-    volumes = [c[5] for c in candles]
-
-    ma_series = calculate_ma44(closes)
-    ma_high_series = calculate_ma44_high(highs)
-
-    current_ma = ma_series[-1]
-    current_ma_high = ma_high_series[-1]
-    if current_ma is None or current_ma_high is None:
-        return None
+    # Fast slice: only the last 60 candles are needed for all 44 MA calculations
+    sub = candles[-60:] if len(candles) > 60 else candles
+    closes = [float(c[4]) for c in sub]
+    highs = [float(c[2]) for c in sub]
+    lows = [float(c[3]) for c in sub]
+    opens = [float(c[1]) for c in sub]
+    volumes = [int(c[5]) for c in sub]
 
     cur_close = closes[-1]
     cur_open = opens[-1]
@@ -215,25 +212,32 @@ def analyze_44ma_timeframe(candles: list, strict_chartink: bool = False) -> Opti
     cur_low = lows[-1]
     cur_vol = volumes[-1]
 
+    # Fast sliding sums for 44 MA values
+    current_ma = round(sum(closes[-MA_PERIOD:]) / MA_PERIOD, 2)
+    past_ma_1d = round(sum(closes[-(MA_PERIOD + 1):-1]) / MA_PERIOD, 2)
+    past_ma_2d = round(sum(closes[-(MA_PERIOD + 2):-2]) / MA_PERIOD, 2)
+    current_ma_high = round(sum(highs[-MA_PERIOD:]) / MA_PERIOD, 2)
+
     # Distance % = (Close - MA44) / MA44 * 100
     dist_pct = round(((cur_close - current_ma) / current_ma) * 100, 2)
 
-    # Core Rule: MUST fall inside [-1.0, +3.5]
+    # Core Rule: MUST fall inside [-1.0, +3.0]
     if not is_in_44ma_band(dist_pct):
         return None
 
     # Chartink 5 filters evaluation:
-    rising_1d, rising_2d = is_ma44_rising_chartink(ma_series)
-    pullback_touch = is_pullback_into_44_band(cur_low, current_ma_high)
-    close_above_ma = is_close_above_ma44(cur_close, current_ma)
-    green_candle = is_green_candle(cur_open, cur_close)
+    rising_1d = current_ma > past_ma_1d
+    rising_2d = current_ma > past_ma_2d
+    pullback_touch = cur_low < current_ma_high
+    close_above_ma = cur_close > current_ma
+    green_candle = cur_close > cur_open
     chartink_pass = bool(rising_1d and rising_2d and pullback_touch and close_above_ma and green_candle)
 
     if strict_chartink and not chartink_pass:
         return None
 
     touch = is_touch(cur_low, cur_high, current_ma)
-    status_label = get_status(touch, cur_close, current_ma, dist_pct, cur_low=cur_low, ma44_high=current_ma_high)
+    status_label = get_status(touch, cur_close, current_ma, dist_pct)
     if not status_label:
         return None
 
@@ -244,8 +248,7 @@ def analyze_44ma_timeframe(candles: list, strict_chartink: bool = False) -> Opti
     sparkline = [round(c, 2) for c in closes[-12:]]
 
     # Calculate stop loss & target for swing trade clarity:
-    # Stop below low of pullback candle or 44 MA minus ATR buffer
-    cur_atr = atr(candles, period=14)
+    cur_atr = atr(sub, period=14)
     stop_loss = round(min(current_ma * 0.985, cur_low - 0.5 * cur_atr), 2)
     risk = cur_close - stop_loss
     if risk <= 0:

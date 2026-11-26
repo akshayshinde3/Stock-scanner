@@ -183,12 +183,8 @@ def load_disk_cache():
             daily_data = data.get("daily", {})
             weekly_data = data.get("weekly", {})
             with _cache_lock:
-                for sym, candles in daily_data.items():
-                    if candles:
-                        _d_cache[sym] = [[str(c[0])[:10], float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])] for c in candles]
-                for sym, candles in weekly_data.items():
-                    if candles:
-                        _w_cache[sym] = [[str(c[0])[:10], float(c[1]), float(c[2]), float(c[3]), float(c[4]), int(c[5])] for c in candles]
+                _d_cache.update({sym: c for sym, c in daily_data.items() if c})
+                _w_cache.update({sym: c for sym, c in weekly_data.items() if c})
             print(f"FastAPI: Loaded {len(_d_cache)} symbols from {target_file}.")
             return
         except Exception as e:
@@ -260,23 +256,49 @@ def fetch_candles(sym: str) -> tuple:
     return None, None
 
 
-def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 14) -> None:
-    with _batch_lock:
-        if force_refresh:
+def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 16) -> None:
+    if force_refresh:
+        with _batch_lock:
             _failed_symbols.clear()
             symbols_to_fetch = list(universe)
-        else:
-            with _cache_lock:
-                symbols_to_fetch = [s for s in universe if (s not in _d_cache or s not in _w_cache) and (s not in _failed_symbols)]
+    else:
+        with _cache_lock:
+            symbols_to_fetch = [
+                s for s in universe
+                if (s not in _d_cache or s not in _w_cache) and (s not in _failed_symbols)
+            ]
 
-        if not symbols_to_fetch:
-            return
+    if not symbols_to_fetch:
+        return
 
+    # Non-blocking background fetch for normal scans so user scans return in <2 seconds
+    if not force_refresh:
+        def _bg_fetch_worker(to_fetch):
+            with _batch_lock:
+                def _fetch_one(s: str):
+                    d, w = fetch_candles(s)
+                    return s, d, w
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    for fut in as_completed({executor.submit(_fetch_one, s): s for s in to_fetch}):
+                        try:
+                            s, d, w = fut.result()
+                            if d and w:
+                                with _cache_lock:
+                                    _d_cache[s] = d
+                                    _w_cache[s] = w
+                            else:
+                                _failed_symbols.add(s)
+                        except Exception:
+                            pass
+        threading.Thread(target=_bg_fetch_worker, args=(symbols_to_fetch,), daemon=True).start()
+        return
+
+    # Force refresh path
+    with _batch_lock:
         def _fetch_worker(s: str):
             d, w = fetch_candles(s)
             return s, d, w
 
-        new_count = 0
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {executor.submit(_fetch_worker, s): s for s in symbols_to_fetch}
             for fut in as_completed(future_map):
@@ -286,7 +308,6 @@ def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max
                         with _cache_lock:
                             _d_cache[s] = d_candles
                             _w_cache[s] = w_candles
-                        new_count += 1
                     else:
                         _failed_symbols.add(s)
                 except Exception:
@@ -376,16 +397,6 @@ async def scan_44ma(
             "daily": daily,
             "weekly": weekly,
         }
-    }
-    _SCAN_CACHE[cache_key] = result
-    _LAST_SCAN_TIME[cache_key] = now_time
-    return result
-        "universe": index.upper(),
-        "dist_min": -1.0,
-        "dist_max": 3.0,
-        "total_scanned": len(universe),
-        "counts": {"both": len(both), "daily": len(daily), "weekly": len(weekly), "total_qualifying": len(both)+len(daily)+len(weekly)},
-        "results": {"both": both, "daily": daily, "weekly": weekly}
     }
     _SCAN_CACHE[cache_key] = result
     _LAST_SCAN_TIME[cache_key] = now_time

@@ -25,7 +25,7 @@ from patterns.config import (
 def atr(candles: Union[pd.DataFrame, list], period: int = ATR_PERIOD) -> float:
     """
     Computes the 14-period Average True Range (ATR) on the candle series.
-    Returns the latest ATR value (float). If not enough data, returns 1.0% of latest close.
+    Optimized for high-speed scanning: only evaluates the recent candles needed.
     """
     if candles is None or len(candles) < 2:
         return 1.0
@@ -35,34 +35,32 @@ def atr(candles: Union[pd.DataFrame, list], period: int = ATR_PERIOD) -> float:
         lows = candles["low"].values.astype(float)
         closes = candles["close"].values.astype(float)
     else:
-        # Assumed format: [date, open, high, low, close, volume]
-        highs = np.array([float(c[2]) for c in candles], dtype=float)
-        lows = np.array([float(c[3]) for c in candles], dtype=float)
-        closes = np.array([float(c[4]) for c in candles], dtype=float)
+        # Fast path: only the last (period * 3 + 2) candles are needed for ATR
+        needed = period * 3 + 2
+        sub = candles[-needed:] if len(candles) > needed else candles
+        highs = [float(c[2]) for c in sub]
+        lows = [float(c[3]) for c in sub]
+        closes = [float(c[4]) for c in sub]
 
     n = len(closes)
     if n < 2:
         return float(closes[-1] * 0.01) if n == 1 else 1.0
 
-    # True Range calculation
-    tr = np.zeros(n, dtype=float)
-    tr[0] = highs[0] - lows[0]
+    tr = [highs[0] - lows[0]]
     for i in range(1, n):
         hl = highs[i] - lows[i]
         hc = abs(highs[i] - closes[i - 1])
         lc = abs(lows[i] - closes[i - 1])
-        tr[i] = max(hl, hc, lc)
+        tr.append(max(hl, hc, lc))
 
     if n < period:
-        return float(np.mean(tr))
+        return float(sum(tr) / len(tr))
 
-    # Wilder's smoothing or simple rolling mean for ATR
-    atr_vals = np.zeros(n, dtype=float)
-    atr_vals[period - 1] = np.mean(tr[:period])
+    curr_atr = sum(tr[:period]) / period
     for i in range(period, n):
-        atr_vals[i] = (atr_vals[i - 1] * (period - 1) + tr[i]) / period
+        curr_atr = (curr_atr * (period - 1) + tr[i]) / period
 
-    return float(atr_vals[-1])
+    return float(curr_atr)
 
 
 def atr_series(candles: Union[pd.DataFrame, list], period: int = ATR_PERIOD) -> List[float]:
