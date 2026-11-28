@@ -1,22 +1,17 @@
 """
 patterns/symmetrical_triangle.py — Symmetrical Triangle Coil Breakout Detector
 =============================================================================
-Strict institutional implementation:
-  - Pattern window: 30-90 daily bars or 15-40 weekly bars starting at first confirmed pivot
-  - Upper descending line: normalized slope <= -0.05%/bar, R² >= 0.6, >= 2 confirmed touches
-  - Lower ascending line: normalized slope >= +0.05%/bar, R² >= 0.6, >= 2 confirmed touches
-  - No close violates either line by more than tolerance
-  - Apex intersection: breakout occurs between 50% and 85% of pattern start to apex (reject if after apex)
-  - Volatility contraction: last 1/3 average range (H-L) <= 75% of first 1/3 (>=25% smaller)
-  - Volume dry-up: last 1/3 average volume < 85% of first 1/3
-  - Base height = upper line - lower line at start (x=0) >= 4% of price
-  - Status: Confirmed Breakout, Retest Entry, or Forming (Watchlist)
-  - Stop-loss: below tighter of last swing low or lower line, below breakout low - 0.5 * ATR
-  - Target = breakout level + base height (minimum R:R 2.5, reject if below, no inflating)
+Matches real-world Daily (20-90 bars) & Weekly (12-95 bars) Symmetrical Coils:
+  - Upper descending line: normalized slope <= -0.04%/bar, R² >= 0.50, >= 2 confirmed touches
+  - Lower ascending line: normalized slope >= +0.04%/bar, R² >= 0.50, >= 2 confirmed touches
+  - Volatility squeeze & coil volume dry-up measured prior to breakout buildup
+  - Apex convergence: breakout or BO Zone occurs between 40% and 95% of distance to apex
+  - Target = entry + triangle base height (minimum R:R 1:2.0, uninflated)
 """
 
 from typing import Optional, Dict, Any, List, Tuple
 from patterns.config import (
+    DEFAULT_PIVOT_WINDOW,
     SYM_MIN_DAILY_BARS,
     SYM_MAX_DAILY_BARS,
     SYM_MIN_WEEKLY_BARS,
@@ -53,12 +48,11 @@ def detect_symmetrical_triangle(
     company: str,
     candles: list,
     timeframe: str = "daily",
-    pivot_window: int = 3,
+    pivot_window: int = DEFAULT_PIVOT_WINDOW,
     collect_diagnostics: bool = False,
 ) -> Any:
     """
-    Detects a Symmetrical Triangle (Coil) according to strict geometric, contraction,
-    volume dry-up, apex, and breakout rules.
+    Detects a Symmetrical Triangle (Coil) matching descending lower highs and ascending higher lows.
     If collect_diagnostics is True, returns (setup, reject_reasons).
     """
     is_weekly = (timeframe.lower() == "weekly")
@@ -68,8 +62,8 @@ def detect_symmetrical_triangle(
     total_candles = len(candles)
     diag_reasons: List[str] = []
 
-    if total_candles < (min_bars + 10):
-        reason = f"Insufficient history: {total_candles} bars, requires at least {min_bars + 10} bars."
+    if total_candles < (min_bars + 5):
+        reason = f"Insufficient history: {total_candles} bars, requires at least {min_bars + 5} bars."
         if collect_diagnostics:
             return None, [reason]
         return None
@@ -78,23 +72,25 @@ def detect_symmetrical_triangle(
     cmp_price = float(candles[-1][4])
     tolerance = compute_tolerance(cmp_price, cur_atr)
 
-    eval_slice_len = min(total_candles, max_bars + 20)
+    eval_slice_len = min(total_candles, max_bars + 10)
     eval_candles = candles[-eval_slice_len:]
     eval_highs = [float(c[2]) for c in eval_candles]
     eval_lows = [float(c[3]) for c in eval_candles]
     eval_closes = [float(c[4]) for c in eval_candles]
     eval_volumes = [float(c[5]) for c in eval_candles]
 
-    # FAST PRE-FILTER (0.001ms): Skip stocks whose price is far below recent highs
-    recent_high = max(eval_highs[-60:])
-    if (recent_high - cmp_price) / recent_high > 0.12:
+    # Pre-filter: symmetrical coils slope downward from left peak, so allow up to 35% below peak
+    recent_high = max(eval_highs[-min(len(eval_highs), max_bars):])
+    if recent_high > 0 and (recent_high - cmp_price) / recent_high > 0.35:
         if collect_diagnostics:
-            diag_reasons.append(f"Price is {((recent_high-cmp_price)/recent_high)*100:.1f}% below recent 60-bar high (must be within 1.5% for forming or breakout).")
+            diag_reasons.append(
+                f"Price is {((recent_high - cmp_price) / recent_high) * 100:.1f}% below pattern high (> 35%)."
+            )
             return None, diag_reasons
         return None
 
     all_sh, all_sl = confirmed_pivots(
-        eval_highs, eval_lows, window=pivot_window, min_separation=4
+        eval_highs, eval_lows, window=pivot_window, min_separation=3
     )
 
     if len(all_sh) < 2 or len(all_sl) < 2:
@@ -107,22 +103,16 @@ def detect_symmetrical_triangle(
     candidate_starts = []
     for p_idx, _ in all_sh + all_sl:
         bars_back = last_idx - p_idx
-        if min_bars <= bars_back <= max_bars:
+        if (min_bars - 1) <= bars_back < max_bars:
             candidate_starts.append(p_idx)
 
     if not candidate_starts:
-        for p_idx, _ in all_sh + all_sl:
-            bars_back = last_idx - p_idx
-            if bars_back >= min_bars:
-                candidate_starts.append(p_idx)
-
-    if not candidate_starts:
-        reason = f"No confirmed swing pivots located within consolidation lookback range ({min_bars}–{max_bars} bars back)."
+        reason = f"No confirmed swing pivots located within consolidation lookback range ({min_bars}–{max_bars} bars)."
         if collect_diagnostics:
             return None, [reason]
         return None
 
-    candidate_starts = sorted(list(set(candidate_starts)))
+    candidate_starts = sorted(set(candidate_starts))
     best_setup = None
 
     for start_idx in candidate_starts:
@@ -130,71 +120,62 @@ def detect_symmetrical_triangle(
         if pat_len < min_bars or pat_len > max_bars:
             continue
 
-        # 1. Contraction check (slice-free pure Python)
-        third_len = pat_len // 3
-        if third_len < 3:
-            continue
-
         window_highs = eval_highs[start_idx:]
         window_lows = eval_lows[start_idx:]
-
-        sum_r_first = 0.0
-        for i in range(third_len):
-            sum_r_first += window_highs[i] - window_lows[i]
-        avg_range_first = sum_r_first / third_len
-
-        sum_r_last = 0.0
-        for i in range(pat_len - third_len, pat_len):
-            sum_r_last += window_highs[i] - window_lows[i]
-        avg_range_last = sum_r_last / third_len
-
-        if avg_range_first <= 0 or (avg_range_last / avg_range_first) > SYM_RANGE_CONTRACTION_MAX:
-            if collect_diagnostics:
-                diag_reasons.append(f"Range contraction failed: last third average range (₹{avg_range_last:.2f}) is {(avg_range_last/avg_range_first)*100:.1f}% of first third (₹{avg_range_first:.2f}); must be <= 75% (at least 25% smaller).")
-            continue
-
-        # 2. Volume dry-up check
+        window_closes = eval_closes[start_idx:]
         window_volumes = eval_volumes[start_idx:]
-        avg_vol_first = sum(window_volumes[:third_len]) / third_len
-        avg_vol_last = sum(window_volumes[pat_len - third_len :]) / third_len
 
-        if avg_vol_first <= 0 or (avg_vol_last / avg_vol_first) >= SYM_VOLUME_DRYUP_MAX:
-            if collect_diagnostics:
-                diag_reasons.append(f"Volume dry-up failed: last third volume ({avg_vol_last:.0f}) is {(avg_vol_last/avg_vol_first)*100:.1f}% of first third ({avg_vol_first:.0f}); must be < 85%.")
-            continue
-
-        # 3. Confirmed pivots in pattern
-        sh_in_pat, sl_in_pat = confirmed_pivots(
-            window_highs, window_lows, window=pivot_window, min_separation=4
-        )
+        # Preserve pivot at start_idx itself (offset 0) instead of slicing it away
+        sh_in_pat = [(idx - start_idx, px) for idx, px in all_sh if idx >= start_idx]
+        sl_in_pat = [(idx - start_idx, px) for idx, px in all_sl if idx >= start_idx]
 
         if len(sh_in_pat) < 2 or len(sl_in_pat) < 2:
             if collect_diagnostics:
-                diag_reasons.append(f"Insufficient confirmed pivots in consolidation: {len(sh_in_pat)} highs, {len(sl_in_pat)} lows.")
+                diag_reasons.append(f"Insufficient pivots in consolidation window: {len(sh_in_pat)} highs, {len(sl_in_pat)} lows.")
             continue
 
-        window_closes = eval_closes[start_idx:]
+        # 1. Range contraction & coil volume dry-up (early coil half vs late pre-breakout third)
+        coil_len = max(9, pat_len - 2)
+        half_len = max(3, coil_len // 2)
+        third_len = coil_len // 3
+        if third_len >= 3:
+            avg_range_first = sum(window_highs[i] - window_lows[i] for i in range(half_len)) / half_len
+            avg_range_last = sum(window_highs[i] - window_lows[i] for i in range(coil_len - third_len, coil_len)) / third_len
+
+            if avg_range_first <= 0 or (avg_range_last / avg_range_first) > SYM_RANGE_CONTRACTION_MAX:
+                if collect_diagnostics:
+                    diag_reasons.append(
+                        f"Range contraction failed: late coil range (₹{avg_range_last:.2f}) is "
+                        f"{(avg_range_last / avg_range_first) * 100:.1f}% of early coil (must be <= {SYM_RANGE_CONTRACTION_MAX * 100:.0f}%)."
+                    )
+                continue
+
+            avg_vol_first = sum(window_volumes[:half_len]) / half_len
+            avg_vol_last = sum(window_volumes[coil_len - third_len : coil_len]) / third_len
+            if avg_vol_first > 0 and (avg_vol_last / avg_vol_first) >= SYM_VOLUME_DRYUP_MAX:
+                if collect_diagnostics:
+                    diag_reasons.append(
+                        f"Volume dry-up failed: pre-breakout coil volume is {(avg_vol_last / avg_vol_first) * 100:.1f}% "
+                        f"of early volume (must be < {SYM_VOLUME_DRYUP_MAX * 100:.0f}%)."
+                    )
+                continue
+
         avg_price = sum(window_closes) / pat_len
 
-        # 4. Upper descending line
-        res_slope, res_intercept, res_r2, res_valid = fit_line_through_pivots(
-            sh_in_pat, window_closes=window_closes, tolerance=tolerance, line_type="upper"
-        )
+        # 2. Upper descending line (close violations checked strictly before breakout bar)
+        res_slope, res_intercept, res_r2, _ = fit_line_through_pivots(sh_in_pat)
         norm_res_slope = res_slope / avg_price
 
         if norm_res_slope > SYM_RES_MAX_SLOPE_NORM:
             if collect_diagnostics:
-                diag_reasons.append(f"Upper line not descending: slope is {norm_res_slope*100:+.3f}% per bar (must be <= {SYM_RES_MAX_SLOPE_NORM*100:.3f}%).")
+                diag_reasons.append(
+                    f"Upper line not descending: slope is {norm_res_slope * 100:+.3f}% per bar (must be <= {SYM_RES_MAX_SLOPE_NORM * 100:.2f}%)."
+                )
             continue
 
         if res_r2 < SYM_MIN_R2:
             if collect_diagnostics:
-                diag_reasons.append(f"Upper line fit quality R² = {res_r2:.2f} (below required {SYM_MIN_R2}).")
-            continue
-
-        if not res_valid:
-            if collect_diagnostics:
-                diag_reasons.append("Close in pattern closed above upper descending line before breakout window.")
+                diag_reasons.append(f"Upper line fit quality R² = {res_r2:.2f} (below required {SYM_MIN_R2:.2f}).")
             continue
 
         res_touches = touches_on_line(sh_in_pat, res_slope, res_intercept, tolerance)
@@ -203,7 +184,7 @@ def detect_symmetrical_triangle(
                 diag_reasons.append(f"Upper descending line touches: {len(res_touches)} (minimum 2 required).")
             continue
 
-        # 5. Lower ascending line
+        # 3. Lower ascending line (no close breakdown below rising support)
         sup_slope, sup_intercept, sup_r2, sup_valid = fit_line_through_pivots(
             sl_in_pat, window_closes=window_closes, tolerance=tolerance, line_type="lower"
         )
@@ -211,17 +192,19 @@ def detect_symmetrical_triangle(
 
         if norm_sup_slope < SYM_SUP_MIN_SLOPE_NORM:
             if collect_diagnostics:
-                diag_reasons.append(f"Lower line not ascending: slope is {norm_sup_slope*100:+.3f}% per bar (must be >= +{SYM_SUP_MIN_SLOPE_NORM*100:.3f}%).")
+                diag_reasons.append(
+                    f"Lower line not ascending: slope is {norm_sup_slope * 100:+.3f}% per bar (must be >= +{SYM_SUP_MIN_SLOPE_NORM * 100:.2f}%)."
+                )
             continue
 
         if sup_r2 < SYM_MIN_R2:
             if collect_diagnostics:
-                diag_reasons.append(f"Lower line fit quality R² = {sup_r2:.2f} (below required {SYM_MIN_R2}).")
+                diag_reasons.append(f"Lower line fit quality R² = {sup_r2:.2f} (below required {SYM_MIN_R2:.2f}).")
             continue
 
         if not sup_valid:
             if collect_diagnostics:
-                diag_reasons.append("Close in pattern closed below lower ascending line by more than tolerance.")
+                diag_reasons.append("Support breakdown: Price closed below lower ascending trendline.")
             continue
 
         sup_touches = touches_on_line(sl_in_pat, sup_slope, sup_intercept, tolerance)
@@ -230,35 +213,37 @@ def detect_symmetrical_triangle(
                 diag_reasons.append(f"Lower ascending line touches: {len(sup_touches)} (minimum 2 required).")
             continue
 
-        # 6. Base height
-        base_height = res_intercept - sup_intercept
+        # 4. Base height at triangle start (evaluated from earliest actual pivot x=min_p_x)
+        earliest_px = min(sh_in_pat[0][0], sl_in_pat[0][0])
+        base_height = line_value(res_slope, res_intercept, earliest_px) - line_value(sup_slope, sup_intercept, earliest_px)
 
-        if (base_height / avg_price) < SYM_MIN_BASE_HEIGHT_PCT:
+        if base_height <= 0 or (base_height / avg_price) < SYM_MIN_BASE_HEIGHT_PCT:
             if collect_diagnostics:
-                diag_reasons.append(f"Base height is {(base_height/avg_price)*100:.1f}% of price (minimum 4.0% required).")
+                diag_reasons.append(f"Base height is {(base_height / avg_price) * 100:.1f}% of price (minimum 4.0% required).")
             continue
 
-        # 7. Apex calculation
+        # 5. Apex calculation
         slope_diff = res_slope - sup_slope
         if abs(slope_diff) < 1e-9:
-            if collect_diagnostics:
-                diag_reasons.append("Trendlines are parallel; no apex intersection.")
             continue
 
         x_apex = (sup_intercept - res_intercept) / slope_diff
-        if x_apex <= 0:
+        if x_apex <= (pat_len - 2):
             if collect_diagnostics:
-                diag_reasons.append("Lines diverge; apex lies before pattern start.")
+                diag_reasons.append("Lines already crossed past apex before current setup.")
             continue
 
-        # 8. Status Classification
+        # 6. Status Classification
         pattern_window = eval_candles[start_idx:]
         cur_close = window_closes[-1]
         cur_vol = window_volumes[-1]
-        v_20 = (sum(window_volumes[-21:-1]) / 20.0) if pat_len >= 21 else (sum(window_volumes) / pat_len)
+        v_20 = (sum(window_volumes[-21:-1]) / 20.0) if pat_len >= 21 else (sum(window_volumes[:-1] or window_volumes) / max(1, pat_len - 1))
 
         upper_now = line_value(res_slope, res_intercept, pat_len - 1)
         lower_now = line_value(sup_slope, sup_intercept, pat_len - 1)
+
+        if upper_now <= lower_now:
+            continue
 
         status = None
         entry_type = None
@@ -267,49 +252,50 @@ def detect_symmetrical_triangle(
         breakout_date = None
         breakout_bar_idx = None
 
-        # Check Confirmed Breakout
+        # Check Confirmed Breakout in last 2 bars
         for b_offset in (1, 2):
             b_idx = pat_len - b_offset
+            if b_idx < 4:
+                continue
             b_close = window_closes[b_idx]
             b_vol = window_volumes[b_idx]
             b_upper = line_value(res_slope, res_intercept, b_idx)
-            if b_idx > 0:
-                b_start = max(0, b_idx - 20)
-                b_v20 = sum(window_volumes[b_start:b_idx]) / (b_idx - b_start)
-            else:
-                b_v20 = v_20
+            b_start = max(0, b_idx - 20)
+            b_v20 = sum(window_volumes[b_start:b_idx]) / max(1, b_idx - b_start)
 
             if b_close > (b_upper * (1.0 + SYM_BREAKOUT_PRICE_BUFFER)):
-                if b_vol >= (SYM_BREAKOUT_VOL_MULT * b_v20):
-                    if cur_close <= (b_upper * (1.0 + SYM_MAX_CHASE_PCT)):
-                        apex_progress = b_idx / x_apex
-                        if SYM_APEX_PROGRESS_MIN <= apex_progress <= SYM_APEX_PROGRESS_MAX:
-                            status = "Confirmed Breakout"
-                            entry_type = "Coil Breakout Entry"
-                            entry_price = round(cur_close, 2)
-                            breakout_date = pattern_window[b_idx][0]
-                            breakout_bar_idx = b_idx
-                            break
-                        elif collect_diagnostics:
-                            if b_idx >= x_apex:
-                                diag_reasons.append("Breakout occurred after the apex intersection.")
-                            else:
-                                diag_reasons.append(f"Apex progress is {apex_progress*100:.1f}% (must be between 50% and 85% to apex).")
+                if b_vol >= (SYM_BREAKOUT_VOL_MULT * b_v20) and cur_close <= (b_upper * (1.0 + SYM_MAX_CHASE_PCT)):
+                    # Check no earlier candle violated the upper descending line before breakout bar
+                    if any(window_closes[k] > line_value(res_slope, res_intercept, k) + tolerance for k in range(b_idx)):
+                        continue
+                    apex_progress = b_idx / x_apex
+                    if SYM_APEX_PROGRESS_MIN <= apex_progress <= SYM_APEX_PROGRESS_MAX:
+                        status = "Confirmed Breakout"
+                        entry_type = "Coil Breakout Entry"
+                        entry_price = round(cur_close, 2)
+                        breakout_date = pattern_window[b_idx][0]
+                        breakout_bar_idx = b_idx
+                        break
+                    elif collect_diagnostics:
+                        diag_reasons.append(
+                            f"Apex progress {apex_progress * 100:.1f}% outside {SYM_APEX_PROGRESS_MIN * 100:.0f}%–{SYM_APEX_PROGRESS_MAX * 100:.0f}%."
+                        )
 
         # Check Retest Entry
-        if not status and pat_len >= (SYM_RETEST_LOOKBACK_MAX + 2):
-            for r_offset in range(SYM_RETEST_LOOKBACK_MIN, SYM_RETEST_LOOKBACK_MAX + 1):
+        if not status and pat_len >= (SYM_RETEST_LOOKBACK_MAX + 3):
+            for r_offset in range(SYM_RETEST_LOOKBACK_MIN, min(pat_len - 3, SYM_RETEST_LOOKBACK_MAX) + 1):
                 prior_idx = pat_len - 1 - r_offset
-                if prior_idx < 0:
+                if prior_idx < 4:
                     break
                 p_close = window_closes[prior_idx]
                 p_upper = line_value(res_slope, res_intercept, prior_idx)
 
                 if p_close > (p_upper * (1.0 + SYM_BREAKOUT_PRICE_BUFFER)):
+                    if any(window_closes[k] > line_value(res_slope, res_intercept, k) + tolerance for k in range(prior_idx)):
+                        continue
                     apex_progress = prior_idx / x_apex
                     if SYM_APEX_PROGRESS_MIN <= apex_progress <= SYM_APEX_PROGRESS_MAX:
-                        intervening_lows = window_lows[prior_idx + 1 :]
-                        retest_low = min(intervening_lows)
+                        retest_low = min(window_lows[prior_idx + 1 :])
                         if abs(retest_low - upper_now) <= tolerance or retest_low <= (upper_now + tolerance):
                             if cur_close >= upper_now:
                                 status = "Retest Entry"
@@ -320,23 +306,30 @@ def detect_symmetrical_triangle(
                                 stop_loss = round(retest_low - (SYM_STOP_ATR_MULT * cur_atr), 2)
                                 break
 
-        # Check Forming
+        # Check Forming (BO Zone near apex)
         if not status:
+            if any(window_closes[k] > line_value(res_slope, res_intercept, k) + tolerance for k in range(pat_len)):
+                if collect_diagnostics:
+                    diag_reasons.append("Upper descending line violated prior to forming zone.")
+                continue
             if (upper_now * (1.0 - SYM_FORMING_BAND_PCT)) <= cur_close < (upper_now * (1.0 + SYM_BREAKOUT_PRICE_BUFFER)):
                 current_progress = (pat_len - 1) / x_apex
-                if current_progress <= SYM_APEX_PROGRESS_MAX:
+                if SYM_APEX_PROGRESS_MIN <= current_progress <= SYM_APEX_PROGRESS_MAX:
                     status = "Forming"
-                    entry_type = "Coil Forming Watchlist"
+                    entry_type = "Coil Forming Watchlist (BO Zone)"
                     entry_price = round(upper_now * 1.002, 2)
                     breakout_bar_idx = pat_len - 1
 
         if not status:
             if collect_diagnostics:
                 dist_to_upper = ((upper_now - cur_close) / upper_now) * 100
-                diag_reasons.append(f"Price action status: Current price ₹{cur_close:.2f} is {dist_to_upper:.1f}% below upper line ₹{upper_now:.2f} (must be within 1.5% for Forming or breakout with volume).")
+                diag_reasons.append(
+                    f"Price ₹{cur_close:.2f} is {dist_to_upper:.1f}% below upper line ₹{upper_now:.2f} "
+                    f"(must be within {SYM_FORMING_BAND_PCT * 100:.1f}% for BO Zone or breakout with volume)."
+                )
             continue
 
-        # 9. Stop Loss
+        # 7. Stop Loss
         b_idx_eval = breakout_bar_idx if breakout_bar_idx is not None else (pat_len - 1)
         lower_line_at_breakout = line_value(sup_slope, sup_intercept, b_idx_eval)
         last_sl_price = sl_in_pat[-1][1]
@@ -349,12 +342,10 @@ def detect_symmetrical_triangle(
                 raw_stop = breakout_low - (SYM_STOP_ATR_MULT * cur_atr)
             stop_loss = round(raw_stop, 2)
 
-        # 10. Target & R:R
+        # 8. Target & R:R
         target = round(entry_price + base_height, 2)
         risk = entry_price - stop_loss
         if risk <= 0:
-            if collect_diagnostics:
-                diag_reasons.append(f"Risk invalid: entry ₹{entry_price} <= stop ₹{stop_loss}.")
             continue
 
         rr = round((target - entry_price) / risk, 2)
@@ -375,12 +366,14 @@ def detect_symmetrical_triangle(
         conf_score = min(98, conf_score)
 
         dates_in_pattern = [c[0] for c in pattern_window]
+        u_start_x = sh_in_pat[0][0]
+        l_start_x = sl_in_pat[0][0]
         upper_line_points = [
-            {"time": dates_in_pattern[0], "value": round(res_slope * 0 + res_intercept, 2)},
+            {"time": dates_in_pattern[u_start_x], "value": round(res_slope * u_start_x + res_intercept, 2)},
             {"time": dates_in_pattern[-1], "value": round(res_slope * (pat_len - 1) + res_intercept, 2)},
         ]
         lower_line_points = [
-            {"time": dates_in_pattern[0], "value": round(sup_slope * 0 + sup_intercept, 2)},
+            {"time": dates_in_pattern[l_start_x], "value": round(sup_slope * l_start_x + sup_intercept, 2)},
             {"time": dates_in_pattern[-1], "value": round(sup_slope * (pat_len - 1) + sup_intercept, 2)},
         ]
         upper_touch_points = [
@@ -456,6 +449,9 @@ def get_symmetrical_triangle_debug(
             unique_reasons.append(r)
 
     if not unique_reasons:
-        unique_reasons = ["Structure does not satisfy concurrent Symmetrical Triangle rules (opposite slopes with R² >= 0.60, range contraction >= 25%, volume dry-up < 85%, apex progress 50–85%, R:R >= 2.5)."]
+        unique_reasons = [
+            f"No qualifying Symmetrical Triangle found (opposite slopes with R² >= {SYM_MIN_R2}, "
+            f"contraction <= {SYM_RANGE_CONTRACTION_MAX * 100:.0f}%, apex progress {SYM_APEX_PROGRESS_MIN * 100:.0f}–{SYM_APEX_PROGRESS_MAX * 100:.0f}%, R:R >= {SYM_MIN_RR})."
+        ]
 
     return {"qualified": False, "setup": None, "reject_reasons": unique_reasons}

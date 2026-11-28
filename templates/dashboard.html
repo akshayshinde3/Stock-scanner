@@ -3,13 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Indian Stock Screener — Swing Breakouts &amp; 44 MA</title>
+  <title>Stock Screener — Swing Breakouts &amp; 44 MA</title>
 
   <!-- Lightweight Charts (TradingView) -->
   <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; border-width: 0; border-style: solid; border-color: #1f2937; }
+    :root {
+      --tv-bg: #ffffff;
+      --tv-surface: #f8fafd;
+      --tv-pill: #f0f3fa;
+      --tv-pill-hover: #e3e8f4;
+      --tv-border: #e0e3eb;
+      --tv-ink: #131722;
+      --tv-muted: #6a6d78;
+      --tv-light-muted: #9598a1;
+      --tv-blue: #2962ff;
+      --tv-blue-hover: #1e53e5;
+      --tv-blue-soft: #eef4ff;
+      --tv-green: #089981;
+      --tv-green-soft: #e6f6f3;
+      --tv-red: #f23645;
+      --tv-red-soft: #fdebee;
+      --tv-orange: #ff9800;
+      --tv-orange-soft: #fff4e5;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      border-width: 0;
+      border-style: solid;
+      border-color: var(--tv-border);
+    }
     button, input, select { font: inherit; color: inherit; background: transparent; }
     a { color: inherit; text-decoration: none; }
     table { border-collapse: collapse; }
@@ -19,30 +50,22 @@
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      background-color: #0b0f19;
-      color: #e5e7eb;
-      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--tv-bg);
+      color: var(--tv-ink);
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
       -webkit-font-smoothing: antialiased;
       overflow-y: scroll;
     }
-    ::selection { background-color: #2563eb; color: #fff; }
+    ::selection { background-color: var(--tv-blue); color: #ffffff; }
 
-    .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #ffffff; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d4dc; border-radius: 3px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #b2b5be; }
 
-    .sparkline-svg { overflow: visible; display: inline-block; vertical-align: middle; }
-    .sparkline-path { fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-
-    /* Zero-jank plain row hover (no per-row GPU layer thrashing) */
-    #tableBody tr:hover, #watchTableBody tr:hover { background-color: rgba(31, 41, 55, 0.52); }
-
-    /* Utility CSS (pre-compiled statically — zero runtime Tailwind JS overhead) */
     .hidden { display: none !important; }
     .flex { display: flex; }
     .inline-flex { display: inline-flex; }
-    .inline-block { display: inline-block; }
     .grid { display: grid; }
     .flex-col { flex-direction: column; }
     .flex-wrap { flex-wrap: wrap; }
@@ -50,574 +73,753 @@
     .items-center { align-items: center; }
     .justify-between { justify-content: space-between; }
     .justify-center { justify-content: center; }
-    .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-    .sticky { position: sticky; }
     .fixed { position: fixed; }
-    .relative { position: relative; }
-    .top-0 { top: 0; }
     .inset-0 { inset: 0; }
     .z-30 { z-index: 30; }
     .z-50 { z-index: 50; }
-
     .w-full { width: 100%; }
-    .w-10 { width: 2.5rem; }
-    .h-10 { height: 2.5rem; }
-    .w-3\.5 { width: 0.875rem; }
-    .w-2 { width: 0.5rem; }
-    .h-2 { height: 0.5rem; }
-    .h-1 { height: 0.25rem; }
-    .h-0\.5 { height: 0.125rem; }
     .h-\[450px\] { height: 450px; }
-    .max-w-7xl { max-width: 80rem; }
+    .max-w-7xl { max-width: 82rem; }
     .max-w-5xl { max-width: 64rem; }
     .max-w-xl { max-width: 36rem; }
-    .max-w-\[130px\] { max-width: 130px; }
-    .max-w-\[200px\] { max-width: 200px; }
     .max-h-\[95vh\] { max-height: 95vh; }
-    .max-h-72 { max-height: 18rem; }
-
     .mx-auto { margin-left: auto; margin-right: auto; }
     .mt-auto { margin-top: auto; }
-    .mt-0\.5 { margin-top: 0.125rem; }
-    .mt-1 { margin-top: 0.25rem; }
-    .mt-2 { margin-top: 0.5rem; }
-    .mt-3 { margin-top: 0.75rem; }
-    .ml-2 { margin-left: 0.5rem; }
-    .pb-3 { padding-bottom: 0.75rem; }
-    .pl-5 { padding-left: 1.25rem; }
-    .p-0\.5 { padding: 0.125rem; }
-    .p-1 { padding: 0.25rem; }
-    .p-2 { padding: 0.5rem; }
-    .p-2\.5 { padding: 0.625rem; }
     .p-3 { padding: 0.75rem; }
     .p-4 { padding: 1rem; }
     .p-5 { padding: 1.25rem; }
-    .px-1 { padding-left: 0.25rem; padding-right: 0.25rem; }
-    .px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
-    .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
-    .px-2\.5 { padding-left: 0.625rem; padding-right: 0.625rem; }
-    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
-    .px-4 { padding-left: 1rem; padding-right: 1rem; }
-    .px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }
-    .py-0\.2 { padding-top: 1px; padding-bottom: 1px; }
-    .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
-    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-    .py-1\.5 { padding-top: 0.375rem; padding-bottom: 0.375rem; }
-    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
-    .py-2\.5 { padding-top: 0.625rem; padding-bottom: 0.625rem; }
-    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
-    .py-3\.5 { padding-top: 0.875rem; padding-bottom: 0.875rem; }
-    .py-4 { padding-top: 1rem; padding-bottom: 1rem; }
-    .py-10 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
-    .py-12 { padding-top: 3rem; padding-bottom: 3rem; }
-
-    .gap-1 { gap: 0.25rem; }
-    .gap-1\.5 { gap: 0.375rem; }
     .gap-2 { gap: 0.5rem; }
-    .gap-2\.5 { gap: 0.625rem; }
     .gap-3 { gap: 0.75rem; }
     .gap-4 { gap: 1rem; }
-    .space-x-1\.5 > :not([hidden]) ~ :not([hidden]) { margin-left: 0.375rem; }
-    .space-x-3 > :not([hidden]) ~ :not([hidden]) { margin-left: 0.75rem; }
-    .space-y-1 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.25rem; }
-    .space-y-2 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.5rem; }
-    .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem; }
-    .divide-y > :not([hidden]) ~ :not([hidden]) { border-top-width: 1px; }
-    .divide-gray-800\/60 > :not([hidden]) ~ :not([hidden]) { border-color: rgba(31, 41, 55, 0.6); }
-
     .overflow-hidden { overflow: hidden; }
     .overflow-x-auto { overflow-x: auto; }
-    .overflow-y-auto { overflow-y: auto; }
-    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .select-none { user-select: none; }
     .cursor-pointer { cursor: pointer; }
     .pointer-events-none { pointer-events: none; }
-    .list-disc { list-style-type: disc; }
-
-    .font-sans { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-    .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .text-left { text-align: left; }
-    .text-center { text-align: center; }
-    .text-right { text-align: right; }
-    .text-\[9px\] { font-size: 9px; line-height: 1.2; }
-    .text-\[10px\] { font-size: 10px; line-height: 1.3; }
-    .text-\[11px\] { font-size: 11px; line-height: 1.35; }
-    .text-xs { font-size: 0.75rem; line-height: 1rem; }
-    .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
-    .text-base { font-size: 1rem; line-height: 1.5rem; }
-    .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
-    .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
-    .text-2xl { font-size: 1.5rem; line-height: 2rem; }
-    .text-3xl { font-size: 1.875rem; line-height: 2.25rem; }
-    .font-medium { font-weight: 500; }
-    .font-semibold { font-weight: 600; }
-    .font-bold { font-weight: 700; }
-    .uppercase { text-transform: uppercase; }
-    .tracking-wider { letter-spacing: 0.05em; }
-    .tracking-tight { letter-spacing: -0.025em; }
-    .leading-none { line-height: 1; }
-
-    .border { border-width: 1px; }
-    .border-b { border-bottom-width: 1px; }
-    .border-t { border-top-width: 1px; }
-    .border-dashed { border-style: dashed; }
-    .rounded { border-radius: 0.25rem; }
-    .rounded-md { border-radius: 0.375rem; }
-    .rounded-lg { border-radius: 0.5rem; }
-    .rounded-xl { border-radius: 0.75rem; }
-    .rounded-2xl { border-radius: 1rem; }
-    .rounded-full { border-radius: 9999px; }
-
-    .bg-transparent { background-color: transparent; }
-    .bg-\[\#0b0f19\] { background-color: #0b0f19; }
-    .bg-\[\#0f172a\] { background-color: #0f172a; }
-    .bg-\[\#101726\] { background-color: #101726; }
-    .bg-\[\#111827\]\/80 { background-color: rgba(17, 24, 39, 0.8); }
-    .bg-black\/85 { background-color: rgba(0, 0, 0, 0.85); }
-    .bg-gray-950 { background-color: #030712; }
-    .bg-gray-950\/60 { background-color: rgba(3, 7, 18, 0.6); }
-    .bg-gray-950\/70 { background-color: rgba(3, 7, 18, 0.7); }
-    .bg-gray-950\/80 { background-color: rgba(3, 7, 18, 0.8); }
-    .bg-gray-900 { background-color: #111827; }
-    .bg-gray-900\/40 { background-color: rgba(17, 24, 39, 0.4); }
-    .bg-gray-900\/60 { background-color: rgba(17, 24, 39, 0.6); }
-    .bg-gray-900\/70 { background-color: rgba(17, 24, 39, 0.7); }
-    .bg-gray-900\/80 { background-color: rgba(17, 24, 39, 0.8); }
-    .bg-gray-800 { background-color: #1f2937; }
-    .hover\:bg-gray-800:hover { background-color: #1f2937; }
-    .hover\:bg-gray-700:hover { background-color: #374151; }
-
-    .bg-blue-950\/50 { background-color: rgba(23, 37, 84, 0.5); }
-    .bg-blue-950\/60 { background-color: rgba(23, 37, 84, 0.6); }
-    .bg-blue-950\/70 { background-color: rgba(23, 37, 84, 0.7); }
-    .bg-blue-900\/40 { background-color: rgba(30, 58, 138, 0.4); }
-    .bg-blue-900\/60 { background-color: rgba(30, 58, 138, 0.6); }
-    .bg-blue-600 { background-color: #2563eb; }
-    .hover\:bg-blue-500:hover { background-color: #3b82f6; }
-    .bg-blue-600\/20 { background-color: rgba(37, 99, 235, 0.2); }
-    .hover\:bg-blue-600\/40:hover { background-color: rgba(37, 99, 235, 0.4); }
-    .bg-blue-500\/10 { background-color: rgba(59, 130, 246, 0.1); }
-
-    .bg-emerald-950 { background-color: #022c22; }
-    .bg-emerald-950\/50 { background-color: rgba(2, 44, 34, 0.5); }
-    .bg-emerald-950\/60 { background-color: rgba(2, 44, 34, 0.6); }
-    .bg-emerald-900\/60 { background-color: rgba(6, 78, 59, 0.6); }
-    .bg-emerald-600 { background-color: #059669; }
-    .bg-emerald-600\/20 { background-color: rgba(5, 150, 105, 0.2); }
-    .bg-emerald-500\/10 { background-color: rgba(16, 185, 129, 0.1); }
-    .bg-emerald-400 { background-color: #34d399; }
-
-    .bg-amber-950 { background-color: #451a03; }
-    .bg-amber-950\/50 { background-color: rgba(69, 26, 3, 0.5); }
-    .bg-amber-950\/60 { background-color: rgba(69, 26, 3, 0.6); }
-    .bg-amber-950\/70 { background-color: rgba(69, 26, 3, 0.7); }
-    .hover\:bg-amber-900:hover { background-color: #78350f; }
-    .bg-amber-900\/50 { background-color: rgba(120, 53, 15, 0.5); }
-    .bg-amber-600\/20 { background-color: rgba(217, 119, 6, 0.2); }
-
-    .bg-indigo-950 { background-color: #1e1b4b; }
-    .bg-indigo-950\/70 { background-color: rgba(30, 27, 75, 0.7); }
-    .hover\:bg-indigo-900:hover { background-color: #312e81; }
-    .bg-indigo-900\/70 { background-color: rgba(49, 46, 129, 0.7); }
-    .bg-purple-950 { background-color: #3b0764; }
-    .bg-purple-950\/60 { background-color: rgba(59, 7, 100, 0.6); }
-    .hover\:bg-rose-950\/60:hover { background-color: rgba(76, 5, 25, 0.6); }
-    .bg-red-500 { background-color: #ef4444; }
-    .bg-cyan-400 { background-color: #22d3ee; }
-    .bg-yellow-500\/20 { background-color: rgba(234, 179, 8, 0.2); }
-    .bg-gradient-to-r { background-image: linear-gradient(to right, #3b82f6, #818cf8, #34d399); }
-
-    .text-white { color: #ffffff; }
-    .hover\:text-white:hover { color: #ffffff; }
-    .text-gray-100 { color: #f3f4f6; }
-    .text-gray-200 { color: #e5e7eb; }
-    .text-gray-300 { color: #d1d5db; }
-    .text-gray-400 { color: #9ca3af; }
-    .text-gray-500 { color: #6b7280; }
-    .text-gray-600 { color: #4b5563; }
-    .placeholder-gray-500::placeholder { color: #6b7280; }
-    .text-blue-200 { color: #bfdbfe; }
-    .text-blue-300 { color: #93c5fd; }
-    .text-blue-400 { color: #60a5fa; }
-    .hover\:text-blue-400:hover { color: #60a5fa; }
-    .text-emerald-300 { color: #6ee7b7; }
-    .text-emerald-400 { color: #34d399; }
-    .text-amber-300 { color: #fcd34d; }
-    .text-amber-400 { color: #fbbf24; }
-    .text-cyan-400 { color: #22d3ee; }
-    .text-rose-300 { color: #fda4af; }
-    .text-rose-400 { color: #fb7185; }
-    .hover\:text-rose-300:hover { color: #fda4af; }
-    .text-red-400 { color: #f87171; }
-    .text-yellow-300 { color: #fde047; }
-    .text-yellow-400 { color: #facc15; }
-    .text-indigo-300 { color: #a5b4fc; }
-    .text-purple-300 { color: #d8b4fe; }
-    .text-purple-400 { color: #c084fc; }
-    .hover\:underline:hover { text-decoration: underline; }
-
-    .border-gray-800 { border-color: #1f2937; }
-    .border-gray-800\/80 { border-color: rgba(31, 41, 55, 0.8); }
-    .border-gray-700 { border-color: #374151; }
-    .border-gray-700\/70 { border-color: rgba(55, 65, 81, 0.7); }
-    .hover\:border-gray-700:hover { border-color: #374151; }
-    .border-blue-500\/30 { border-color: rgba(59, 130, 246, 0.3); }
-    .border-blue-500\/40 { border-color: rgba(59, 130, 246, 0.4); }
-    .border-blue-500\/50 { border-color: rgba(59, 130, 246, 0.5); }
-    .border-blue-500\/60 { border-color: rgba(59, 130, 246, 0.6); }
-    .focus\:border-blue-500:focus { border-color: #3b82f6; }
-    .focus\:outline-none:focus { outline: none; }
-    .border-emerald-500\/30 { border-color: rgba(16, 185, 129, 0.3); }
-    .border-emerald-500\/40 { border-color: rgba(16, 185, 129, 0.4); }
-    .border-emerald-500\/50 { border-color: rgba(16, 185, 129, 0.5); }
-    .border-amber-500\/40 { border-color: rgba(245, 158, 11, 0.4); }
-    .border-amber-400 { border-color: #fbbf24; }
-    .border-indigo-500\/40 { border-color: rgba(99, 102, 241, 0.4); }
-    .border-purple-500\/40 { border-color: rgba(168, 85, 247, 0.4); }
-    .hover\:border-rose-500\/40:hover { border-color: rgba(244, 63, 94, 0.4); }
-    .border-yellow-500\/40 { border-color: rgba(234, 179, 8, 0.4); }
-
-    .ring-1 { box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3); }
-    .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.25); }
-    .shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.35); }
-    .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.45); }
-    .shadow-2xl { box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.65); }
-    .shadow-inner { box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.25); }
-
     .opacity-0 { opacity: 0; }
     .opacity-50 { opacity: 0.5; }
     .opacity-100 { opacity: 1; }
     .transition-opacity { transition: opacity 0.2s ease-in-out; }
-    input[type="checkbox"] { accent-color: #2563eb; cursor: pointer; }
-    #scanProgressBar { transition: opacity 0.2s ease-in-out; }
+    .font-mono { font-variant-numeric: tabular-nums; }
+    input[type="checkbox"] { accent-color: var(--tv-blue); cursor: pointer; width: 0.9rem; height: 0.9rem; }
 
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
     .animate-pulse { animation: pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 
-    @media (min-width: 640px) {
-      .sm\:flex { display: flex; }
-      .sm\:inline-block { display: inline-block; }
-      .sm\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      .sm\:w-64 { width: 16rem; }
-      .sm\:px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
-      .sm\:p-4 { padding: 1rem; }
-      .sm\:text-sm { font-size: 0.875rem; line-height: 1.25rem; }
-      .sm\:text-base { font-size: 1rem; line-height: 1.5rem; }
-      .sm\:text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+    /* ---- Top TradingView Navbar ---- */
+    .tv-header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--tv-border);
+      position: sticky;
+      top: 0;
+      z-index: 30;
     }
-    @media (min-width: 768px) {
-      .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .tv-header-inner {
+      max-width: 82rem;
+      margin: 0 auto;
+      padding: 0.625rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .tv-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--tv-ink);
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+    .tv-search-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--tv-pill);
+      border-radius: 9999px;
+      padding: 0.4375rem 0.875rem;
+      width: 12.5rem;
+      border: 1px solid transparent;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .tv-search-pill:focus-within {
+      background: #ffffff;
+      border-color: var(--tv-blue);
+      box-shadow: 0 0 0 3px rgba(41, 98, 255, 0.1);
+    }
+    .tv-search-pill input {
+      width: 100%;
+      font-size: 0.8125rem;
+      color: var(--tv-ink);
+      outline: none;
+    }
+    .tv-search-pill input::placeholder { color: var(--tv-muted); }
+
+    /* Center Strategy Nav */
+    .tv-nav-links {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      flex-wrap: wrap;
+    }
+    .tv-nav-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4375rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--tv-ink);
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+      white-space: nowrap;
+    }
+    .tv-nav-btn:hover { background: var(--tv-pill); }
+    .tv-nav-btn.active {
+      background: var(--tv-pill);
+      color: var(--tv-blue);
+    }
+    .tv-nav-count {
+      font-size: 0.6875rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      padding: 1px 6px;
+      border-radius: 9999px;
+      background: #ffffff;
+      color: var(--tv-muted);
+      border: 1px solid var(--tv-border);
+    }
+    .tv-nav-btn.active .tv-nav-count {
+      background: var(--tv-blue);
+      color: #ffffff;
+      border-color: var(--tv-blue);
+    }
+
+    /* Right Controls */
+    .tv-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .tv-select-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: var(--tv-pill);
+      border-radius: 9999px;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--tv-ink);
+      cursor: pointer;
+    }
+    .tv-select-pill select {
+      outline: none;
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--tv-ink);
+    }
+    .tv-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+      white-space: nowrap;
+    }
+    .tv-btn-ghost { background: transparent; color: var(--tv-ink); }
+    .tv-btn-ghost:hover { background: var(--tv-pill); }
+    .tv-btn-soft { background: var(--tv-pill); color: var(--tv-ink); }
+    .tv-btn-soft:hover { background: var(--tv-pill-hover); }
+    .tv-btn-primary {
+      background: linear-gradient(135deg, #2962ff 0%, #4b7bff 100%);
+      color: #ffffff;
+    }
+    .tv-btn-primary:hover { filter: brightness(0.95); }
+    .tv-btn-logout:hover { background: var(--tv-red-soft); color: var(--tv-red); }
+
+    /* Progress Bar */
+    .tv-progress-bar {
+      height: 2px;
+      background: linear-gradient(to right, #2962ff, #089981, #2962ff);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite linear;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* Cache Banner */
+    .cache-banner {
+      background: var(--tv-blue-soft);
+      border: 1px solid #d0dfff;
+      border-radius: 0.75rem;
+      padding: 0.625rem 1rem;
+      font-size: 0.8125rem;
+      color: var(--tv-blue);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .cache-bar-track {
+      flex: 1;
+      height: 6px;
+      background: #dce8ff;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .cache-bar-fill {
+      height: 100%;
+      background: var(--tv-blue);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
+    /* ---- 3-Column TradingView Overview Strip (exact screenshot reference) ---- */
+    .tv-overview-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      border-bottom: 1px solid var(--tv-border);
+      padding-bottom: 1.25rem;
+    }
+    @media (min-width: 900px) {
+      .tv-overview-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .tv-col {
+        padding: 0.25rem 1.5rem;
+        border-right: 1px solid var(--tv-border);
+      }
+      .tv-col:first-child { padding-left: 0; }
+      .tv-col:last-child { padding-right: 0; border-right: none; }
+    }
+    @media (max-width: 899px) {
+      .tv-col {
+        padding: 1rem 0;
+        border-bottom: 1px solid var(--tv-border);
+      }
+      .tv-col:last-child { border-bottom: none; padding-bottom: 0; }
+    }
+
+    .tv-col-spark-wrap {
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .tv-col-spark-caption {
+      font-size: 0.6875rem;
+      color: var(--tv-muted);
+      margin-top: 0.25rem;
+    }
+    .tv-col-heading {
+      font-size: 0.9375rem;
+      font-weight: 700;
+      color: var(--tv-ink);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .tv-col-heading-sub {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--tv-muted);
+    }
+
+    /* Dominance / Breakdown Stacked Bar */
+    .tv-legend-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.5rem;
+      margin-bottom: 0.625rem;
+    }
+    .tv-legend-label {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.75rem;
+      color: var(--tv-muted);
+      white-space: nowrap;
+    }
+    .tv-legend-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+      flex-shrink: 0;
+    }
+    .tv-legend-val {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--tv-ink);
+      font-variant-numeric: tabular-nums;
+      margin-top: 2px;
+    }
+    .tv-seg-bar {
+      display: flex;
+      height: 8px;
+      border-radius: 9999px;
+      overflow: hidden;
+      gap: 2px;
+      margin-bottom: 1rem;
+      background: var(--tv-pill);
+    }
+    .tv-seg-part { height: 100%; border-radius: 9999px; transition: width 0.3s ease; }
+
+    /* TradingView Compact Item Row */
+    .tv-item-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.375rem;
+      margin: 0 -0.375rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      transition: background-color 0.12s ease;
+    }
+    .tv-item-row:hover { background: var(--tv-surface); }
+    .tv-item-left {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      min-width: 0;
+    }
+    .tv-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 9999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .tv-item-title {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--tv-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 11.5rem;
+    }
+    .tv-ticker-pill {
+      display: inline-block;
+      margin-top: 2px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--tv-pill);
+      color: var(--tv-ink);
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+    .tv-item-right { text-align: right; flex-shrink: 0; }
+    .tv-price-main {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--tv-ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .tv-price-unit {
+      font-size: 0.6875rem;
+      font-weight: 400;
+      color: var(--tv-muted);
+      margin-left: 2px;
+    }
+    .tv-chg-sub {
+      font-size: 0.75rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      margin-top: 2px;
+    }
+
+    /* Split Bond-style bar row in Column 3 */
+    .tv-spread-row {
+      padding: 0.45rem 0.375rem;
+      margin: 0 -0.375rem;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      transition: background-color 0.12s ease;
+    }
+    .tv-spread-row:hover { background: var(--tv-surface); }
+    .tv-split-bar {
+      display: flex;
+      height: 5px;
+      border-radius: 9999px;
+      overflow: hidden;
+      gap: 2px;
+      margin-top: 0.375rem;
+      background: var(--tv-pill);
+    }
+
+    .tv-see-all {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      margin-top: 0.625rem;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--tv-blue);
+      cursor: pointer;
+    }
+    .tv-see-all:hover { text-decoration: underline; }
+
+    /* ---- Toolbar Strip ---- */
+    .tv-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .tv-seg-control {
+      display: inline-flex;
+      align-items: center;
+      background: var(--tv-pill);
+      padding: 3px;
+      border-radius: 9999px;
+      gap: 2px;
+    }
+    .tv-seg-btn {
+      padding: 0.3125rem 0.875rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--tv-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .tv-seg-btn:hover { color: var(--tv-ink); }
+    .tv-seg-btn.active {
+      background: #ffffff;
+      color: var(--tv-ink);
+      box-shadow: 0 1px 2px rgba(19, 23, 34, 0.08);
+    }
+
+    /* ---- Screener Table ---- */
+    .tv-table-card {
+      background: #ffffff;
+      border: 1px solid var(--tv-border);
+      border-radius: 0.75rem;
+      overflow: hidden;
+    }
+    table th {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--tv-muted);
+      padding: 0.75rem 0.875rem;
+      border-bottom: 1px solid var(--tv-border);
+      background: #ffffff;
+      white-space: nowrap;
+    }
+    table th.sortable { cursor: pointer; user-select: none; }
+    table th.sortable:hover { color: var(--tv-ink); background: var(--tv-surface); }
+    table td {
+      font-size: 0.8125rem;
+      padding: 0.6875rem 0.875rem;
+      border-bottom: 1px solid #f0f3fa;
+      color: var(--tv-ink);
+      white-space: nowrap;
+    }
+    #tableBody tr:hover, #watchTableBody tr:hover { background-color: var(--tv-surface); }
+    table tr:last-child td { border-bottom: none; }
+
+    .tv-btn-chart {
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--tv-pill);
+      color: var(--tv-blue);
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+    .tv-btn-chart:hover { background: var(--tv-blue-soft); }
+
+    /* ---- Modals (Clean TradingView Light Modal) ---- */
+    .modal-overlay {
+      background: rgba(19, 23, 34, 0.45);
+      backdrop-filter: blur(2px);
+    }
+    .modal-card-light {
+      background: #ffffff;
+      border: 1px solid var(--tv-border);
+      border-radius: 1rem;
+      color: var(--tv-ink);
+      box-shadow: 0 20px 50px rgba(19, 23, 34, 0.22);
     }
   </style>
 </head>
-<body class="min-h-screen flex flex-col bg-[#0b0f19] text-gray-200">
+<body>
 
-  <!-- Header -->
-  <header class="border-b border-gray-800 bg-[#0f172a] px-4 sm:px-6 py-3 sticky top-0 z-30 shadow-md">
-    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold font-mono text-lg shadow-inner">
-          NSE
+  <!-- TradingView-Style Sticky White Header -->
+  <header class="tv-header">
+    <div class="tv-header-inner">
+      <!-- Left: Logo & Search Pill -->
+      <div class="flex items-center gap-3 flex-wrap">
+        <div class="tv-brand">
+          <span style="padding:0.25rem 0.5rem;border-radius:0.375rem;background:var(--tv-blue-soft);color:var(--tv-blue);font-size:0.75rem;font-weight:700;letter-spacing:0.02em;">NSE</span>
+          <span>Stock Screener</span>
         </div>
-        <div>
-          <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            Institutional Swing Screener
-            <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-medium">
-              EOD Live
-            </span>
-            <span class="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/30 font-medium hidden sm:inline-block">
-              Best for Swing Trade
-            </span>
-          </h1>
-          <p class="text-xs text-gray-400">
-            Ascending Triangle • Symmetrical Triangle • Bull Pole &amp; Flag • 44 MA (PMPatil Chartink)
-          </p>
+
+        <div class="tv-search-pill">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6a6d78" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input id="searchBox" type="text" placeholder="Search (Ctrl+K)" aria-label="Search symbol or company">
         </div>
       </div>
 
-      <!-- Controls: Universe & CSV & Scan -->
-      <div class="flex items-center flex-wrap gap-2.5">
-        <div class="flex items-center space-x-1.5 bg-gray-900 border border-gray-700/70 rounded-lg px-2.5 py-1.5 text-xs">
-          <span class="text-gray-400">Universe:</span>
-          <select id="indexSelector" class="bg-transparent text-white font-semibold focus:outline-none cursor-pointer">
-            <option value="nifty500" class="bg-gray-900">Nifty 500 (All)</option>
-            <option value="nifty100" class="bg-gray-900">Nifty 100 (Large)</option>
-            <option value="nifty50" class="bg-gray-900">Nifty 50 (Core)</option>
-            <option value="midcap" class="bg-gray-900">Nifty Midcap</option>
-            <option value="smallcap" class="bg-gray-900">Nifty Smallcap</option>
+      <!-- Center: 4 Strategy Navigation Links -->
+      <nav class="tv-nav-links" id="mainHeadingsContainer" aria-label="Scanner strategies">
+        <button data-section="ascending" class="tv-nav-btn active">
+          <span>Ascending</span>
+          <span id="badge-main-asc" class="tv-nav-count">0</span>
+        </button>
+        <button data-section="symmetrical" class="tv-nav-btn">
+          <span>Symmetrical</span>
+          <span id="badge-main-symm" class="tv-nav-count">0</span>
+        </button>
+        <button data-section="pole_and_flag" class="tv-nav-btn">
+          <span>Pole &amp; Flag</span>
+          <span id="badge-main-flag" class="tv-nav-count">0</span>
+        </button>
+        <button data-section="ma44" class="tv-nav-btn">
+          <span>44 MA</span>
+          <span id="badge-main-ma44" class="tv-nav-count">0</span>
+        </button>
+      </nav>
+
+      <!-- Right: Universe, Actions & Logout -->
+      <div class="tv-controls">
+        <label class="tv-select-pill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6a6d78" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          </svg>
+          <select id="indexSelector" aria-label="Select stock universe">
+            <option value="nifty500">Nifty 500</option>
+            <option value="nifty100">Nifty 100</option>
+            <option value="nifty50">Nifty 50</option>
+            <option value="midcap">Midcap</option>
+            <option value="smallcap">Smallcap</option>
           </select>
-        </div>
+        </label>
 
-        <button id="btnOpenDebugger" class="px-3 py-1.5 rounded-lg bg-indigo-950/70 hover:bg-indigo-900 text-xs font-medium text-indigo-300 border border-indigo-500/40 cursor-pointer">
-          🔍 Why Rejected?
+        <button id="btnOpenDebugger" class="tv-btn tv-btn-ghost" title="Inspect why a symbol was rejected">
+          Why Rejected?
         </button>
 
-        <button id="btnExportCsv" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-medium text-gray-200 border border-gray-700 cursor-pointer">
-          ⬇ Export CSV
+        <button id="btnExportCsv" class="tv-btn tv-btn-soft">
+          Export CSV
         </button>
 
-        <button id="btnRefresh" class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white shadow-sm cursor-pointer">
-          ⟳ Refresh
+        <button id="btnRefresh" class="tv-btn tv-btn-primary">
+          Refresh
         </button>
 
-        <a href="/logout" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-rose-950/60 text-xs font-medium text-gray-300 hover:text-rose-300 border border-gray-700 hover:border-rose-500/40 flex items-center gap-1.5 cursor-pointer">
-          <span>🔒</span>
-          <span>Logout</span>
+        <a href="/logout" class="tv-btn tv-btn-ghost tv-btn-logout">
+          Logout
         </a>
       </div>
     </div>
   </header>
 
-  <!-- Live Subheader Status Banner -->
-  <div class="bg-[#111827]/80 border-b border-gray-800 px-4 sm:px-6 py-2 text-xs text-gray-400">
-    <div class="max-w-7xl mx-auto flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <span class="flex items-center gap-1.5">
-          <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-          <span>4 Institutional Strategies</span>
-        </span>
-        <span>•</span>
-        <span>Last Updated: <b id="lastUpdatedText" class="text-gray-200 font-mono">Live</b></span>
-      </div>
-      <div class="text-gray-400 hidden sm:flex items-center gap-3">
-        <span>44 MA Band: <b class="text-emerald-400 font-mono">-1.0% to +3.0%</b></span>
-        <span>•</span>
-        <span>Zero Target Inflation • Strict Mathematical R:R</span>
-      </div>
-    </div>
+  <!-- Slim Loading Progress Bar -->
+  <div id="scanProgressBar" class="opacity-0 pointer-events-none transition-opacity" style="height:2px;">
+    <div class="tv-progress-bar w-full"></div>
   </div>
 
-  <!-- Top Slim Progress Bar for non-blocking scans (prevents table collapsing) -->
-  <div id="scanProgressBar" class="h-0.5 bg-gradient-to-r w-full opacity-0 pointer-events-none transition-opacity duration-300"></div>
+  <!-- Main Workspace -->
+  <main class="max-w-7xl mx-auto w-full p-4 flex-1 flex flex-col gap-4" style="padding-left:1.25rem;padding-right:1.25rem;">
 
-  <!-- Main Full-Width Layout -->
-  <main class="max-w-7xl mx-auto w-full px-3 sm:px-6 py-4 flex-1 flex flex-col gap-4">
-
-    <!-- 4 MAIN STRATEGY TABS -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5" id="mainHeadingsContainer">
-      <button data-section="ascending" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-blue-950/60 border-blue-500/50 shadow-md">
-        <div class="flex items-center justify-between">
-          <span class="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
-            <span>📐 1. Ascending Triangle</span>
-          </span>
-          <span id="badge-main-asc" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-blue-900/60 text-blue-200 border border-blue-500/40">0</span>
-        </div>
-        <div class="text-[11px] text-gray-400 mt-1">Flat Resistance • 1:3 R:R</div>
-      </button>
-
-      <button data-section="symmetrical" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
-        <div class="flex items-center justify-between">
-          <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>📐 2. Symmetrical Triangle</span>
-          </span>
-          <span id="badge-main-symm" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
-        </div>
-        <div class="text-[11px] text-gray-400 mt-1">Coil Vol Dry-up • 1:2.5 R:R</div>
-      </button>
-
-      <button data-section="pole_and_flag" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
-        <div class="flex items-center justify-between">
-          <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>🚩 3. Pole &amp; Flag</span>
-          </span>
-          <span id="badge-main-flag" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
-        </div>
-        <div class="text-[11px] text-gray-400 mt-1">Momentum Flag • 1:2.0 R:R</div>
-      </button>
-
-      <button data-section="ma44" class="main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700">
-        <div class="flex items-center justify-between">
-          <span class="text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5">
-            <span>📈 4. 44 MA Rising</span>
-          </span>
-          <span id="badge-main-ma44" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-gray-800 text-gray-300 border border-gray-700">0</span>
-        </div>
-        <div class="text-[11px] text-gray-400 mt-1">Rising MA • -1% to +3% Band</div>
-      </button>
+    <!-- Cold-Start Cache Download Banner -->
+    <div id="cacheBanner" class="cache-banner hidden">
+      <span style="font-weight:600;">Downloading NSE market data...</span>
+      <div class="cache-bar-track">
+        <div id="cacheBarFill" class="cache-bar-fill" style="width:0%"></div>
+      </div>
+      <span id="cachePctText" class="font-mono" style="font-weight:700;font-size:0.75rem;">0%</span>
     </div>
 
-    <!-- CHILD NAVIGATION BAR -->
-    <div id="childNavigationBar" class="flex flex-wrap items-center justify-between gap-3 bg-gray-900/80 p-2.5 rounded-xl border border-gray-800">
+    <!-- 3-Column TradingView Markets Summary Strip -->
+    <section id="overviewSection" class="tv-overview-grid" aria-label="Strategy highlights">
+      <!-- Column 1: Setup Breakdown / Dominance Card -->
+      <div class="tv-col" id="overviewCol1"></div>
+      <!-- Column 2: Top Ranked Setups -->
+      <div class="tv-col" id="overviewCol2"></div>
+      <!-- Column 3: Conviction / Risk-Reward Spread -->
+      <div class="tv-col" id="overviewCol3"></div>
+    </section>
+
+    <!-- Toolbar: Timeframes, Filters & Metadata -->
+    <div class="tv-toolbar">
       <div class="flex flex-wrap items-center gap-2" id="childTabsContainer"></div>
 
-      <!-- Live Search Box -->
-      <div class="relative w-full sm:w-64">
-        <input
-          id="searchBox"
-          type="text"
-          placeholder="Search symbol or company..."
-          class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-        />
+      <div class="flex flex-wrap items-center gap-3" style="font-size:0.75rem;color:var(--tv-muted);">
+        <span id="strategyDescription">Loading strategy rules...</span>
+        <span style="color:var(--tv-border);">|</span>
+        <span>Updated <b id="lastUpdatedText" class="font-mono" style="color:var(--tv-ink);">—</b></span>
+        <span style="color:var(--tv-border);">|</span>
+        <span><b id="matchCountText" class="font-mono" style="color:var(--tv-ink);">0</b> setups</span>
       </div>
-    </div>
-
-    <!-- Strategy Summary Metrics Cards -->
-    <div id="statsCardsContainer" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
-
-    <!-- Strategy Info Banner -->
-    <div id="strategyBanner" class="flex items-center justify-between text-xs text-gray-400 bg-gray-900/60 p-2.5 rounded-lg border border-gray-800">
-      <span id="strategyDescription" class="font-medium text-gray-300">Strategy Description</span>
-      <span class="font-mono text-gray-400">
-        Showing <b id="matchCountText" class="text-white">0</b> setups
-      </span>
     </div>
 
     <!-- Main Results Table -->
-    <div class="overflow-x-auto rounded-xl border border-gray-800 bg-gray-900/80 shadow-md custom-scrollbar">
-      <table class="w-full text-left text-xs border-collapse">
-        <thead id="tableHead"></thead>
-        <tbody id="tableBody" class="divide-y divide-gray-800/60 font-mono"></tbody>
-      </table>
-    </div>
+    <section class="tv-table-card" aria-label="Confirmed screener results">
+      <div class="overflow-x-auto custom-scrollbar">
+        <table class="w-full" style="text-align:left;">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-    <!-- Watchlist Section (Forming Setups - Directly Visible Without Clicking) -->
-    <div id="watchlistContainer" class="rounded-xl border border-gray-800 bg-gray-900/40 p-3 mt-1 hidden">
-      <div class="flex items-center justify-between cursor-pointer select-none" id="watchlistHeader">
+    <!-- Collapsible Forming Watchlist -->
+    <section id="watchlistContainer" class="tv-table-card hidden" style="margin-top:0.25rem;" aria-label="Forming watchlist">
+      <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--tv-border);display:flex;align-items:center;justify-content:space-between;background:var(--tv-surface);" id="watchlistHeader">
         <div class="flex items-center gap-2">
-          <span class="text-amber-400 text-sm">⏳</span>
-          <span class="text-xs font-bold text-amber-300 uppercase tracking-wider">
-            Forming Watchlist (Pre-Breakout Coiling)
-          </span>
-          <span id="watchlistCountBadge" class="px-2 py-0.5 rounded-full text-[11px] font-mono bg-amber-950 text-amber-300 border border-amber-500/40">0</span>
+          <span style="width:8px;height:8px;border-radius:9999px;background:var(--tv-orange);display:inline-block;"></span>
+          <span style="font-size:0.875rem;font-weight:700;color:var(--tv-ink);">Forming Watchlist</span>
+          <span style="font-size:0.75rem;color:var(--tv-muted);">Coiling near breakout trigger</span>
+          <span id="watchlistCountBadge" class="font-mono" style="padding:1px 8px;border-radius:9999px;font-size:0.6875rem;font-weight:700;background:var(--tv-orange-soft);color:#b45309;">0</span>
         </div>
-        <button id="btnToggleWatchlist" onclick="toggleWatchlistSection()" class="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer">
-          <span id="watchlistToggleIcon">▲ Collapse Watchlist</span>
+        <button id="btnToggleWatchlist" onclick="toggleWatchlistSection()" class="tv-btn tv-btn-soft">
+          <span id="watchlistToggleIcon">Collapse</span>
         </button>
       </div>
 
-      <div id="watchlistContent" class="mt-3 overflow-x-auto rounded-lg border border-gray-800/80 bg-gray-950/60 custom-scrollbar">
-        <table class="w-full text-left text-xs border-collapse">
+      <div id="watchlistContent" class="overflow-x-auto custom-scrollbar">
+        <table class="w-full" style="text-align:left;">
           <thead id="watchTableHead"></thead>
-          <tbody id="watchTableBody" class="divide-y divide-gray-800/60 font-mono"></tbody>
+          <tbody id="watchTableBody"></tbody>
         </table>
       </div>
-    </div>
+    </section>
 
   </main>
 
-  <!-- Interactive Lightweight Chart Modal -->
-  <div id="chartModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 p-3 sm:p-4">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+  <!-- Interactive TradingView Chart Modal (Light Theme) -->
+  <div id="chartModal" class="fixed inset-0 z-50 hidden items-center justify-center modal-overlay p-3 sm:p-4">
+    <div class="modal-card-light w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh]">
 
       <!-- Modal Header -->
-      <div class="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between bg-gray-950">
+      <div style="padding:0.875rem 1.25rem;border-bottom:1px solid var(--tv-border);display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;background:#ffffff;">
         <div class="flex items-center flex-wrap gap-3">
-          <span id="modalSymbol" class="text-xl font-bold text-white font-mono">—</span>
-          <span id="modalCompany" class="text-sm text-gray-400 font-sans truncate max-w-[200px]">—</span>
-          <span id="modalCmp" class="text-sm font-bold text-emerald-400 font-mono">—</span>
-          <span id="modalStatusBadge" class="text-xs px-2 py-0.5 rounded bg-blue-900/40 text-blue-300 border border-blue-500/30 font-sans font-semibold">
-            —
-          </span>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <button id="btnInspectRejection" class="px-2.5 py-1 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/40 text-xs font-semibold hover:bg-indigo-900 cursor-pointer">
-            Diagnostics 🔍
-          </button>
-          <div class="flex rounded-lg bg-gray-800 p-0.5 border border-gray-700 text-xs font-medium">
-            <button id="btnModalTfDaily" class="px-3 py-1 rounded-md bg-blue-600 text-white font-bold cursor-pointer">Daily</button>
-            <button id="btnModalTfWeekly" class="px-3 py-1 rounded-md text-gray-400 hover:text-white cursor-pointer">Weekly</button>
+          <div id="modalAvatar" class="tv-avatar" style="background:var(--tv-blue-soft);color:var(--tv-blue);">--</div>
+          <div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span id="modalSymbol" style="font-size:1.125rem;font-weight:700;color:var(--tv-ink);">—</span>
+              <span id="modalCmp" class="font-mono" style="font-size:0.9375rem;font-weight:700;color:var(--tv-green);">—</span>
+              <span id="modalStatusBadge" style="font-size:0.75rem;padding:2px 10px;border-radius:9999px;background:var(--tv-blue-soft);color:var(--tv-blue);font-weight:600;">—</span>
+            </div>
+            <div id="modalCompany" style="font-size:0.75rem;color:var(--tv-muted);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">—</div>
           </div>
-          <button id="btnCloseModal" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg leading-none cursor-pointer">
-            ✕
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button id="btnInspectRejection" class="tv-btn tv-btn-soft">
+            Diagnostics
+          </button>
+          <div class="tv-seg-control">
+            <button id="btnModalTfDaily" class="tv-seg-btn active">Daily</button>
+            <button id="btnModalTfWeekly" class="tv-seg-btn">Weekly</button>
+          </div>
+          <button id="btnCloseModal" aria-label="Close chart modal" class="tv-btn tv-btn-ghost" style="font-size:1rem;padding:0.35rem 0.6rem;">
+            &#x2715;
           </button>
         </div>
       </div>
 
-      <!-- Trade Plan Bar (Entry, Target, Stop Loss) -->
-      <div id="modalTradePlanBar" class="bg-[#101726] border-b border-gray-800 px-5 py-2 flex flex-wrap items-center justify-between text-xs font-mono">
-        <div class="flex items-center gap-4">
-          <span>Entry: <b id="planEntry" class="text-cyan-400">—</b></span>
-          <span>•</span>
-          <span>Target: <b id="planTarget" class="text-emerald-400">—</b></span>
-          <span>•</span>
-          <span>Stop Loss: <b id="planStopLoss" class="text-rose-400">—</b></span>
-          <span>•</span>
-          <span>R:R: <b id="planRR" class="text-yellow-400">—</b></span>
+      <!-- Trade Plan Strip -->
+      <div id="modalTradePlanBar" style="background:var(--tv-surface);border-bottom:1px solid var(--tv-border);padding:0.5rem 1.25rem;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;font-size:0.75rem;color:var(--tv-muted);gap:0.5rem;">
+        <div class="flex items-center flex-wrap gap-4 font-mono">
+          <span>Entry: <b id="planEntry" style="color:var(--tv-blue);">—</b></span>
+          <span>Target: <b id="planTarget" style="color:var(--tv-green);">—</b></span>
+          <span>Stop Loss: <b id="planStopLoss" style="color:var(--tv-red);">—</b></span>
+          <span>R:R: <b id="planRR" style="color:var(--tv-ink);">—</b></span>
         </div>
-        <div id="planNotes" class="text-gray-400 text-[11px]">
-          Fitted lines &amp; confirmed touch pivots shown
+        <div id="planNotes" style="font-size:0.75rem;color:var(--tv-muted);">
+          Fitted trendlines &amp; confirmed swing pivots
         </div>
       </div>
 
-      <!-- Chart Container -->
-      <div class="p-4 bg-[#0b0f19]">
+      <!-- Chart Canvas -->
+      <div style="padding:0.75rem 1rem;background:#ffffff;">
         <div id="chartContainer" class="w-full h-[450px]"></div>
       </div>
 
-      <!-- Footer Notes -->
-      <div class="px-5 py-2.5 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
+      <!-- Legend Footer -->
+      <div style="padding:0.625rem 1.25rem;border-top:1px solid var(--tv-border);background:var(--tv-surface);display:flex;align-items:center;justify-content:space-between;font-size:0.75rem;color:var(--tv-muted);flex-wrap:wrap;gap:0.5rem;">
         <div class="flex items-center flex-wrap gap-4">
-          <span class="flex items-center gap-1.5">
-            <span class="w-3.5 h-1 bg-red-500 rounded inline-block"></span>
-            <span class="font-semibold text-gray-300">44 MA Close</span>
+          <span class="flex items-center gap-2">
+            <span style="width:14px;height:3px;background:#f23645;border-radius:2px;display:inline-block;"></span>
+            <span>44 MA Close</span>
           </span>
-          <span class="flex items-center gap-1.5">
-            <span class="w-3.5 h-0.5 border-t border-dashed border-amber-400 inline-block"></span>
-            <span class="font-semibold text-amber-300">44 MA High (Dip Zone)</span>
+          <span class="flex items-center gap-2">
+            <span style="width:14px;height:1px;border-top:1px dashed #ff9800;display:inline-block;"></span>
+            <span>44 MA High</span>
           </span>
-          <span class="flex items-center gap-1.5">
-            <span class="w-3.5 h-0.5 bg-cyan-400 inline-block"></span>
+          <span class="flex items-center gap-2">
+            <span style="width:14px;height:3px;background:#2962ff;border-radius:2px;display:inline-block;"></span>
             <span>Pattern Trendlines</span>
           </span>
-          <span class="flex items-center gap-1.5">
-            <span class="w-2 h-2 rounded-full bg-cyan-400 inline-block"></span>
-            <span>Confirmed Touch Pivots</span>
-          </span>
         </div>
-        <div>
-          <a id="modalTvLink" href="#" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline flex items-center gap-1">
-            TradingView ↗
-          </a>
-        </div>
+        <a id="modalTvLink" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--tv-blue);font-weight:600;">
+          Open in TradingView &rsaquo;
+        </a>
       </div>
     </div>
   </div>
 
-  <!-- "Why Rejected" Debug Modal -->
-  <div id="debugModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/85 p-4">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl p-5">
-      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
-        <div class="flex items-center gap-2">
-          <span class="text-lg">🔍</span>
-          <h2 class="text-sm sm:text-base font-bold text-white">Rule Filter Diagnostics</h2>
-        </div>
-        <button id="btnCloseDebugModal" class="text-gray-400 hover:text-white text-lg cursor-pointer">✕</button>
+  <!-- Rule Filter Diagnostics Modal -->
+  <div id="debugModal" class="fixed inset-0 z-50 hidden items-center justify-center modal-overlay p-4">
+    <div class="modal-card-light w-full max-w-xl overflow-hidden p-5">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:0.75rem;border-bottom:1px solid var(--tv-border);">
+        <h2 style="font-size:1rem;font-weight:700;color:var(--tv-ink);">Rule Filter Diagnostics</h2>
+        <button id="btnCloseDebugModal" aria-label="Close diagnostics modal" class="tv-btn tv-btn-ghost" style="font-size:1rem;padding:0.25rem 0.5rem;">&#x2715;</button>
       </div>
 
-      <div class="py-4 space-y-3 text-xs">
-        <div class="flex items-center gap-2">
+      <div style="padding-top:1rem;display:flex;flex-direction:column;gap:0.75rem;font-size:0.8125rem;">
+        <div class="flex flex-wrap items-center gap-2">
           <input
             id="debugSymbolInput"
             type="text"
-            placeholder="Enter symbol (e.g. RELIANCE, TCS)..."
-            class="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 uppercase font-mono focus:outline-none focus:border-blue-500"
+            placeholder="Symbol (e.g. RELIANCE, TCS)"
+            style="flex:1;min-width:140px;background:var(--tv-surface);border:1px solid var(--tv-border);border-radius:0.5rem;padding:0.5rem 0.75rem;color:var(--tv-ink);text-transform:uppercase;font-weight:600;outline:none;"
           />
-          <select id="debugStrategySelect" class="bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white">
+          <select id="debugStrategySelect" style="background:var(--tv-surface);border:1px solid var(--tv-border);border-radius:0.5rem;padding:0.5rem 0.75rem;color:var(--tv-ink);font-weight:500;">
             <option value="ascending">Ascending Triangle</option>
             <option value="symmetrical">Symmetrical Triangle</option>
             <option value="pole_and_flag">Pole &amp; Flag</option>
             <option value="44ma">44 MA Scanner</option>
           </select>
-          <button id="btnRunDebug" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 font-bold text-white rounded-lg cursor-pointer">
+          <button id="btnRunDebug" class="tv-btn tv-btn-primary" style="padding:0.525rem 1rem;">
             Diagnose
           </button>
         </div>
 
-        <div id="debugResultsContainer" class="p-3 bg-gray-950 rounded-xl border border-gray-800 max-h-72 overflow-y-auto font-mono text-gray-300 custom-scrollbar">
-          Enter a symbol and strategy to inspect rule compliance and rejection reasons.
+        <div id="debugResultsContainer" class="custom-scrollbar" style="padding:0.875rem;background:var(--tv-surface);border-radius:0.75rem;border:1px solid var(--tv-border);max-height:18rem;overflow-y:auto;color:var(--tv-ink);font-size:0.75rem;line-height:1.55;">
+          Enter any NSE symbol and strategy to inspect rule checks and rejection reasons.
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Footer -->
-  <footer class="border-t border-gray-800 bg-[#0b0f19] py-3 px-5 text-center text-xs text-gray-500 mt-auto">
-    <p>For educational purposes only. Not investment advice.</p>
-    <p class="mt-0.5 text-[11px] text-gray-600">
-      Built for Indian Technical Swing Traders • 44 MA &amp; Geometric Trendline Engines
-    </p>
+  <!-- Minimal Clean Footer -->
+  <footer style="border-top:1px solid var(--tv-border);background:#ffffff;padding:0.875rem 1.25rem;text-align:center;font-size:0.75rem;color:var(--tv-muted);margin-top:auto;">
+    For educational purposes only. Not financial advice.
   </footer>
 
   <!-- Application Logic -->
@@ -634,6 +836,8 @@
 
       let ma44RisingFilter = true;
       let ma44GreenFilter = false;
+      let isCacheWarming = false;
+      let totalScannedCount = 0;
 
       const store = {
         ascending: { daily: { confirmed: [], forming: [] }, weekly: { confirmed: [], forming: [] } },
@@ -646,26 +850,56 @@
       let sortField = "distance_pct";
       let sortAsc = true;
 
+      const AVATAR_PALETTE = [
+        { bg: "#eef4ff", fg: "#2962ff" },
+        { bg: "#e6f6f3", fg: "#089981" },
+        { bg: "#fff4e5", fg: "#d97706" },
+        { bg: "#f3eefe", fg: "#6d28d9" },
+        { bg: "#fdebee", fg: "#f23645" },
+        { bg: "#e0f2fe", fg: "#0284c7" }
+      ];
+
+      function getAvatarStyle(sym) {
+        let h = 0;
+        for (let i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) >>> 0;
+        return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+      }
+
       const fmt = (n) => (n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
-      function generateSparklineSvg(points, isUp) {
-        if (!points || points.length < 2) return `<span class="text-gray-600">—</span>`;
+      let svgGradSeq = 0;
+
+      // TradingView-style smooth gradient area sparkline
+      function generateAreaSparklineSvg(points, isUp, width = 76, height = 22) {
+        if (!points || points.length < 2) return `<span style="color:var(--tv-light-muted);">—</span>`;
         let min = points[0], max = points[0];
         for (let i = 1; i < points.length; i++) {
           if (points[i] < min) min = points[i];
           if (points[i] > max) max = points[i];
         }
         const range = max - min || 1;
-        const width = 76;
-        const height = 20;
-        let pathData = "";
+        const stroke = isUp ? "#089981" : "#f23645";
+        const gradId = `tvg_${++svgGradSeq}`;
+        let linePts = "";
         const denom = points.length - 1;
         for (let i = 0; i < points.length; i++) {
-          const x = (i / denom) * width;
-          const y = height - ((points[i] - min) / range) * (height - 4) - 2;
-          pathData += (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
+          const x = ((i / denom) * width).toFixed(1);
+          const y = (height - ((points[i] - min) / range) * (height - 4) - 2).toFixed(1);
+          linePts += (i === 0 ? "M" : "L") + x + " " + y;
         }
-        return `<svg width="76" height="20" class="sparkline-svg"><path d="${pathData}" class="sparkline-path" stroke="${isUp ? '#10b981' : '#ef4444'}"/></svg>`;
+        const areaPts = `${linePts} L${width} ${height} L0 ${height} Z`;
+        return `
+          <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="display:inline-block;vertical-align:middle;overflow:visible;">
+            <defs>
+              <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="${stroke}" stop-opacity="0.22"/>
+                <stop offset="100%" stop-color="${stroke}" stop-opacity="0.01"/>
+              </linearGradient>
+            </defs>
+            <path d="${areaPts}" fill="url(#${gradId})"/>
+            <path d="${linePts}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        `;
       }
 
       const loadedKeys = new Set();
@@ -692,6 +926,53 @@
           store.ma44.both.length + store.ma44.daily.length + store.ma44.weekly.length;
       }
 
+      let cacheCheckTimer = null;
+      let lastObservedCached = -1;
+
+      async function checkCacheProgress() {
+        const banner = document.getElementById("cacheBanner");
+        const fill = document.getElementById("cacheBarFill");
+        const pctText = document.getElementById("cachePctText");
+        try {
+          const res = await fetch(`/api/cache-status?index=${currentIndex}`).then(r => r.json());
+          if (!res) return;
+
+          if (res.ready && !res.bg_active) {
+            const wasWarming = isCacheWarming;
+            isCacheWarming = false;
+            banner.classList.add("hidden");
+            if (cacheCheckTimer) {
+              clearInterval(cacheCheckTimer);
+              cacheCheckTimer = null;
+            }
+            if (wasWarming) {
+              loadedKeys.clear();
+              loadAllData(false);
+            }
+            return;
+          }
+
+          isCacheWarming = !res.ready || res.bg_active;
+          if (!res.ready) {
+            banner.classList.remove("hidden");
+            fill.style.width = `${res.pct}%`;
+            pctText.textContent = `${res.cached}/${res.total} (${res.pct}%)`;
+          } else {
+            banner.classList.add("hidden");
+          }
+
+          if (lastObservedCached >= 0 && res.cached - lastObservedCached >= 40) {
+            loadedKeys.clear();
+            loadDataForCurrentView(false);
+          }
+          lastObservedCached = res.cached;
+
+          if (!cacheCheckTimer && (!res.ready || res.bg_active)) {
+            cacheCheckTimer = setInterval(checkCacheProgress, 2500);
+          }
+        } catch (e) {}
+      }
+
       async function loadDataForCurrentView(forceRefresh = false) {
         const tf = (activeSection === "ma44") ? activeTimeframe : (activeTimeframe === "weekly" ? "weekly" : "daily");
         const cacheKey = `${activeSection}_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`;
@@ -712,13 +993,13 @@
         if (updateText) updateText.textContent = forceRefresh ? "Refreshing..." : "Scanning...";
         if (refreshBtn && forceRefresh) {
           refreshBtn.classList.add("opacity-50", "pointer-events-none");
-          refreshBtn.textContent = "⟳ Refreshing...";
+          refreshBtn.textContent = "Refreshing...";
         }
 
         const tbody = document.getElementById("tableBody");
         if (tbody && !loadedKeys.has(cacheKey)) {
           if (!tbody.firstElementChild || tbody.children.length <= 1) {
-            tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-blue-400 font-sans"><span class="animate-pulse">⚡ Scanning Nifty universe at high speed...</span></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="12" style="padding:3rem 0;text-align:center;color:var(--tv-blue);"><span class="animate-pulse">Scanning NSE universe...</span></td></tr>`;
           } else {
             tbody.style.opacity = "0.55";
           }
@@ -738,6 +1019,7 @@
               store.ascending[tf].forming = res.ascending_pre || [];
               store.symmetrical[tf].confirmed = res.symmetrical_confirmed || [];
               store.symmetrical[tf].forming = res.symmetrical_pre || [];
+              totalScannedCount = res.total_scanned || totalScannedCount;
               loadedKeys.add(`ascending_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
               loadedKeys.add(`symmetrical_${tf}_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
               if (res.last_updated && updateText) updateText.textContent = res.last_updated;
@@ -747,6 +1029,7 @@
             if (res) {
               store.pole_and_flag[tf].confirmed = res.confirmed_breakouts || [];
               store.pole_and_flag[tf].forming = res.pre_breakouts || [];
+              totalScannedCount = res.total_scanned || totalScannedCount;
               loadedKeys.add(cacheKey);
               if (res.last_updated && updateText) updateText.textContent = res.last_updated;
             }
@@ -756,6 +1039,7 @@
               store.ma44.both = res.results.both || [];
               store.ma44.daily = res.results.daily || [];
               store.ma44.weekly = res.results.weekly || [];
+              totalScannedCount = res.total_scanned || totalScannedCount;
               loadedKeys.add(`ma44_daily_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
               loadedKeys.add(`ma44_weekly_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
               loadedKeys.add(`ma44_both_${currentIndex}_${ma44RisingFilter}_${ma44GreenFilter}`);
@@ -776,7 +1060,7 @@
           if (tbody) tbody.style.opacity = "1";
           if (refreshBtn) {
             refreshBtn.classList.remove("opacity-50", "pointer-events-none");
-            refreshBtn.textContent = "⟳ Refresh";
+            refreshBtn.textContent = "Refresh";
           }
         }
       }
@@ -784,12 +1068,12 @@
       async function loadAllData(forceRefresh = false) {
         const myPreloadVer = ++preloadVersion;
         await loadDataForCurrentView(forceRefresh);
-        // Gently preload remaining tabs sequentially in background without saturating Render 0.1 CPU
+        checkCacheProgress();
         setTimeout(() => {
           if (myPreloadVer === preloadVersion) {
             preloadRemainingTabs(myPreloadVer);
           }
-        }, 500);
+        }, 400);
       }
 
       async function preloadRemainingTabs(ver) {
@@ -835,9 +1119,7 @@
             } else if (activeSection === "ma44" && job.type === "ma44") {
               scheduleRenderView();
             }
-          } catch (e) {
-            // Ignore quiet background prefetch failures
-          }
+          } catch (e) {}
         }
       }
 
@@ -867,46 +1149,31 @@
       }
 
       function syncMainHeadingStyles() {
-        document.querySelectorAll(".main-heading-btn").forEach(btn => {
-          const sec = btn.dataset.section;
-          const titleSpan = btn.querySelector("span.text-xs, span.text-sm");
-          if (sec === activeSection) {
-            btn.className = "main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-blue-950/60 border-blue-500/60 shadow-lg ring-1";
-            if (titleSpan) titleSpan.className = "text-xs sm:text-sm font-bold text-white flex items-center gap-1.5";
-          } else {
-            btn.className = "main-heading-btn p-3 rounded-xl border text-left cursor-pointer bg-gray-900/70 border-gray-800 hover:border-gray-700";
-            if (titleSpan) titleSpan.className = "text-xs sm:text-sm font-bold text-gray-300 flex items-center gap-1.5";
-          }
+        document.querySelectorAll(".tv-nav-btn").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.section === activeSection);
         });
       }
 
       function renderChildBar() {
         const container = document.getElementById("childTabsContainer");
+        const mkBtn = (label, tf, isActive) =>
+          `<button class="tv-seg-btn ${isActive ? 'active' : ''}" onclick="setTimeframe('${tf}')">${label}</button>`;
 
         if (activeSection === "ma44") {
           container.innerHTML = `
-            <div class="flex items-center gap-1.5 bg-gray-950 p-1 rounded-lg border border-gray-800">
-              <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'both' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('both')">
-                Both Daily + Weekly (${store.ma44.both.length})
-              </button>
-              <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
-                Daily (${store.ma44.daily.length})
-              </button>
-              <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
-                Weekly (${store.ma44.weekly.length})
-              </button>
+            <div class="tv-seg-control">
+              ${mkBtn('Both (' + store.ma44.both.length + ')', 'both', activeTimeframe === 'both')}
+              ${mkBtn('Daily (' + store.ma44.daily.length + ')', 'daily', activeTimeframe === 'daily')}
+              ${mkBtn('Weekly (' + store.ma44.weekly.length + ')', 'weekly', activeTimeframe === 'weekly')}
             </div>
-            <div class="flex items-center gap-2 ml-2">
-              <span class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-950/70 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shadow-sm">
-                <span>⚡ -1.0% to +3.0% Band</span>
-              </span>
-              <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
-                <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" class="rounded bg-gray-950 border-gray-700" />
-                <span>MA Rising Only</span>
+            <div class="flex flex-wrap items-center gap-3" style="margin-left:0.25rem;">
+              <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.75rem;font-weight:500;color:var(--tv-ink);cursor:pointer;user-select:none;">
+                <input type="checkbox" id="chkRising" ${ma44RisingFilter ? 'checked' : ''} onchange="toggleFilter('rising')" />
+                <span>Rising MA Only</span>
               </label>
-              <label class="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
-                <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" class="rounded bg-gray-950 border-gray-700" />
-                <span>Green Candle (Close&gt;Open)</span>
+              <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.75rem;font-weight:500;color:var(--tv-ink);cursor:pointer;user-select:none;">
+                <input type="checkbox" id="chkGreen" ${ma44GreenFilter ? 'checked' : ''} onchange="toggleFilter('green')" />
+                <span>Green Candle</span>
               </label>
             </div>
           `;
@@ -915,28 +1182,236 @@
 
         const secData = store[activeSection];
         const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
-        const confirmedList = secData[tf].confirmed;
         const formingList = secData[tf].forming;
 
         container.innerHTML = `
-          <div class="flex items-center gap-1 bg-gray-950 p-1 rounded-lg border border-gray-800">
-            <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'daily' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('daily')">
-              📅 Daily (${secData.daily.confirmed.length})
-            </button>
-            <button class="px-3 py-1 rounded text-xs font-bold cursor-pointer ${activeTimeframe === 'weekly' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}" onclick="setTimeframe('weekly')">
-              📆 Weekly (${secData.weekly.confirmed.length})
-            </button>
+          <div class="tv-seg-control">
+            ${mkBtn('Daily (' + secData.daily.confirmed.length + ')', 'daily', tf === 'daily')}
+            ${mkBtn('Weekly (' + secData.weekly.confirmed.length + ')', 'weekly', tf === 'weekly')}
           </div>
-          <div class="flex items-center gap-2 ml-2">
-            <span class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-600 text-white flex items-center gap-1.5 shadow-sm">
-              <span>🚀 Confirmed Breakout &amp; Retest</span>
-              <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-500/40">${confirmedList.length}</span>
-            </span>
-            <button onclick="toggleWatchlistSection()" class="px-3 py-1 rounded-lg text-xs font-bold bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-500/40 flex items-center gap-1.5 cursor-pointer">
-              <span>⏳ Forming Watchlist</span>
-              <span class="px-1.5 py-0.2 rounded-full text-[11px] font-mono bg-amber-950 text-amber-300">${formingList.length}</span>
-            </button>
+          <button onclick="toggleWatchlistSection()" class="tv-btn tv-btn-soft" style="font-size:0.75rem;">
+            <span style="width:7px;height:7px;border-radius:9999px;background:var(--tv-orange);display:inline-block;"></span>
+            <span>Forming Watchlist (${formingList.length})</span>
+          </button>
+        `;
+      }
+
+      function renderOverviewColumns(mode, dataCtx) {
+        const col1 = document.getElementById("overviewCol1");
+        const col2 = document.getElementById("overviewCol2");
+        const col3 = document.getElementById("overviewCol3");
+
+        const renderMiniSpark = (item, fallbackUp, label) => {
+          const pts = (item && item.sparkline && item.sparkline.length >= 2) ? item.sparkline : null;
+          if (!pts) {
+            return `<div style="height:56px;display:flex;align-items:center;justify-content:center;color:var(--tv-light-muted);font-size:0.75rem;">Awaiting setups</div>`;
+          }
+          return `
+            <div class="tv-col-spark-wrap">
+              ${generateAreaSparklineSvg(pts, fallbackUp, 240, 48)}
+              <div class="tv-col-spark-caption">${label}</div>
+            </div>
+          `;
+        };
+
+        const renderTvRow = (item, subRightHtml, tfArg) => {
+          const av = getAvatarStyle(item.symbol);
+          return `
+            <div class="tv-item-row" onclick="openChartModal('${item.symbol}', '${tfArg}')">
+              <div class="tv-item-left">
+                <div class="tv-avatar" style="background:${av.bg};color:${av.fg};">${item.symbol.slice(0, 2)}</div>
+                <div style="min-width:0;">
+                  <div class="tv-item-title">${item.company || item.symbol}</div>
+                  <span class="tv-ticker-pill">${item.symbol}</span>
+                </div>
+              </div>
+              <div class="tv-item-right">
+                <div class="tv-price-main">${fmt(item.cmp)}<span class="tv-price-unit">INR</span></div>
+                <div class="tv-chg-sub">${subRightHtml}</div>
+              </div>
+            </div>
+          `;
+        };
+
+        if (mode === "ma44") {
+          const { list, touchCount, aboveCount, belowCount, tfArg } = dataCtx;
+          const total = touchCount + aboveCount + belowCount || 1;
+          const pctT = ((touchCount / total) * 100).toFixed(1);
+          const pctA = ((aboveCount / total) * 100).toFixed(1);
+          const pctB = ((belowCount / total) * 100).toFixed(1);
+
+          const pmpatilList = list.filter(x => x.chartink_qualified);
+          const leadItem = list[0];
+          const secondItem = pmpatilList[0] || list[1];
+
+          col1.innerHTML = `
+            ${renderMiniSpark(leadItem, (leadItem?.day_change_pct || 0) >= 0, leadItem ? `${leadItem.symbol} • 12 bars` : '44 MA Pulse')}
+            <div class="tv-col-heading"><span>44 MA band breakdown</span></div>
+            <div class="tv-legend-row">
+              <div>
+                <div class="tv-legend-label"><span class="tv-legend-dot" style="background:var(--tv-blue);"></span>Touching</div>
+                <div class="tv-legend-val">${pctT}%</div>
+              </div>
+              <div>
+                <div class="tv-legend-label"><span class="tv-legend-dot" style="background:var(--tv-green);"></span>Above</div>
+                <div class="tv-legend-val">${pctA}%</div>
+              </div>
+              <div>
+                <div class="tv-legend-label"><span class="tv-legend-dot" style="background:var(--tv-red);"></span>Below</div>
+                <div class="tv-legend-val">${pctB}%</div>
+              </div>
+            </div>
+            <div class="tv-seg-bar">
+              <div class="tv-seg-part" style="width:${pctT}%;background:var(--tv-blue);"></div>
+              <div class="tv-seg-part" style="width:${pctA}%;background:var(--tv-green);"></div>
+              <div class="tv-seg-part" style="width:${pctB}%;background:var(--tv-red);"></div>
+            </div>
+            ${list.slice(0, 2).map(it => renderTvRow(
+              it,
+              `<span style="color:${it.distance_pct >= 0 ? 'var(--tv-green)' : 'var(--tv-red)'};">${it.distance_pct > 0 ? '+' : ''}${Number(it.distance_pct).toFixed(2)}% dist</span>`,
+              tfArg
+            )).join("") || `<div style="font-size:0.75rem;color:var(--tv-muted);padding:0.5rem 0;">No qualifying 44 MA stocks yet.</div>`}
+            <a class="tv-see-all" onclick="document.getElementById('tableHead').scrollIntoView({behavior:'smooth'})">See all ${list.length} setups &rsaquo;</a>
+          `;
+
+          const topClosest = list.slice(0, 4);
+          col2.innerHTML = `
+            ${renderMiniSpark(secondItem, true, secondItem ? `${secondItem.symbol} • Top match` : 'Band Leader')}
+            <div class="tv-col-heading"><span>Closest to 44 MA &rsaquo;</span><span class="tv-col-heading-sub">-1% to +3%</span></div>
+            ${topClosest.map(it => renderTvRow(
+              it,
+              `<span style="color:${(it.day_change_pct || 0) >= 0 ? 'var(--tv-green)' : 'var(--tv-red)'};">${(it.day_change_pct || 0) >= 0 ? '+' : ''}${it.day_change_pct}%</span>`,
+              tfArg
+            )).join("") || `<div style="font-size:0.75rem;color:var(--tv-muted);padding:1rem 0;">Scanning stocks near rising 44 MA...</div>`}
+            <a class="tv-see-all" onclick="changeSort('distance_pct')">Sort by distance &rsaquo;</a>
+          `;
+
+          const multiTf = store.ma44.both.slice(0, 3);
+          const spreadSource = multiTf.length > 0 ? multiTf : pmpatilList.slice(0, 3);
+          col3.innerHTML = `
+            ${renderMiniSpark(spreadSource[0] || leadItem, true, multiTf.length > 0 ? 'Daily + Weekly Confluence' : 'PMPatil Filter')}
+            <div class="tv-col-heading"><span>High-conviction 44 MA &rsaquo;</span><span class="tv-col-heading-sub">${pmpatilList.length} PMPatil</span></div>
+            ${spreadSource.map(it => {
+              const upPct = it.target && it.cmp ? Math.min(92, Math.max(45, Math.round(((it.target - it.cmp) / it.cmp) * 800))) : 75;
+              const riskPct = 100 - upPct;
+              return `
+                <div class="tv-spread-row" onclick="openChartModal('${it.symbol}', '${tfArg}')">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="tv-item-left">
+                      <div class="tv-avatar" style="background:${getAvatarStyle(it.symbol).bg};color:${getAvatarStyle(it.symbol).fg};">${it.symbol.slice(0, 2)}</div>
+                      <div>
+                        <div class="tv-item-title">${it.symbol}</div>
+                        <div style="font-size:0.72rem;color:var(--tv-muted);">${it.timeframe} &bull; MA &#8377;${fmt(it.ma44)}</div>
+                      </div>
+                    </div>
+                    <div class="tv-item-right">
+                      <div class="tv-price-main">${Number(it.distance_pct).toFixed(2)}%</div>
+                      <div class="tv-chg-sub" style="color:var(--tv-orange);">${it.chartink_qualified ? 'PMPatil' : it.status}</div>
+                    </div>
+                  </div>
+                  <div class="tv-split-bar">
+                    <div style="width:${upPct}%;background:var(--tv-blue);"></div>
+                    <div style="width:${riskPct}%;background:var(--tv-orange);"></div>
+                  </div>
+                </div>
+              `;
+            }).join("") || `<div style="font-size:0.75rem;color:var(--tv-muted);padding:1rem 0;">No multi-timeframe confluence setups right now.</div>`}
+            <a class="tv-see-all" onclick="document.getElementById('btnOpenDebugger').click()">Check any stock &rsaquo;</a>
+          `;
+          return;
+        }
+
+        // Pattern Modes (Ascending, Symmetrical, Pole & Flag)
+        const { titleName, confirmedList, formingList, tf } = dataCtx;
+        const boCount = confirmedList.filter(x => !(x.status || "").includes("Retest")).length;
+        const retCount = confirmedList.filter(x => (x.status || "").includes("Retest")).length;
+        const formCount = formingList.length;
+        const totalAll = boCount + retCount + formCount || 1;
+
+        const pctBo = ((boCount / totalAll) * 100).toFixed(1);
+        const pctRet = ((retCount / totalAll) * 100).toFixed(1);
+        const pctForm = ((formCount / totalAll) * 100).toFixed(1);
+
+        const byConfidence = [...confirmedList].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        const byRR = [...confirmedList, ...formingList].sort((a, b) => (b.rr_ratio || 0) - (a.rr_ratio || 0));
+        const topPick = byConfidence[0] || formingList[0];
+
+        col1.innerHTML = `
+          ${renderMiniSpark(topPick, true, topPick ? `${topPick.symbol} • Top ${titleName}` : titleName)}
+          <div class="tv-col-heading"><span>${titleName} breakdown</span></div>
+          <div class="tv-legend-row">
+            <div>
+              <div class="tv-legend-label"><span class="tv-legend-dot" style="background:var(--tv-blue);"></span>Breakout</div>
+              <div class="tv-legend-val">${pctBo}%</div>
+            </div>
+            <div>
+              <div class="tv-legend-label"><span class="tv-legend-dot" style="background:var(--tv-green);"></span>Retest</div>
+              <div class="tv-legend-val">${pctRet}%</div>
+            </div>
+            <div>
+              <div class="tv-legend-label"><span class="tv-legend-dot" style="background:var(--tv-orange);"></span>Forming</div>
+              <div class="tv-legend-val">${pctForm}%</div>
+            </div>
           </div>
+          <div class="tv-seg-bar">
+            <div class="tv-seg-part" style="width:${pctBo}%;background:var(--tv-blue);"></div>
+            <div class="tv-seg-part" style="width:${pctRet}%;background:var(--tv-green);"></div>
+            <div class="tv-seg-part" style="width:${pctForm}%;background:var(--tv-orange);"></div>
+          </div>
+          ${byConfidence.slice(0, 2).map(it => renderTvRow(
+            it,
+            `<span style="color:var(--tv-green);">${it.risk_reward} &bull; ${it.confidence}%</span>`,
+            tf
+          )).join("") || `<div style="font-size:0.75rem;color:var(--tv-muted);padding:0.5rem 0;">${isCacheWarming ? 'Loading NSE data...' : 'No confirmed breakouts yet.'}</div>`}
+          <a class="tv-see-all" onclick="document.getElementById('tableHead').scrollIntoView({behavior:'smooth'})">See all confirmed (${confirmedList.length}) &rsaquo;</a>
+        `;
+
+        const col2List = confirmedList.length > 0 ? confirmedList.slice(0, 4) : formingList.slice(0, 4);
+        col2.innerHTML = `
+          ${renderMiniSpark(col2List[0], true, col2List[0] ? `${col2List[0].symbol} • Closest trigger` : 'Active Triggers')}
+          <div class="tv-col-heading"><span>${confirmedList.length > 0 ? 'Active breakouts' : 'Watchlist triggers'} &rsaquo;</span><span class="tv-col-heading-sub">${tf.toUpperCase()}</span></div>
+          ${col2List.map(it => {
+            const upside = it.target && it.cmp ? (((it.target - it.cmp) / it.cmp) * 100).toFixed(1) : null;
+            return renderTvRow(
+              it,
+              upside != null ? `<span style="color:var(--tv-green);">+${upside}% tgt</span>` : `<span style="color:var(--tv-muted);">${it.risk_reward}</span>`,
+              tf
+            );
+          }).join("") || `<div style="font-size:0.75rem;color:var(--tv-muted);padding:1rem 0;">No active pattern triggers in current universe.</div>`}
+          <a class="tv-see-all" onclick="changeSort('cmp')">Browse full screener &rsaquo;</a>
+        `;
+
+        const col3List = byRR.slice(0, 3);
+        col3.innerHTML = `
+          ${renderMiniSpark(col3List[0] || topPick, true, `${totalScannedCount || 500} stocks scanned`)}
+          <div class="tv-col-heading"><span>Best Risk : Reward &rsaquo;</span><span class="tv-col-heading-sub">${confirmedList.filter(x => (x.confidence || 0) >= 80).length} high conf</span></div>
+          ${col3List.map(it => {
+            const rrNum = Math.min(8, Math.max(1, Number(it.rr_ratio || 2)));
+            const rewardShare = Math.round((rrNum / (rrNum + 1)) * 100);
+            const riskShare = 100 - rewardShare;
+            return `
+              <div class="tv-spread-row" onclick="openChartModal('${it.symbol}', '${tf}')">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="tv-item-left">
+                    <div class="tv-avatar" style="background:${getAvatarStyle(it.symbol).bg};color:${getAvatarStyle(it.symbol).fg};">${it.symbol.slice(0, 2)}</div>
+                    <div>
+                      <div class="tv-item-title">${it.symbol}</div>
+                      <div style="font-size:0.72rem;color:var(--tv-muted);">Tgt &#8377;${fmt(it.target)} &bull; SL &#8377;${fmt(it.stop_loss)}</div>
+                    </div>
+                  </div>
+                  <div class="tv-item-right">
+                    <div class="tv-price-main">${it.risk_reward}</div>
+                    <div class="tv-chg-sub" style="color:var(--tv-orange);">${it.confidence}% conf</div>
+                  </div>
+                </div>
+                <div class="tv-split-bar">
+                  <div style="width:${rewardShare}%;background:var(--tv-blue);"></div>
+                  <div style="width:${riskShare}%;background:var(--tv-orange);"></div>
+                </div>
+              </div>
+            `;
+          }).join("") || `<div style="font-size:0.75rem;color:var(--tv-muted);padding:1rem 0;">Run Why Rejected? to inspect any symbol.</div>`}
+          <a class="tv-see-all" onclick="document.getElementById('btnOpenDebugger').click()">Inspect any symbol &rsaquo;</a>
         `;
       }
 
@@ -957,10 +1432,10 @@
         const icon = document.getElementById("watchlistToggleIcon");
         if (showWatchlist) {
           cont.classList.remove("hidden");
-          icon.textContent = "▲ Collapse Watchlist";
+          icon.textContent = "Collapse";
         } else {
           cont.classList.add("hidden");
-          icon.textContent = "▼ Expand Watchlist";
+          icon.textContent = "Expand";
         }
       };
 
@@ -985,12 +1460,16 @@
         requestAnimationFrame(appendNextChunk);
       }
 
+      function sortArrow(field) {
+        if (sortField !== field) return `<span style="color:#d1d4dc;margin-left:3px;">&#8597;</span>`;
+        return `<span style="color:var(--tv-blue);margin-left:3px;">${sortAsc ? '&#9650;' : '&#9660;'}</span>`;
+      }
+
       function renderView() {
         const myToken = ++tableRenderToken;
         syncMainHeadingStyles();
         renderChildBar();
 
-        const statsContainer = document.getElementById("statsCardsContainer");
         const bannerDesc = document.getElementById("strategyDescription");
         const countText = document.getElementById("matchCountText");
         const watchlistWrap = document.getElementById("watchlistContainer");
@@ -1010,111 +1489,40 @@
             else if (st.includes("Near Below")) belowCount++;
           }
 
-          statsContainer.innerHTML = `
-            <div class="bg-blue-950/50 border border-blue-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
-              <div>
-                <div class="text-[11px] text-blue-400 font-medium">Touching 44 MA</div>
-                <div class="text-2xl font-bold font-mono text-blue-300">${touchCount}</div>
-                <div class="text-[10px] text-gray-400">Low ≤ MA44 ≤ High</div>
-              </div>
-              <span class="text-3xl text-blue-400">📍</span>
-            </div>
-            <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <div class="text-[11px] text-emerald-400 font-medium">Above (0–3%)</div>
-                <div class="text-2xl font-bold font-mono text-emerald-300">${aboveCount}</div>
-                <div class="text-[10px] text-gray-400">0.0% to +3.0% Clearance</div>
-              </div>
-              <span class="text-3xl text-emerald-400">📈</span>
-            </div>
-            <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <div class="text-[11px] text-amber-400 font-medium">Near Below (−1–0%)</div>
-                <div class="text-2xl font-bold font-mono text-amber-300">${belowCount}</div>
-                <div class="text-[10px] text-gray-400">-1.0% to 0.0% Under MA44</div>
-              </div>
-              <span class="text-3xl text-amber-400">⚡</span>
-            </div>
-            <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-              <div>
-                <div class="text-[11px] text-gray-400 font-medium">Fixed Band Range</div>
-                <div class="text-xl font-bold font-mono text-white">-1.0% to +3.0%</div>
-                <div class="text-[10px] text-emerald-400">Rising 44 MA Only</div>
-              </div>
-              <span class="text-2xl text-purple-400">🎯</span>
-            </div>
-          `;
+          renderOverviewColumns("ma44", {
+            list, touchCount, aboveCount, belowCount,
+            tfArg: activeTimeframe === "weekly" ? "weekly" : "daily"
+          });
 
-          bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">44 MA Rising Scanner (${activeTimeframe.toUpperCase()}):</span> All stocks qualifying near rising 44 MA support strictly inside the <b class="text-white font-mono">-1.0% to +3.0%</b> distance band. First match wins: Touching (Blue), Above (0–3%) (Green), Near Below (−1–0%) (Orange).`;
-
+          bannerDesc.innerHTML = `<b style="color:var(--tv-ink);">44 MA Rising (${activeTimeframe.toUpperCase()})</b> &bull; Band -1.0% to +3.0%`;
           render44MaTable(list, myToken);
           return;
         }
 
         watchlistWrap.classList.remove("hidden");
         const wlContent = document.getElementById("watchlistContent");
-        if (wlContent) {
-          if (showWatchlist) wlContent.classList.remove("hidden");
-          else wlContent.classList.add("hidden");
-        }
+        if (wlContent) wlContent.classList.toggle("hidden", !showWatchlist);
 
         const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
         const secData = store[activeSection];
-        const confirmedRaw = secData[tf].confirmed || [];
-        const formingRaw = secData[tf].forming || [];
-
-        const confirmedList = filterAndSort(confirmedRaw);
-        const formingList = filterAndSort(formingRaw);
+        const confirmedList = filterAndSort(secData[tf].confirmed || []);
+        const formingList = filterAndSort(secData[tf].forming || []);
 
         countText.textContent = confirmedList.length;
         document.getElementById("watchlistCountBadge").textContent = formingList.length;
 
         let titleName = "Ascending Triangle";
-        let minRRText = "1:3 Strict";
+        let minRRText = "Min 1:3 R:R";
         if (activeSection === "symmetrical") {
           titleName = "Symmetrical Triangle";
-          minRRText = "1:2.5 Strict";
+          minRRText = "Min 1:2.5 R:R";
         } else if (activeSection === "pole_and_flag") {
           titleName = "Pole & Flag";
-          minRRText = "1:2.0 Strict";
+          minRRText = "Min 1:2.0 R:R";
         }
 
-        statsContainer.innerHTML = `
-          <div class="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 flex items-center justify-between shadow-sm">
-            <div>
-              <div class="text-[11px] text-emerald-400 font-medium">${titleName} Confirmed</div>
-              <div class="text-2xl font-bold font-mono text-emerald-300">${confirmedRaw.length}</div>
-              <div class="text-[10px] text-gray-400">${tf.toUpperCase()} Breakout &amp; Retest</div>
-            </div>
-            <span class="text-3xl text-emerald-400">🚀</span>
-          </div>
-          <div class="bg-amber-950/50 border border-amber-500/40 rounded-xl p-3 flex items-center justify-between">
-            <div>
-              <div class="text-[11px] text-amber-400 font-medium">Forming Watchlist</div>
-              <div class="text-2xl font-bold font-mono text-amber-300">${formingRaw.length}</div>
-              <div class="text-[10px] text-gray-400">Coiling under breakout trigger</div>
-            </div>
-            <span class="text-3xl text-amber-400">⏳</span>
-          </div>
-          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-            <div>
-              <div class="text-[11px] text-blue-400 font-medium">Risk : Reward</div>
-              <div class="text-xl font-bold font-mono text-blue-300">${minRRText}</div>
-              <div class="text-[10px] text-gray-400">Uninflated Target</div>
-            </div>
-            <span class="text-2xl text-blue-400">🎯</span>
-          </div>
-          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 flex items-center justify-between">
-            <div>
-              <div class="text-[11px] text-yellow-400 font-medium">Swing Quality</div>
-              <div class="text-xl font-bold font-mono text-yellow-400">High Conviction</div>
-              <div class="text-[10px] text-gray-400">Volume &amp; Geometry Confirmed</div>
-            </div>
-            <span class="text-2xl text-yellow-400">🏆</span>
-          </div>
-        `;
-
-        bannerDesc.innerHTML = `<span class="text-emerald-400 font-bold">${titleName} (${tf.toUpperCase()}):</span> Showing institutional breakouts and retest setups meeting strict geometry, confirmed swing touches, volume surge, and minimum R:R rules.`;
+        renderOverviewColumns("pattern", { titleName, confirmedList, formingList, tf });
+        bannerDesc.innerHTML = `<b style="color:var(--tv-ink);">${titleName} (${tf.toUpperCase()})</b> &bull; ${minRRText}`;
 
         renderPatternTable(confirmedList, "tableHead", "tableBody", false, myToken);
         renderPatternTable(formingList, "watchTableHead", "watchTableBody", true, myToken);
@@ -1125,25 +1533,32 @@
         const tbody = document.getElementById(bodyId);
 
         thead.innerHTML = `
-          <tr class="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
-            <th class="py-3 px-4 cursor-pointer hover:text-white" onclick="changeSort('symbol')">Symbol</th>
-            <th class="py-3 px-3">Company</th>
-            <th class="py-3 px-3 text-center">Pattern</th>
-            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('cmp')">CMP (₹)</th>
-            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">${isWatchlist ? 'Anticipated Entry' : 'Entry'}</th>
-            <th class="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
-            <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target</th>
-            <th class="py-3 px-3 text-center text-yellow-400">R:R</th>
-            <th class="py-3 px-3 text-center">Confidence</th>
-            <th class="py-3 px-3 text-center">Status</th>
-            <th class="py-3 px-3 text-center">Signal Date</th>
-            <th class="py-3 px-3 text-center">Trend (12B)</th>
-            <th class="py-3 px-4 text-center">Chart Action</th>
+          <tr>
+            <th class="sortable" onclick="changeSort('symbol')">Symbol${sortArrow('symbol')}</th>
+            <th style="text-align:center;">Pattern</th>
+            <th class="sortable" style="text-align:right;" onclick="changeSort('cmp')">CMP${sortArrow('cmp')}</th>
+            <th style="text-align:right;">${isWatchlist ? 'Est. Entry' : 'Entry'}</th>
+            <th style="text-align:right;">Stop-Loss</th>
+            <th style="text-align:right;">Target</th>
+            <th class="sortable" style="text-align:center;" onclick="changeSort('rr_ratio')">R:R${sortArrow('rr_ratio')}</th>
+            <th class="sortable" style="text-align:center;" onclick="changeSort('confidence')">Confidence${sortArrow('confidence')}</th>
+            <th style="text-align:center;">Status</th>
+            <th style="text-align:center;">Signal Date</th>
+            <th style="text-align:center;">Trend (12B)</th>
+            <th style="text-align:center;">Action</th>
           </tr>
         `;
 
         if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="13" class="py-10 text-center text-gray-500 font-sans">${isWatchlist ? 'No forming setups currently on watchlist.' : 'No confirmed breakouts matching criteria.'}</td></tr>`;
+          let emptyMsg = isWatchlist ? 'No forming setups on watchlist.' : 'No confirmed breakouts matching criteria.';
+          if (!isWatchlist) {
+            const secData = store[activeSection];
+            const tfKey = activeTimeframe === 'weekly' ? 'weekly' : 'daily';
+            const fCount = secData && secData[tfKey] ? (secData[tfKey].forming || []).length : 0;
+            if (fCount > 0) emptyMsg = `No confirmed breakouts today — view ${fCount} setup${fCount > 1 ? 's' : ''} in Forming Watchlist below.`;
+          }
+          if (isCacheWarming) emptyMsg = 'Downloading NSE market data in the background — setups will appear automatically.';
+          tbody.innerHTML = `<tr><td colspan="12" style="padding:2.5rem 1rem;text-align:center;color:var(--tv-muted);">${emptyMsg}</td></tr>`;
           return;
         }
 
@@ -1151,39 +1566,47 @@
         const rows = list.map(item => {
           const isUp = (item.cmp >= (item.buy_price || 0));
           const isBestSwing = (item.confidence >= 80 && item.rr_ratio >= 3.0);
-          const statusBadge = isWatchlist
-            ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-            : (item.status.includes('Retest') ? 'bg-purple-950/60 text-purple-300 border-purple-500/40' : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 font-bold');
+          const av = getAvatarStyle(item.symbol);
+
+          let statusColor = isWatchlist ? '#b45309' : 'var(--tv-green)';
+          let statusBg = isWatchlist ? 'var(--tv-orange-soft)' : 'var(--tv-green-soft)';
+          if (!isWatchlist && item.status.includes('Retest')) {
+            statusColor = '#6d28d9';
+            statusBg = '#f3eefe';
+          }
 
           return `
             <tr class="cursor-pointer" onclick="openChartModal('${item.symbol}', '${tfArg}')">
-              <td class="py-3 px-4 font-bold text-white hover:text-blue-400">
-                <div class="flex items-center gap-1.5">
-                  <span>${item.symbol}</span>
-                  ${isBestSwing ? '<span class="text-[9px] px-1 py-0.2 rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 font-sans">BEST SWING</span>' : ''}
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="tv-avatar" style="width:28px;height:28px;font-size:0.6875rem;background:${av.bg};color:${av.fg};">${item.symbol.slice(0, 2)}</div>
+                  <div>
+                    <div class="flex items-center gap-1" style="font-weight:700;color:var(--tv-ink);">
+                      <span>${item.symbol}</span>
+                      ${isBestSwing ? '<span style="font-size:0.625rem;padding:1px 5px;border-radius:4px;background:var(--tv-blue-soft);color:var(--tv-blue);font-weight:700;">TOP</span>' : ''}
+                    </div>
+                    <div style="font-size:0.6875rem;color:var(--tv-muted);max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.company}</div>
+                  </div>
                 </div>
               </td>
-              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
-              <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border bg-gray-800 text-gray-300 border-gray-700">${item.pattern}</span>
+              <td style="text-align:center;">
+                <span class="tv-ticker-pill">${item.pattern}</span>
               </td>
-              <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
-              <td class="py-3 px-3 text-right text-cyan-400 font-mono font-semibold">₹${fmt(item.buy_price)}</td>
-              <td class="py-3 px-3 text-right text-rose-400 font-mono">₹${fmt(item.stop_loss)}</td>
-              <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
-              <td class="py-3 px-3 text-center font-bold text-yellow-400 font-mono">${item.risk_reward}</td>
-              <td class="py-3 px-3 text-center">
-                <span class="px-2 py-0.5 rounded text-[11px] font-mono ${item.confidence >= 80 ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/40' : 'bg-gray-800 text-gray-300'}">${item.confidence}%</span>
+              <td class="font-mono" style="text-align:right;font-weight:600;color:var(--tv-ink);">&#8377;${fmt(item.cmp)}</td>
+              <td class="font-mono" style="text-align:right;color:var(--tv-blue);font-weight:600;">&#8377;${fmt(item.buy_price)}</td>
+              <td class="font-mono" style="text-align:right;color:var(--tv-red);font-weight:500;">&#8377;${fmt(item.stop_loss)}</td>
+              <td class="font-mono" style="text-align:right;color:var(--tv-green);font-weight:700;">&#8377;${fmt(item.target)}</td>
+              <td class="font-mono" style="text-align:center;font-weight:700;color:var(--tv-ink);">${item.risk_reward}</td>
+              <td class="font-mono" style="text-align:center;">
+                <span style="padding:2px 8px;border-radius:9999px;font-size:0.6875rem;font-weight:700;${item.confidence >= 80 ? 'background:var(--tv-green-soft);color:var(--tv-green);' : 'background:var(--tv-pill);color:var(--tv-muted);'}">${item.confidence}%</span>
               </td>
-              <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold border ${statusBadge}">${item.status}</span>
+              <td style="text-align:center;">
+                <span style="display:inline-block;padding:2px 9px;border-radius:9999px;font-size:0.6875rem;font-weight:600;background:${statusBg};color:${statusColor};">${item.status}</span>
               </td>
-              <td class="py-3 px-3 text-center font-mono text-gray-400 text-[11px]">${item.breakout_date || item.pattern_end_date || 'Recent'}</td>
-              <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
-              <td class="py-3 px-4 text-center font-sans">
-                <button class="px-2.5 py-1 rounded text-xs font-semibold border ${isWatchlist ? 'bg-amber-600/20 text-amber-300 border-amber-500/40' : 'bg-emerald-600/20 text-emerald-300 border-emerald-500/40'}">
-                  <span>Draw Chart 📐</span>
-                </button>
+              <td class="font-mono" style="text-align:center;color:var(--tv-muted);font-size:0.75rem;">${item.breakout_date || item.pattern_end_date || 'Recent'}</td>
+              <td style="text-align:center;">${generateAreaSparklineSvg(item.sparkline, isUp)}</td>
+              <td style="text-align:center;">
+                <button class="tv-btn-chart">Chart</button>
               </td>
             </tr>
           `;
@@ -1196,61 +1619,74 @@
         const tbody = document.getElementById("tableBody");
 
         thead.innerHTML = `
-          <tr class="border-b border-gray-800 bg-gray-950/70 text-gray-400 font-semibold select-none">
-            <th class="py-3 px-4 cursor-pointer hover:text-white" onclick="changeSort('symbol')">Symbol</th>
-            <th class="py-3 px-3">Company</th>
-            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('cmp')">CMP (₹)</th>
-            <th class="py-3 px-3 text-right text-red-400">44 MA (₹)</th>
-            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('distance_pct')">Distance %</th>
-            <th class="py-3 px-3 text-center">Status Badge</th>
-            <th class="py-3 px-3 text-right text-cyan-400 font-semibold">Swing Entry</th>
-            <th class="py-3 px-3 text-right text-rose-400">Stop-Loss</th>
-            <th class="py-3 px-3 text-right text-emerald-400 font-bold">Target (1:3)</th>
-            <th class="py-3 px-3 text-right cursor-pointer hover:text-white" onclick="changeSort('day_change_pct')">Day Chg %</th>
-            <th class="py-3 px-3 text-center">Timeframe</th>
-            <th class="py-3 px-3 text-center">Trend (12B)</th>
-            <th class="py-3 px-4 text-center">Chart Action</th>
+          <tr>
+            <th class="sortable" onclick="changeSort('symbol')">Symbol${sortArrow('symbol')}</th>
+            <th class="sortable" style="text-align:right;" onclick="changeSort('cmp')">CMP${sortArrow('cmp')}</th>
+            <th style="text-align:right;">44 MA</th>
+            <th class="sortable" style="text-align:right;" onclick="changeSort('distance_pct')">Distance %${sortArrow('distance_pct')}</th>
+            <th style="text-align:center;">Status</th>
+            <th style="text-align:right;">Entry</th>
+            <th style="text-align:right;">Stop-Loss</th>
+            <th style="text-align:right;">Target (1:3)</th>
+            <th class="sortable" style="text-align:right;" onclick="changeSort('day_change_pct')">Day Chg %${sortArrow('day_change_pct')}</th>
+            <th style="text-align:center;">Timeframe</th>
+            <th style="text-align:center;">Trend (12B)</th>
+            <th style="text-align:center;">Action</th>
           </tr>
         `;
 
         if (list.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="13" class="py-12 text-center text-gray-500 font-sans">No stocks qualifying near rising 44 MA in the -1% to +3% band with active filters.</td></tr>`;
+          const emptyMsg = isCacheWarming
+            ? 'Downloading NSE market data in the background — qualifying stocks will appear automatically.'
+            : 'No stocks qualifying near rising 44 MA in the -1% to +3% band with current filters.';
+          tbody.innerHTML = `<tr><td colspan="12" style="padding:3rem 1rem;text-align:center;color:var(--tv-muted);">${emptyMsg}</td></tr>`;
           return;
         }
 
         const tfArg = activeTimeframe === "weekly" ? "weekly" : "daily";
         const rows = list.map(item => {
           const isUp = (item.day_change_pct || 0) >= 0;
-          let badgeClass = "bg-gray-800 text-gray-300 border-gray-700";
-          if (item.status === "Touching" || (item.status && item.status.includes("Touching"))) badgeClass = "bg-blue-900/60 text-blue-300 border-blue-500/50 font-bold";
-          else if (item.status && item.status.includes("Above")) badgeClass = "bg-emerald-900/60 text-emerald-300 border-emerald-500/50 font-bold";
-          else if (item.status && item.status.includes("Near Below")) badgeClass = "bg-amber-900/50 text-amber-300 border-amber-500/40 font-semibold";
+          const av = getAvatarStyle(item.symbol);
+
+          let badgeBg = 'var(--tv-pill)', badgeColor = 'var(--tv-muted)';
+          if (item.status === "Touching" || (item.status && item.status.includes("Touching"))) {
+            badgeBg = 'var(--tv-blue-soft)'; badgeColor = 'var(--tv-blue)';
+          } else if (item.status && item.status.includes("Above")) {
+            badgeBg = 'var(--tv-green-soft)'; badgeColor = 'var(--tv-green)';
+          } else if (item.status && item.status.includes("Near Below")) {
+            badgeBg = 'var(--tv-orange-soft)'; badgeColor = '#b45309';
+          }
 
           return `
             <tr class="cursor-pointer" onclick="openChartModal('${item.symbol}', '${tfArg}')">
-              <td class="py-3 px-4 font-bold text-white hover:text-blue-400">${item.symbol}</td>
-              <td class="py-3 px-3 font-sans text-gray-300 text-xs truncate max-w-[130px]">${item.company}</td>
-              <td class="py-3 px-3 text-right font-bold text-gray-100">₹${fmt(item.cmp)}</td>
-              <td class="py-3 px-3 text-right text-red-400 font-semibold font-mono">₹${fmt(item.ma44)}</td>
-              <td class="py-3 px-3 text-right font-bold ${item.distance_pct >= 0 ? 'text-emerald-400' : 'text-amber-400'}">${item.distance_pct > 0 ? '+' : ''}${Number(item.distance_pct).toFixed(2)}%</td>
-              <td class="py-3 px-3 text-center font-sans">
-                <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-semibold border ${badgeClass}">
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="tv-avatar" style="width:28px;height:28px;font-size:0.6875rem;background:${av.bg};color:${av.fg};">${item.symbol.slice(0, 2)}</div>
+                  <div>
+                    <div style="font-weight:700;color:var(--tv-ink);">${item.symbol}</div>
+                    <div style="font-size:0.6875rem;color:var(--tv-muted);max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.company}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="font-mono" style="text-align:right;font-weight:600;color:var(--tv-ink);">&#8377;${fmt(item.cmp)}</td>
+              <td class="font-mono" style="text-align:right;color:var(--tv-red);font-weight:500;">&#8377;${fmt(item.ma44)}</td>
+              <td class="font-mono" style="text-align:right;font-weight:600;color:${item.distance_pct >= 0 ? 'var(--tv-green)' : 'var(--tv-red)'};">${item.distance_pct > 0 ? '+' : ''}${Number(item.distance_pct).toFixed(2)}%</td>
+              <td style="text-align:center;">
+                <span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:9999px;font-size:0.6875rem;font-weight:600;background:${badgeBg};color:${badgeColor};">
                   <span>${item.status}</span>
-                  ${item.chartink_qualified ? '<span class="text-[9px] px-1 py-0.2 rounded bg-indigo-900/70 text-indigo-300 font-mono" title="Satisfies all 5 Chartink PMPatil filters">PMPatil</span>' : ''}
+                  ${item.chartink_qualified ? '<span style="font-size:0.625rem;padding:0 5px;border-radius:9999px;background:#ffffff;color:#6d28d9;font-weight:700;">PMPatil</span>' : ''}
                 </span>
               </td>
-              <td class="py-3 px-3 text-right text-cyan-400 font-semibold font-mono">₹${fmt(item.buy_price)}</td>
-              <td class="py-3 px-3 text-right text-rose-400 font-mono">₹${fmt(item.stop_loss)}</td>
-              <td class="py-3 px-3 text-right text-emerald-300 font-bold font-mono">₹${fmt(item.target)}</td>
-              <td class="py-3 px-3 text-right font-semibold ${isUp ? 'text-emerald-400' : 'text-red-400'}">${isUp ? '+' : ''}${item.day_change_pct}%</td>
-              <td class="py-3 px-3 text-center font-sans">
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.timeframe === 'Both' ? 'bg-purple-950 text-purple-300 border border-purple-500/40' : 'bg-gray-800 text-gray-300'}">${item.timeframe}</span>
+              <td class="font-mono" style="text-align:right;color:var(--tv-blue);font-weight:600;">&#8377;${fmt(item.buy_price)}</td>
+              <td class="font-mono" style="text-align:right;color:var(--tv-red);">&#8377;${fmt(item.stop_loss)}</td>
+              <td class="font-mono" style="text-align:right;color:var(--tv-green);font-weight:700;">&#8377;${fmt(item.target)}</td>
+              <td class="font-mono" style="text-align:right;font-weight:600;color:${isUp ? 'var(--tv-green)' : 'var(--tv-red)'};">${isUp ? '+' : ''}${item.day_change_pct}%</td>
+              <td style="text-align:center;">
+                <span class="tv-ticker-pill" style="${item.timeframe === 'Both' ? 'background:#f3eefe;color:#6d28d9;' : ''}">${item.timeframe}</span>
               </td>
-              <td class="py-3 px-3 text-center">${generateSparklineSvg(item.sparkline, isUp)}</td>
-              <td class="py-3 px-4 text-center font-sans">
-                <button class="px-2.5 py-1 rounded text-xs font-semibold border bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border-blue-500/40">
-                  Draw 44 MA 📐
-                </button>
+              <td style="text-align:center;">${generateAreaSparklineSvg(item.sparkline, isUp)}</td>
+              <td style="text-align:center;">
+                <button class="tv-btn-chart">Chart</button>
               </td>
             </tr>
           `;
@@ -1262,7 +1698,7 @@
         if (sortField === field) sortAsc = !sortAsc;
         else {
           sortField = field;
-          sortAsc = true;
+          sortAsc = (field === "symbol" || field === "distance_pct");
         }
         scheduleRenderView();
       };
@@ -1270,12 +1706,18 @@
       window.openChartModal = async function(symbol, tf = null) {
         currentStockForModal = symbol;
         const reqTf = tf || (activeTimeframe === "weekly" ? "weekly" : "daily");
-        document.getElementById("btnModalTfDaily").className = reqTf === "daily" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold cursor-pointer" : "px-3 py-1 rounded-md text-gray-400 hover:text-white cursor-pointer";
-        document.getElementById("btnModalTfWeekly").className = reqTf === "weekly" ? "px-3 py-1 rounded-md bg-blue-600 text-white font-bold cursor-pointer" : "px-3 py-1 rounded-md text-gray-400 hover:text-white cursor-pointer";
+        document.getElementById("btnModalTfDaily").classList.toggle("active", reqTf === "daily");
+        document.getElementById("btnModalTfWeekly").classList.toggle("active", reqTf === "weekly");
 
         const modal = document.getElementById("chartModal");
         modal.classList.remove("hidden");
         modal.classList.add("flex");
+
+        const av = getAvatarStyle(symbol);
+        const avEl = document.getElementById("modalAvatar");
+        avEl.style.background = av.bg;
+        avEl.style.color = av.fg;
+        avEl.textContent = symbol.slice(0, 2);
 
         document.getElementById("modalSymbol").textContent = symbol;
         document.getElementById("modalTvLink").href = `https://in.tradingview.com/chart/?symbol=NSE:${symbol}`;
@@ -1318,43 +1760,43 @@
         const key = `${symbol.toUpperCase()}_${tf}_${requestedSection}`;
         let data = chartCache.get(key);
         if (!data) {
-          container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-gray-400 font-sans">Loading interactive chart...</div>`;
+          container.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:0.8125rem;color:var(--tv-muted);">Loading interactive chart...</div>`;
           try {
             const res = await fetch(`/api/chart/${symbol}?tf=${tf}&strategy=${requestedSection}`);
             data = await res.json();
             if (data && data.candles) chartCache.set(key, data);
           } catch (e) {
-            container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-rose-400 font-sans">Failed to load chart.</div>`;
+            container.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:0.8125rem;color:var(--tv-red);">Failed to load chart.</div>`;
             return;
           }
         }
 
-        // Guard if user switched stock or closed modal while fetching
         if (currentStockForModal !== symbol || modal.classList.contains("hidden")) return;
         if (!data || !data.candles || data.candles.length === 0) {
-          container.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-gray-500 font-sans">No candle data available.</div>`;
+          container.innerHTML = `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:0.8125rem;color:var(--tv-muted);">No candle data available.</div>`;
           return;
         }
 
         container.innerHTML = "";
         const chart = LightweightCharts.createChart(container, {
-          width: container.clientWidth,
+          width: container.clientWidth || 720,
           height: 450,
-          layout: { background: { color: "#0b0f19" }, textColor: "#9ca3af" },
-          grid: { vertLines: { color: "#1a2234" }, horzLines: { color: "#1a2234" } },
-          timeScale: { borderColor: "#374151", timeVisible: true },
-          rightPriceScale: { borderColor: "#374151" }
+          layout: { background: { color: "#ffffff" }, textColor: "#6a6d78" },
+          grid: { vertLines: { color: "#f0f3fa" }, horzLines: { color: "#f0f3fa" } },
+          crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+          timeScale: { borderColor: "#e0e3eb", timeVisible: true },
+          rightPriceScale: { borderColor: "#e0e3eb" }
         });
         chartInstance = chart;
 
         const candleSeries = chart.addCandlestickSeries({
-          upColor: "#10b981", downColor: "#ef4444", borderVisible: false,
-          wickUpColor: "#10b981", wickDownColor: "#ef4444"
+          upColor: "#089981", downColor: "#f23645", borderVisible: false,
+          wickUpColor: "#089981", wickDownColor: "#f23645"
         });
-        const ma44Series = chart.addLineSeries({ color: "#ef4444", lineWidth: 2, title: "44 MA (Close)" });
-        const ma44HighSeries = chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "44 MA Band (High)" });
-        const upperLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Upper Trendline" });
-        const lowerLineSeries = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "Lower Trendline" });
+        const ma44Series = chart.addLineSeries({ color: "#f23645", lineWidth: 2, title: "44 MA (Close)" });
+        const ma44HighSeries = chart.addLineSeries({ color: "#ff9800", lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dashed, title: "44 MA Band (High)" });
+        const upperLineSeries = chart.addLineSeries({ color: "#2962ff", lineWidth: 2, title: "Upper Trendline" });
+        const lowerLineSeries = chart.addLineSeries({ color: "#2962ff", lineWidth: 2, title: "Lower Trendline" });
 
         candleSeries.setData(data.candles);
         if (data.ma44_line && data.ma44_line.length > 0) ma44Series.setData(data.ma44_line);
@@ -1369,7 +1811,7 @@
         else if (requestedSection === "pole_and_flag") pat = data.pole_and_flag_pattern;
         if (!pat) pat = data.ascending_pattern || data.symmetrical_pattern || data.pole_and_flag_pattern;
 
-        const statusLabel = pat ? `${pat.pattern} • ${pat.status}` : (data.status_44ma || "44 MA Active");
+        const statusLabel = pat ? `${pat.pattern} - ${pat.status}` : (data.status_44ma || "44 MA Active");
         document.getElementById("modalStatusBadge").textContent = statusLabel;
 
         if (pat && pat.buy_price) {
@@ -1378,9 +1820,9 @@
           document.getElementById("planStopLoss").textContent = `₹${fmt(pat.stop_loss)}`;
           document.getElementById("planRR").textContent = pat.risk_reward || "—";
 
-          candleSeries.createPriceLine({ price: pat.buy_price, color: "#06b6d4", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: `ENTRY: ₹${pat.buy_price}` });
-          candleSeries.createPriceLine({ price: pat.target, color: "#10b981", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `TARGET: ₹${pat.target}` });
-          candleSeries.createPriceLine({ price: pat.stop_loss, color: "#ef4444", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `STOP LOSS: ₹${pat.stop_loss}` });
+          candleSeries.createPriceLine({ price: pat.buy_price, color: "#2962ff", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, title: `ENTRY: ₹${pat.buy_price}` });
+          candleSeries.createPriceLine({ price: pat.target, color: "#089981", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `TARGET: ₹${pat.target}` });
+          candleSeries.createPriceLine({ price: pat.stop_loss, color: "#f23645", lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Dashed, title: `STOP LOSS: ₹${pat.stop_loss}` });
         } else {
           document.getElementById("planEntry").textContent = `₹${fmt(data.cmp)}`;
           document.getElementById("planTarget").textContent = "—";
@@ -1394,16 +1836,16 @@
         const markers = [];
         if (pat && pat.upper_touches) {
           pat.upper_touches.forEach(tp => {
-            markers.push({ time: tp.time, position: "aboveBar", color: "#38bdf8", shape: "circle", text: `Touch ₹${tp.price}` });
+            markers.push({ time: tp.time, position: "aboveBar", color: "#2962ff", shape: "circle", text: `Touch ₹${tp.price}` });
           });
         }
         if (pat && pat.lower_touches) {
           pat.lower_touches.forEach(tp => {
-            markers.push({ time: tp.time, position: "belowBar", color: "#38bdf8", shape: "circle", text: `Touch ₹${tp.price}` });
+            markers.push({ time: tp.time, position: "belowBar", color: "#2962ff", shape: "circle", text: `Touch ₹${tp.price}` });
           });
         }
         if (pat && pat.breakout_date) {
-          markers.push({ time: pat.breakout_date, position: "aboveBar", color: "#10b981", shape: "arrowDown", text: "BREAKOUT 🚀", size: 2 });
+          markers.push({ time: pat.breakout_date, position: "aboveBar", color: "#089981", shape: "arrowDown", text: "BREAKOUT", size: 2 });
         }
         if (markers.length > 0) {
           markers.sort((a, b) => (a.time > b.time ? 1 : -1));
@@ -1425,9 +1867,16 @@
       function openDebugger(sym = "") {
         document.getElementById("debugModal").classList.remove("hidden");
         document.getElementById("debugModal").classList.add("flex");
+        const stratSelect = document.getElementById("debugStrategySelect");
+        if (stratSelect && ["ascending", "symmetrical", "pole_and_flag", "ma44"].includes(activeSection)) {
+          stratSelect.value = activeSection === "ma44" ? "44ma" : activeSection;
+        }
+        const input = document.getElementById("debugSymbolInput");
         if (sym) {
-          document.getElementById("debugSymbolInput").value = sym;
+          input.value = sym;
           runDiagnostics();
+        } else {
+          setTimeout(() => input.focus(), 50);
         }
       }
 
@@ -1439,33 +1888,34 @@
       async function runDiagnostics() {
         const sym = document.getElementById("debugSymbolInput").value.trim().toUpperCase();
         const strat = document.getElementById("debugStrategySelect").value;
+        const tf = (activeTimeframe === "weekly") ? "weekly" : "daily";
         const resBox = document.getElementById("debugResultsContainer");
         if (!sym) {
-          resBox.innerHTML = "<span class='text-rose-400'>Please enter a valid stock symbol.</span>";
+          resBox.innerHTML = "<span style='color:var(--tv-red);font-weight:600;'>Please enter a valid stock symbol.</span>";
           return;
         }
-        resBox.innerHTML = `Running diagnostics for <b>${sym}</b> on <b>${strat}</b>...`;
+        resBox.innerHTML = `Running diagnostics for <b>${sym}</b> on <b>${strat}</b> (${tf})...`;
 
         try {
-          const res = await fetch(`/api/debug/${sym}?strategy=${strat}&timeframe=${activeTimeframe}`);
+          const res = await fetch(`/api/debug/${sym}?strategy=${strat}&timeframe=${tf}`);
           const data = await res.json();
           if (data.error) {
-            resBox.innerHTML = `<span class="text-rose-400">Error: ${data.error}</span>`;
+            resBox.innerHTML = `<span style="color:var(--tv-red);font-weight:600;">Error: ${data.error}</span>`;
             return;
           }
 
-          let out = `<div class="space-y-2">`;
-          out += `<div>Symbol: <b class="text-white">${data.symbol}</b> (${data.company}) • Bars Analyzed: <b>${data.bars_analyzed}</b></div>`;
-          out += `<div>Strategy: <b class="text-cyan-400">${data.strategy}</b> • Qualified: <b class="${data.qualified ? 'text-emerald-400' : 'text-rose-400'}">${data.qualified ? 'YES 🚀' : 'NO ❌'}</b></div>`;
+          let out = `<div style="display:flex;flex-direction:column;gap:0.5rem;">`;
+          out += `<div>Symbol: <b>${data.symbol}</b> (${data.company}) &bull; Bars: <b>${data.bars_analyzed}</b></div>`;
+          out += `<div>Strategy: <b style="color:var(--tv-blue);">${data.strategy}</b> &bull; Qualified: <b style="color:${data.qualified ? 'var(--tv-green)' : 'var(--tv-red)'};">${data.qualified ? 'YES' : 'NO'}</b></div>`;
 
           if (data.qualified && data.setup) {
-            out += `<div class="p-2 rounded bg-emerald-950/60 border border-emerald-500/40 text-emerald-300">`;
-            out += `Status: <b>${data.setup.status}</b> | Entry: <b>₹${data.setup.buy_price}</b> | Target: <b>₹${data.setup.target}</b> | Stop: <b>₹${data.setup.stop_loss}</b> | R:R: <b>${data.setup.risk_reward}</b>`;
+            out += `<div style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:var(--tv-green-soft);color:var(--tv-green);font-weight:600;">`;
+            out += `Status: ${data.setup.status} | Entry: ₹${data.setup.buy_price} | Target: ₹${data.setup.target} | Stop: ₹${data.setup.stop_loss} | R:R: ${data.setup.risk_reward}`;
             out += `</div>`;
           }
 
           if (data.reject_reasons && data.reject_reasons.length > 0) {
-            out += `<div class="mt-2 text-rose-300 font-bold">Rejection Reasons / Missing Filters:</div><ul class="list-disc pl-5 space-y-1 text-gray-300">`;
+            out += `<div style="margin-top:0.25rem;color:var(--tv-ink);font-weight:700;">Rule Checks:</div><ul style="list-style:disc;padding-left:1.25rem;display:flex;flex-direction:column;gap:0.25rem;color:var(--tv-muted);">`;
             data.reject_reasons.forEach(r => {
               out += `<li>${r}</li>`;
             });
@@ -1474,16 +1924,19 @@
           out += `</div>`;
           resBox.innerHTML = out;
         } catch (e) {
-          resBox.innerHTML = `<span class="text-rose-400">Diagnostic error: ${e.message}</span>`;
+          resBox.innerHTML = `<span style="color:var(--tv-red);">Diagnostic error: ${e.message}</span>`;
         }
       }
 
       document.getElementById("mainHeadingsContainer").addEventListener("click", (e) => {
-        const btn = e.target.closest(".main-heading-btn");
+        const btn = e.target.closest(".tv-nav-btn");
         if (!btn) return;
         const sec = btn.dataset.section;
         if (!sec || sec === activeSection) return;
         activeSection = sec;
+        if (activeSection !== "ma44" && activeTimeframe === "both") {
+          activeTimeframe = "daily";
+        }
         loadDataForCurrentView(false);
       });
 
@@ -1498,6 +1951,7 @@
 
       document.getElementById("indexSelector").addEventListener("change", (e) => {
         currentIndex = e.target.value;
+        lastObservedCached = -1;
         loadAllData(false);
       });
 
@@ -1532,6 +1986,23 @@
         if (e.target.id === "debugModal") closeDebugger();
       });
       document.getElementById("btnRunDebug").addEventListener("click", runDiagnostics);
+      document.getElementById("debugSymbolInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") runDiagnostics();
+      });
+
+      // TradingView-style Ctrl+K search shortcut & Escape modal close
+      window.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+          e.preventDefault();
+          const sb = document.getElementById("searchBox");
+          if (sb) { sb.focus(); sb.select(); }
+        } else if (e.key === "Escape") {
+          const dbg = document.getElementById("debugModal");
+          const cht = document.getElementById("chartModal");
+          if (dbg && !dbg.classList.contains("hidden")) closeDebugger();
+          else if (cht && !cht.classList.contains("hidden")) closeModal();
+        }
+      });
 
       let resizeTimer = null;
       window.addEventListener("resize", () => {

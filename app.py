@@ -38,19 +38,34 @@ from patterns.geometry import resample_to_weekly
 # ═══════════════════════════════════════════════════════════════════════════
 # Flask Application Setup & Security Configuration
 # ═══════════════════════════════════════════════════════════════════════════
-app = Flask(__name__, template_folder="templates")
-app.json.sort_keys = False
-app.secret_key = os.environ.get("APP_SECRET_KEY", "trading_scanner_super_secure_key_2026_x7k9")
-app.config["PERMANENT_SESSION_LIFETIME"] = dt.timedelta(days=30)
-
-SITE_PASSWORD = (
-    os.environ.get("SITE_PASSWORD")
-    or os.environ.get("APP_PASSWORD")
-    or "Akshay1999"
-).strip()
-
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 NIFTY500_FILE = os.path.join(DATA_DIR, "nifty500.txt")
+
+_env_path = os.path.join(DATA_DIR, ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_env_path)
+except ImportError:
+    if os.path.exists(_env_path):
+        with open(_env_path, "r", encoding="utf-8") as _ef:
+            for _line in _ef:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
+
+app = Flask(__name__, template_folder="templates")
+app.json.sort_keys = False
+_default_secret = os.urandom(32).hex()
+app.secret_key = os.environ.get("APP_SECRET_KEY") or _default_secret
+if not os.environ.get("APP_SECRET_KEY"):
+    print("WARNING: APP_SECRET_KEY not set — using random key (sessions won't survive restarts).")
+app.config["PERMANENT_SESSION_LIFETIME"] = dt.timedelta(days=30)
+
+_raw_password = os.environ.get("SITE_PASSWORD") or os.environ.get("APP_PASSWORD")
+if not _raw_password:
+    raise RuntimeError("SITE_PASSWORD (or APP_PASSWORD) environment variable is required. Set it in .env or environment before starting.")
+SITE_PASSWORD = _raw_password.strip()
 
 COMPANY_NAMES = {
     "RELIANCE": "Reliance Industries Ltd.",
@@ -209,7 +224,7 @@ _bg_fetch_active = False
 _failed_symbols: set = set()
 
 _http_session = requests.Session()
-_adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=1)
+_adapter = requests.adapters.HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=1)
 _http_session.mount("https://", _adapter)
 _http_session.mount("http://", _adapter)
 _http_session.headers.update({
@@ -372,10 +387,42 @@ def get_cached_candles(symbol: str, force_refresh: bool = False, fetch_if_missin
     return d_candles, w_candles
 
 
-def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max_workers: int = 8) -> None:
+def _fetch_symbols_batch(symbols: List[str], max_workers: int = 16) -> int:
+    """Fetches daily and weekly candles for a batch of symbols concurrently."""
+    if not symbols:
+        return 0
+
+    def _fetch_one(s: str):
+        d, w = fetch_stock_candles_yf(s)
+        return s, d, w
+
+    new_count = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for fut in as_completed({executor.submit(_fetch_one, s): s for s in symbols}):
+            try:
+                s, d_candles, w_candles = fut.result()
+                if d_candles and w_candles:
+                    with _cache_lock:
+                        _daily_cache[s] = d_candles
+                        _weekly_cache[s] = w_candles
+                    new_count += 1
+                else:
+                    _failed_symbols.add(s)
+            except Exception:
+                pass
+    return new_count
+
+
+def ensure_universe_cached(
+    universe: List[str],
+    force_refresh: bool = False,
+    max_workers: int = 16,
+    on_complete: Optional[Any] = None,
+) -> None:
     """
     Ensures the given universe is cached.
-    Non-blocking for normal scans: spawns at most ONE background worker for missing symbols.
+    Non-blocking for normal scans: prioritizes the top 50 liquid stocks first
+    and streams remaining symbols in chunks so UI results appear within seconds.
     """
     global _bg_fetch_active
 
@@ -391,6 +438,8 @@ def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max
             ]
 
     if not symbols_to_fetch:
+        if on_complete and not force_refresh:
+            on_complete()
         return
 
     # Non-blocking background fetch: at most one background batch at a time
@@ -402,31 +451,33 @@ def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max
 
         def _bg_fetch_worker(to_fetch):
             global _bg_fetch_active
+            total_new = 0
             try:
                 with _batch_lock:
-                    def _fetch_one(s: str):
-                        d, w = fetch_stock_candles_yf(s)
-                        return s, d, w
-                    new_c = 0
-                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        for fut in as_completed({executor.submit(_fetch_one, s): s for s in to_fetch}):
-                            try:
-                                s, d, w = fut.result()
-                                if d and w:
-                                    with _cache_lock:
-                                        _daily_cache[s] = d
-                                        _weekly_cache[s] = w
-                                    new_c += 1
-                                else:
-                                    _failed_symbols.add(s)
-                            except Exception:
-                                pass
-                    if new_c > 0:
+                    # Fetch first 50 liquid symbols first so UI paints quickly
+                    priority = to_fetch[:50]
+                    rest = to_fetch[50:]
+
+                    new_p = _fetch_symbols_batch(priority, max_workers=max_workers)
+                    total_new += new_p
+                    if new_p > 0:
+                        clear_scan_caches()
+
+                    for i in range(0, len(rest), 100):
+                        chunk = rest[i:i + 100]
+                        new_chunk = _fetch_symbols_batch(chunk, max_workers=max_workers)
+                        total_new += new_chunk
+                        if new_chunk > 0:
+                            clear_scan_caches()
+
+                    if total_new > 0:
                         clear_scan_caches()
                         save_disk_cache()
             finally:
                 with _bg_fetch_lock:
                     _bg_fetch_active = False
+            if on_complete:
+                on_complete()
 
         threading.Thread(target=_bg_fetch_worker, args=(symbols_to_fetch,), daemon=True).start()
         return
@@ -434,38 +485,24 @@ def ensure_universe_cached(universe: List[str], force_refresh: bool = False, max
     # Synchronous path only if force_refresh explicitly requested
     with _batch_lock:
         t0 = time.time()
-        new_count = 0
-
-        def _fetch_worker(s: str):
-            d, w = fetch_stock_candles_yf(s)
-            return s, d, w
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {executor.submit(_fetch_worker, s): s for s in symbols_to_fetch}
-            for fut in as_completed(future_map):
-                try:
-                    s, d_candles, w_candles = fut.result()
-                    if d_candles and w_candles:
-                        with _cache_lock:
-                            _daily_cache[s] = d_candles
-                            _weekly_cache[s] = w_candles
-                        new_count += 1
-                    else:
-                        _failed_symbols.add(s)
-                except Exception:
-                    pass
-
+        new_count = _fetch_symbols_batch(symbols_to_fetch, max_workers=max_workers)
         t1 = time.time()
         print(f"Parallel fetch: {new_count}/{len(symbols_to_fetch)} cached in {t1 - t0:.2f}s")
         if new_count > 0:
+            clear_scan_caches()
             save_disk_cache()
 
 
 def background_cache_warmup():
     print("Background candle warmup starting...")
-    ensure_universe_cached(UNIVERSE_NIFTY500, force_refresh=False)
-    print(f"Candle cache ready ({len(_daily_cache)} symbols in memory).")
-    warm_all_scanners()
+    with _cache_lock:
+        cached_count = len(_daily_cache)
+    if cached_count >= len(UNIVERSE_NIFTY500) * 0.9:
+        print(f"Candle cache ready ({cached_count} symbols in memory).")
+        warm_all_scanners()
+        ensure_universe_cached(UNIVERSE_NIFTY500, force_refresh=False)
+        return
+    ensure_universe_cached(UNIVERSE_NIFTY500, force_refresh=False, on_complete=warm_all_scanners)
 
 
 def _background_scan_loop():
@@ -482,7 +519,7 @@ def _background_scan_loop():
 # ═══════════════════════════════════════════════════════════════════════════
 @app.before_request
 def require_login():
-    exempt_endpoints = {"login", "static"}
+    exempt_endpoints = {"login", "static", "health"}
     if request.endpoint in exempt_endpoints:
         return None
 
@@ -490,6 +527,11 @@ def require_login():
         if request.path.startswith("/api/"):
             return jsonify({"error": "Authentication required. Please log in at /login"}), 401
         return redirect(url_for("login"))
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -537,6 +579,24 @@ def api_universe():
     })
 
 
+@app.route("/api/cache-status")
+def api_cache_status():
+    """Returns current cache population progress for the selected universe."""
+    index_param = request.args.get("index", "nifty500").lower()
+    universe = get_universe(index_param)
+    total = len(universe)
+    with _cache_lock:
+        cached = sum(1 for sym in universe if sym in _daily_cache)
+    return jsonify({
+        "index": index_param,
+        "total": total,
+        "cached": cached,
+        "pct": round((cached / total) * 100, 1) if total > 0 else 100,
+        "ready": cached >= total * 0.9 if total > 0 else True,
+        "bg_active": _bg_fetch_active,
+    })
+
+
 # In-memory scanner results cache + per-key compute locks (prevents duplicate concurrent scans)
 _SCAN_44MA_CACHE: Dict[str, dict] = {}
 _SCAN_TRIANGLES_CACHE: Dict[str, dict] = {}
@@ -545,6 +605,16 @@ _LAST_SCAN_TIME: Dict[str, float] = {}
 _CHART_CACHE: Dict[str, dict] = {}
 _compute_locks: Dict[str, threading.Lock] = {}
 _compute_locks_mutex = threading.Lock()
+
+
+def _get_cached_scan(cache_dict: dict, cache_key: str, time_key: str) -> Optional[dict]:
+    """Returns cached scan result if still valid (3s TTL during warmup, 15m when steady)."""
+    if cache_key not in cache_dict:
+        return None
+    ttl = 3 if _bg_fetch_active else 900
+    if time.time() - _LAST_SCAN_TIME.get(time_key, 0) < ttl:
+        return cache_dict[cache_key]
+    return None
 
 
 def _get_compute_lock(key: str) -> threading.Lock:
@@ -611,14 +681,16 @@ def run_scan_44ma(
 ) -> dict:
     allowed_statuses = [s.strip().lower() for s in status_filter.split(",") if s.strip()] if status_filter else []
     cache_key = f"{index_param}_{min_price}_{min_weekly_vol}_{rising_only}_{green_only}_{strict_chartink}_{status_filter}"
-    now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 900):
-        return _SCAN_44MA_CACHE[cache_key]
+    if not force_refresh:
+        cached = _get_cached_scan(_SCAN_44MA_CACHE, cache_key, f"44ma_{cache_key}")
+        if cached is not None:
+            return cached
 
     with _get_compute_lock(f"44ma_{cache_key}"):
-        now_time = time.time()
-        if not force_refresh and cache_key in _SCAN_44MA_CACHE and (now_time - _LAST_SCAN_TIME.get(f"44ma_{cache_key}", 0) < 900):
-            return _SCAN_44MA_CACHE[cache_key]
+        if not force_refresh:
+            cached = _get_cached_scan(_SCAN_44MA_CACHE, cache_key, f"44ma_{cache_key}")
+            if cached is not None:
+                return cached
 
         universe = get_universe(index_param)
         ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -695,14 +767,16 @@ def run_scan_triangles(
     force_refresh: bool = False,
 ) -> dict:
     cache_key = f"{index_param}_{tf}"
-    now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 900):
-        return _SCAN_TRIANGLES_CACHE[cache_key]
+    if not force_refresh:
+        cached = _get_cached_scan(_SCAN_TRIANGLES_CACHE, cache_key, f"triangles_{cache_key}")
+        if cached is not None:
+            return cached
 
     with _get_compute_lock(f"triangles_{cache_key}"):
-        now_time = time.time()
-        if not force_refresh and cache_key in _SCAN_TRIANGLES_CACHE and (now_time - _LAST_SCAN_TIME.get(f"triangles_{cache_key}", 0) < 900):
-            return _SCAN_TRIANGLES_CACHE[cache_key]
+        if not force_refresh:
+            cached = _get_cached_scan(_SCAN_TRIANGLES_CACHE, cache_key, f"triangles_{cache_key}")
+            if cached is not None:
+                return cached
 
         universe = get_universe(index_param)
         ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -787,14 +861,16 @@ def run_scan_pole_and_flag(
     force_refresh: bool = False,
 ) -> dict:
     cache_key = f"{index_param}_{tf}"
-    now_time = time.time()
-    if not force_refresh and cache_key in _SCAN_POLEFLAG_CACHE and (now_time - _LAST_SCAN_TIME.get(f"poleflag_{cache_key}", 0) < 900):
-        return _SCAN_POLEFLAG_CACHE[cache_key]
+    if not force_refresh:
+        cached = _get_cached_scan(_SCAN_POLEFLAG_CACHE, cache_key, f"poleflag_{cache_key}")
+        if cached is not None:
+            return cached
 
     with _get_compute_lock(f"poleflag_{cache_key}"):
-        now_time = time.time()
-        if not force_refresh and cache_key in _SCAN_POLEFLAG_CACHE and (now_time - _LAST_SCAN_TIME.get(f"poleflag_{cache_key}", 0) < 900):
-            return _SCAN_POLEFLAG_CACHE[cache_key]
+        if not force_refresh:
+            cached = _get_cached_scan(_SCAN_POLEFLAG_CACHE, cache_key, f"poleflag_{cache_key}")
+            if cached is not None:
+                return cached
 
         universe = get_universe(index_param)
         ensure_universe_cached(universe, force_refresh=force_refresh)
@@ -1023,8 +1099,12 @@ def api_chart(symbol: str):
     symm = None
     poleflag = None
 
-    tri_cached = _SCAN_TRIANGLES_CACHE.get(f"nifty500_{tf}")
-    flag_cached = _SCAN_POLEFLAG_CACHE.get(f"nifty500_{tf}")
+    tri_cached = _SCAN_TRIANGLES_CACHE.get(f"nifty500_{tf}") or next(
+        (v for k, v in _SCAN_TRIANGLES_CACHE.items() if k.endswith(f"_{tf}")), None
+    )
+    flag_cached = _SCAN_POLEFLAG_CACHE.get(f"nifty500_{tf}") or next(
+        (v for k, v in _SCAN_POLEFLAG_CACHE.items() if k.endswith(f"_{tf}")), None
+    )
 
     if strategy in ("ascending", "asc"):
         asc = _find_cached_pattern(tri_cached, "ascending", sym)
@@ -1170,6 +1250,6 @@ threading.Thread(target=_background_scan_loop, daemon=True).start()
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"\n=======================================================")
-    print(f" 🚀 Stock Screener Active at http://0.0.0.0:{port}")
+    print(f"  Stock Screener Active at http://0.0.0.0:{port}")
     print(f"=======================================================\n")
     app.run(host="0.0.0.0", port=port, debug=False)
